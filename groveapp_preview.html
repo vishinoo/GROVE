@@ -1,0 +1,817 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grove — preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ---------------------------------------------------------------------
+   Grove preview — white, soft, icon-led.
+   One typeface. Colour appears in exactly two places: the voice blob,
+   and the gradient fills on brand marks. Everything else is ink on white.
+   --------------------------------------------------------------------- */
+:root{
+  --page:#F4F5F7;      /* the ground the cards sit on */
+  --card:#FFFFFF;
+  --ink:#16181D;
+  --ink-soft:#5B6069;
+  --muted:#9096A0;
+  --line:#E8EAEE;
+  --line-soft:#F0F1F4;
+  --field:#F6F7F9;
+
+  /* the blob, and the icon gradients drawn from it */
+  --g1:#5EEAD4; --g2:#7DD3FC; --g3:#A5B4FC;
+  --g4:#C4B5FD; --g5:#F9A8D4; --g6:#86EFAC;
+
+  --r-sm:10px; --r-md:14px; --r-lg:20px; --r-xl:28px;
+
+  /* 4/8 rhythm */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; --s8:64px;
+
+  --font:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;background:var(--page);color:var(--ink);
+  font-family:var(--font);font-size:16px;line-height:1.55;
+  letter-spacing:-0.011em;
+  -webkit-font-smoothing:antialiased;
+}
+.sprite{position:absolute;width:0;height:0;overflow:hidden}
+.wrap{max-width:1140px;margin:0 auto;padding:0 var(--s5)}
+.measure{max-width:60ch}
+
+/* ------------------------------------------------------------ masthead */
+
+.masthead{display:flex;align-items:center;justify-content:space-between;padding:var(--s5) 0 0}
+.wordmark{display:flex;align-items:center;gap:var(--s2);font-weight:600;font-size:17px}
+.masthead .where{font-size:13px;color:var(--muted)}
+
+/* ---------------------------------------------------------------- hero */
+
+.hero{padding:var(--s8) 0 var(--s6);text-align:center}
+h1{
+  font-size:clamp(34px,5.4vw,56px);font-weight:700;
+  line-height:1.06;letter-spacing:-0.035em;
+  margin:0 auto var(--s4);max-width:17ch;
+}
+.standfirst{
+  font-size:clamp(16px,1.8vw,18.5px);line-height:1.6;color:var(--ink-soft);
+  margin:0 auto;max-width:54ch;
+}
+
+/* -------------------------------------------------------------- the orb */
+
+.orb-card{
+  background:var(--card);border-radius:var(--r-xl);
+  padding:var(--s7) var(--s5) var(--s5);
+  max-width:380px;margin:var(--s7) auto 0;
+  box-shadow:0 1px 2px rgba(22,24,29,.04),0 8px 30px rgba(22,24,29,.06);
+  text-align:center;
+}
+
+.orb{
+  position:relative;width:230px;height:230px;margin:0 auto;
+  display:grid;place-items:center;
+}
+/* Four blurred lobes drifting independently — reads as one soft mass that
+   keeps changing colour, rather than a wheel being spun. */
+.lobe{
+  position:absolute;border-radius:50%;
+  filter:blur(30px);opacity:.85;
+  will-change:transform;
+}
+.l1{width:150px;height:150px;background:var(--g1);animation:d1 11s ease-in-out infinite}
+.l2{width:140px;height:140px;background:var(--g3);animation:d2 13s ease-in-out infinite}
+.l3{width:130px;height:130px;background:var(--g5);animation:d3 17s ease-in-out infinite}
+.l4{width:145px;height:145px;background:var(--g6);animation:d4 15s ease-in-out infinite}
+
+@keyframes d1{0%,100%{transform:translate(-26px,-20px) scale(1)}33%{transform:translate(24px,14px) scale(1.14)}66%{transform:translate(-8px,26px) scale(.92)}}
+@keyframes d2{0%,100%{transform:translate(24px,-16px) scale(1.06)}33%{transform:translate(-20px,20px) scale(.9)}66%{transform:translate(14px,24px) scale(1.12)}}
+@keyframes d3{0%,100%{transform:translate(10px,24px) scale(.94)}33%{transform:translate(-24px,-14px) scale(1.12)}66%{transform:translate(20px,-20px) scale(1)}}
+@keyframes d4{0%,100%{transform:translate(-18px,16px) scale(1.1)}33%{transform:translate(18px,-22px) scale(.94)}66%{transform:translate(-22px,-6px) scale(1.06)}}
+
+.orb-caption{
+  color:var(--ink-soft);font-size:15px;line-height:1.55;
+  margin:var(--s5) auto 0;max-width:34ch;
+}
+.orb-controls{display:flex;justify-content:space-between;margin-top:var(--s6)}
+.round{
+  width:52px;height:52px;border-radius:50%;border:0;
+  background:var(--field);color:var(--ink);
+  display:grid;place-items:center;cursor:pointer;
+  transition:background-color .18s ease,opacity .18s ease;
+}
+.round:hover{background:#EDEFF2}
+.round:active{opacity:.7}
+.round:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+.round.primary{background:var(--ink);color:#fff}
+.round.primary:hover{background:#2A2D34}
+
+.state-line{
+  font-size:13px;color:var(--muted);margin-top:var(--s4);
+  font-variant-numeric:tabular-nums;
+}
+
+/* ------------------------------------------------------------ sections */
+
+section{padding:var(--s8) 0;border-top:1px solid var(--line)}
+.section-head{margin-bottom:var(--s7);max-width:62ch}
+.section-head h2{
+  font-size:clamp(24px,3vw,32px);font-weight:700;
+  letter-spacing:-0.03em;line-height:1.15;margin:0 0 var(--s3);
+}
+.section-head p{margin:0;color:var(--ink-soft);font-size:16.5px;line-height:1.6}
+
+/* -------------------------------------------------------- phone frames */
+
+.screens{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:var(--s8) var(--s7);
+}
+@media (max-width:760px){.screens{grid-template-columns:1fr}}
+
+.phone{
+  width:100%;max-width:308px;aspect-ratio:308/598;
+  background:var(--card);border-radius:34px;padding:8px;
+  box-shadow:0 1px 2px rgba(22,24,29,.04),0 10px 34px rgba(22,24,29,.07);
+}
+.viewport{
+  height:100%;border-radius:27px;background:var(--card);
+  padding:16px 15px 11px;display:flex;flex-direction:column;
+  font-size:11px;line-height:1.45;overflow:hidden;
+}
+.screen-note{max-width:360px}
+.screen-note h3{font-size:18px;font-weight:600;letter-spacing:-.02em;margin:var(--s5) 0 var(--s2)}
+.screen-note p{margin:0;color:var(--ink-soft);font-size:14.5px;line-height:1.55}
+
+/* ------------------------------------------------- in-phone primitives */
+
+.s-title{font-size:19px;font-weight:700;letter-spacing:-.03em;margin:0 0 3px}
+.s-sub{font-size:10.5px;color:var(--muted);line-height:1.5;margin:0 0 14px}
+.s-label{font-size:9.5px;font-weight:600;color:var(--muted);margin:0 0 7px;letter-spacing:.01em}
+
+/* the Noctus card: hairline, white, icon-led, no chip behind the icon */
+.ncard{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 11px;border-radius:var(--r-md);
+  border:1px solid var(--line);background:var(--card);
+}
+.ncard + .ncard{margin-top:6px}
+.ncard .body{flex:1;min-width:0}
+.ncard .t{font-size:11px;font-weight:600;line-height:1.3}
+.ncard .d{font-size:9.5px;color:var(--muted);line-height:1.4;margin-top:1px}
+
+.gicon{width:22px;height:22px;flex:none;display:block}
+.gicon.sm{width:19px;height:19px}
+
+.act{
+  height:26px;padding:0 11px;border-radius:8px;border:0;
+  font-family:inherit;font-size:10px;font-weight:600;
+  background:var(--ink);color:#fff;cursor:pointer;flex:none;
+}
+.act.ghost{background:transparent;color:var(--ink-soft);border:1px solid var(--line)}
+.iconbtn{
+  width:26px;height:26px;border-radius:8px;flex:none;
+  display:grid;place-items:center;border:1px solid var(--line);
+  background:var(--card);color:var(--ink-soft);cursor:pointer;
+}
+.iconbtn.solid{background:var(--ink);border-color:var(--ink);color:#fff}
+
+.pipe{height:1px;background:var(--line-soft);margin:12px 0}
+.grow{flex:1;min-height:0}
+
+/* the dock — real vector icons, never glyph characters */
+.dock{
+  margin-top:auto;display:flex;gap:2px;
+  border-top:1px solid var(--line-soft);padding-top:9px;
+}
+.dock a{
+  flex:1;text-align:center;font-size:8px;color:var(--muted);
+  text-decoration:none;display:block;
+}
+.dock a.on{color:var(--ink);font-weight:600}
+.dock svg{width:17px;height:17px;display:block;margin:0 auto 3px}
+
+/* ------------------------------------------------ settings primitives */
+
+.field{
+  background:var(--field);border:1px solid var(--line);
+  border-radius:var(--r-md);padding:10px 11px;
+  font-size:10.5px;line-height:1.5;
+}
+.field .ph{color:var(--muted)}
+.frow{display:flex;align-items:center;gap:10px;padding:11px 0}
+.frow + .frow{border-top:1px solid var(--line-soft)}
+.frow .k{flex:1;font-size:11px;font-weight:500}
+.frow .v{font-size:10.5px;color:var(--muted)}
+.switch{
+  width:34px;height:20px;border-radius:999px;background:var(--ink);
+  position:relative;flex:none;
+}
+.switch::after{
+  content:"";position:absolute;top:2px;right:2px;
+  width:16px;height:16px;border-radius:50%;background:#fff;
+}
+.stepper{display:flex;align-items:center;gap:6px}
+
+.dotm{width:6px;height:6px;border-radius:50%;flex:none;background:var(--muted)}
+.dotm.on{background:#22C55E}
+.dotm.warn{background:#F59E0B}
+
+/* ------------------------------------------------------------- limits */
+
+.limits{border-top:1px solid var(--line)}
+.limit{
+  display:grid;grid-template-columns:minmax(0,19ch) minmax(0,1fr);
+  gap:var(--s7);padding:var(--s5) 0;border-bottom:1px solid var(--line);
+}
+.limit h3{font-size:17px;font-weight:600;letter-spacing:-.02em;margin:0;line-height:1.3}
+.limit p{margin:0;color:var(--ink-soft);max-width:58ch;font-size:15.5px;line-height:1.6}
+.limit p + p{margin-top:var(--s3)}
+.limit .flag{
+  display:block;margin-top:var(--s3);padding-left:var(--s3);
+  border-left:2px solid #F59E0B;color:var(--ink-soft);
+  font-size:14px;line-height:1.55;
+}
+
+/* -------------------------------------------------------------- tiers */
+
+.tier{
+  display:grid;grid-template-columns:minmax(0,14ch) minmax(0,1fr) minmax(0,12ch);
+  gap:var(--s5);padding:var(--s4) 0;border-bottom:1px solid var(--line);
+  align-items:baseline;
+}
+.tiers{border-top:1px solid var(--line)}
+.tier .who{font-weight:600;font-size:15.5px}
+.tier .what{color:var(--ink-soft);font-size:15px}
+.tier .cost{font-size:13px;color:var(--muted);text-align:right}
+
+/* ------------------------------------------------------------- footer */
+
+footer{
+  padding:var(--s7) 0 var(--s8);border-top:1px solid var(--line);
+  display:flex;flex-wrap:wrap;gap:var(--s4);
+  justify-content:space-between;align-items:flex-end;
+}
+footer p{margin:0;color:var(--muted);font-size:14px;max-width:50ch}
+footer .built{font-size:12.5px;color:var(--muted)}
+
+@media (max-width:860px){
+  .limit,.tier{grid-template-columns:1fr;gap:var(--s2)}
+  .tier .cost{text-align:left}
+}
+@media (max-width:520px){
+  .wrap{padding:0 var(--s4)}
+  .orb{width:190px;height:190px}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .lobe{animation:none !important}
+  *{transition-duration:.001ms !important}
+}
+</style>
+</head>
+<body>
+
+<!-- Icon sprite. Brand marks are the real Simple Icons paths from the Noctus
+     icon set; UI glyphs are a single 1.75px-stroke family. Nothing here is an
+     emoji, and no icon sits on a coloured chip. -->
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="gA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#5EEAD4"/><stop offset="100%" stop-color="#7DD3FC"/>
+    </linearGradient>
+    <linearGradient id="gB" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7DD3FC"/><stop offset="100%" stop-color="#A5B4FC"/>
+    </linearGradient>
+    <linearGradient id="gC" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#A5B4FC"/><stop offset="100%" stop-color="#C4B5FD"/>
+    </linearGradient>
+    <linearGradient id="gD" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#C4B5FD"/><stop offset="100%" stop-color="#F9A8D4"/>
+    </linearGradient>
+    <linearGradient id="gE" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#86EFAC"/><stop offset="100%" stop-color="#5EEAD4"/>
+    </linearGradient>
+    <linearGradient id="gF" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F9A8D4"/><stop offset="100%" stop-color="#FDBA74"/>
+    </linearGradient>
+  </defs>
+
+    <symbol id="b-gmail" viewBox="0 0 24 24"><path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z"/></symbol>
+    <symbol id="b-googlecalendar" viewBox="0 0 24 24"><path d="M18.316 5.684H24v12.632h-5.684V5.684zM5.684 24h12.632v-5.684H5.684V24zM18.316 5.684V0H1.895A1.894 1.894 0 0 0 0 1.895v16.421h5.684V5.684h12.632zm-7.207 6.25v-.065c.272-.144.5-.349.687-.617s.279-.595.279-.982c0-.379-.099-.72-.3-1.025a2.05 2.05 0 0 0-.832-.714 2.703 2.703 0 0 0-1.197-.257c-.6 0-1.094.156-1.481.467-.386.311-.65.671-.793 1.078l1.085.452c.086-.249.224-.461.413-.633.189-.172.445-.257.767-.257.33 0 .602.088.816.264a.86.86 0 0 1 .322.703c0 .33-.12.589-.36.778-.24.19-.535.284-.886.284h-.567v1.085h.633c.407 0 .748.109 1.02.327.272.218.407.499.407.843 0 .336-.129.614-.387.832s-.565.327-.924.327c-.351 0-.651-.103-.897-.311-.248-.208-.422-.502-.521-.881l-1.096.452c.178.616.505 1.082.977 1.401.472.319.984.478 1.538.477a2.84 2.84 0 0 0 1.293-.291c.382-.193.684-.458.902-.794.218-.336.327-.72.327-1.149 0-.429-.115-.797-.344-1.105a2.067 2.067 0 0 0-.881-.689zm2.093-1.931l.602.913L15 10.045v5.744h1.187V8.446h-.827l-2.158 1.557zM22.105 0h-3.289v5.184H24V1.895A1.894 1.894 0 0 0 22.105 0zm-3.289 23.5l4.684-4.684h-4.684V23.5zM0 22.105C0 23.152.848 24 1.895 24h3.289v-5.184H0v3.289z"/></symbol>
+    <symbol id="b-whatsapp" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></symbol>
+
+  <!-- phone-native marks, drawn to sit with the brand set: solid, 24-grid -->
+  <symbol id="b-music" viewBox="0 0 24 24"><path d="M21 3.5v12.2a3.3 3.3 0 1 1-2-3.03V7.3L10 9.02v9.18a3.3 3.3 0 1 1-2-3.03V6.2L21 3.5Z"/></symbol>
+  <symbol id="b-messages" viewBox="0 0 24 24"><path d="M12 2C6.2 2 1.6 5.9 1.6 10.7c0 2.7 1.5 5.1 3.8 6.7v4.1l3.7-2.1c.9.2 1.9.3 2.9.3 5.8 0 10.4-3.9 10.4-8.7S17.8 2 12 2Z"/></symbol>
+  <symbol id="b-photos" viewBox="0 0 24 24"><path d="M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm3.5 3A2.5 2.5 0 1 0 10 8.5 2.5 2.5 0 0 0 7.5 6ZM4 19h16v-3l-4.6-4.6-4.4 4.4-2.4-2.3L4 17.6V19Z"/></symbol>
+  <symbol id="b-reminders" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7v4.2l-1.7 3A1 1 0 0 0 4.2 18h15.6a1 1 0 0 0 .9-1.5l-1.7-3.3V9a7 7 0 0 0-7-7Zm0 20a3 3 0 0 0 2.8-2H9.2A3 3 0 0 0 12 22Z"/></symbol>
+  <symbol id="b-maps" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.1 6.2 12.3 6.5 12.6a.7.7 0 0 0 1 0C12.8 21.3 19 14.1 19 9a7 7 0 0 0-7-7Zm0 9.6A2.6 2.6 0 1 1 14.6 9 2.6 2.6 0 0 1 12 11.6Z"/></symbol>
+  <symbol id="b-home" viewBox="0 0 24 24"><path d="M12 2.6 1.8 11.1a1 1 0 0 0 .64 1.77H4.5V21a1 1 0 0 0 1 1h4v-6h5v6h4a1 1 0 0 0 1-1v-8.13h2.06a1 1 0 0 0 .64-1.77L12 2.6Z"/></symbol>
+  <symbol id="b-podcasts" viewBox="0 0 24 24"><path d="M12 2a5 5 0 0 0-5 5v5a5 5 0 0 0 10 0V7a5 5 0 0 0-5-5Zm-8 9.6a1 1 0 0 1 2 0 6 6 0 0 0 12 0 1 1 0 0 1 2 0 8 8 0 0 1-7 7.93V22h-2v-2.47A8 8 0 0 1 4 11.6Z"/></symbol>
+  <symbol id="b-notes" viewBox="0 0 24 24"><path d="M5 2h9.2L21 8.6V22a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Zm8.5 1.9V9H19l-5.5-5.1ZM7.5 12h9v1.8h-9V12Zm0 4h6.5v1.8H7.5V16Z"/></symbol>
+
+  <!-- UI glyphs: stroke family, 1.75px, round caps -->
+  <symbol id="u-talk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></symbol>
+  <symbol id="u-tools" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></symbol>
+  <symbol id="u-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6"/><path d="M15 2v6"/><path d="M6 8h12v3a6 6 0 0 1-12 0V8Z"/><path d="M12 17v5"/></symbol>
+  <symbol id="u-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.6 1.6 0 0 0 15 19.4a1.6 1.6 0 0 0-1 1.47V21a2 2 0 1 1-4 0v-.09A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.77.32l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.6 1.6 0 0 0 4.6 15a1.6 1.6 0 0 0-1.47-1H3a2 2 0 1 1 0-4h.09A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.32-1.77l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.6 1.6 0 0 0 9 4.6a1.6 1.6 0 0 0 1-1.47V3a2 2 0 1 1 4 0v.09A1.6 1.6 0 0 0 15 4.6a1.6 1.6 0 0 0 1.77-.32l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.6 1.6 0 0 0 19.4 9v.09a1.6 1.6 0 0 0 1.47 1H21a2 2 0 1 1 0 4h-.09a1.6 1.6 0 0 0-1.47 1Z"/></symbol>
+  <symbol id="u-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="u-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2.5" width="6" height="11.5" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3.5"/></symbol>
+  <symbol id="u-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="u-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></symbol>
+  <symbol id="u-glasses" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="14" r="3.5"/><circle cx="18.5" cy="14" r="3.5"/><path d="M9 14c0-1.5 1.3-2.5 3-2.5s3 1 3 2.5"/><path d="M2 11l2.5-4h4M22 11l-2.5-4h-4"/></symbol>
+  <symbol id="u-ring" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13.5" r="6.5"/><path d="M9.5 4h5l-1 3.4h-3L9.5 4Z"/></symbol>
+  <symbol id="u-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></symbol>
+  <symbol id="u-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 4v5h-5"/></symbol>
+  <symbol id="u-leaf" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V10"/><path d="M12 14C12 10.7 9.3 8 6 8c0 3.3 2.7 6 6 6Z" fill="currentColor" stroke="none"/><path d="M12 11.5C12 7.6 14.7 4.5 18 4.5c0 3.9-2.7 7-6 7Z" fill="currentColor" stroke="none"/></symbol>
+</svg>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="wordmark">
+      <svg width="22" height="22" aria-hidden="true"><use href="#u-leaf"/></svg>
+      Grove
+    </div>
+    <span class="where">interface preview</span>
+  </header>
+
+  <div class="hero">
+    <h1>An assistant you wear, not one you look at.</h1>
+    <p class="standfirst">
+      Cheap Bluetooth glasses, a cheap Bluetooth ring, and one agent you talk to
+      with your phone still in your pocket.
+    </p>
+
+    <!-- The one place colour lives. Four blurred lobes drift on their own
+         clocks, so the mass keeps shifting hue instead of pulsing on a beat. -->
+    <div class="orb-card">
+      <div class="orb" id="orb">
+        <span class="lobe l1"></span>
+        <span class="lobe l2"></span>
+        <span class="lobe l3"></span>
+        <span class="lobe l4"></span>
+      </div>
+
+      <p class="orb-caption" id="orb-caption">
+        Moved your two o'clock to Thursday and let Priya know.
+      </p>
+
+      <div class="orb-controls">
+        <button class="round" id="btn-close" aria-label="End voice mode">
+          <svg width="19" height="19" aria-hidden="true"><use href="#u-close"/></svg>
+        </button>
+        <button class="round primary" id="btn-mic" aria-label="Talk to Grove">
+          <svg width="19" height="19" aria-hidden="true"><use href="#u-mic"/></svg>
+        </button>
+      </div>
+
+      <p class="state-line" id="state-line">Ready — press to talk</p>
+    </div>
+  </div>
+
+</div>
+
+<section>
+<div class="wrap">
+  <div class="section-head">
+    <h2>Four screens, and almost no chrome.</h2>
+    <p>
+      White ground, hairline cards, one icon family. Brand marks carry a soft
+      gradient and sit directly on the card — no coloured tile behind them.
+    </p>
+  </div>
+
+  <div class="screens">
+
+    <!-- ------------------------------------------------------------ Talk -->
+    <article class="screen-note">
+      <div class="phone"><div class="viewport">
+        <div style="display:flex;gap:6px">
+          <div class="ncard" style="flex:1;padding:8px 9px;gap:7px">
+            <svg class="gicon sm" style="color:var(--ink-soft)" aria-hidden="true"><use href="#u-glasses"/></svg>
+            <div class="body"><div class="t" style="font-size:10px">Glasses</div></div>
+            <span class="dotm warn"></span>
+          </div>
+          <div class="ncard" style="flex:1;padding:8px 9px;gap:7px">
+            <svg class="gicon sm" style="color:var(--ink-soft)" aria-hidden="true"><use href="#u-ring"/></svg>
+            <div class="body"><div class="t" style="font-size:10px">Ring</div></div>
+            <span class="dotm on"></span>
+          </div>
+        </div>
+
+        <div class="orb" style="width:132px;height:132px;margin:22px auto 0">
+          <span class="lobe l1" style="width:86px;height:86px;filter:blur(18px)"></span>
+          <span class="lobe l2" style="width:80px;height:80px;filter:blur(18px)"></span>
+          <span class="lobe l3" style="width:74px;height:74px;filter:blur(18px)"></span>
+          <span class="lobe l4" style="width:82px;height:82px;filter:blur(18px)"></span>
+        </div>
+
+        <p style="text-align:center;font-size:13px;font-weight:600;margin:16px 0 4px;letter-spacing:-.02em">Listening</p>
+        <p style="text-align:center;font-size:10.5px;color:var(--muted);margin:0 0 18px">play something mellow</p>
+
+        <div class="s-label">Earlier</div>
+        <div class="ncard">
+          <svg class="gicon" aria-hidden="true"><use href="#b-music" fill="url(#gE)"/></svg>
+          <div class="body">
+            <div class="t">Put on the Sunday playlist</div>
+            <div class="d">Playing on your glasses.</div>
+          </div>
+        </div>
+        <div class="ncard">
+          <svg class="gicon" aria-hidden="true"><use href="#b-googlecalendar" fill="url(#gB)"/></svg>
+          <div class="body">
+            <div class="t">Move my two o'clock</div>
+            <div class="d">Thursday 2pm, Priya invited.</div>
+          </div>
+        </div>
+        <div class="ncard">
+          <svg class="gicon" aria-hidden="true"><use href="#b-messages" fill="url(#gA)"/></svg>
+          <div class="body">
+            <div class="t">Tell Sam I'm ten minutes out</div>
+            <div class="d">Sent.</div>
+          </div>
+        </div>
+
+        <div class="grow"></div>
+
+        <div class="dock">
+          <a href="#" class="on"><svg aria-hidden="true"><use href="#u-talk"/></svg>Talk</a>
+          <a href="#"><svg aria-hidden="true"><use href="#u-tools"/></svg>Tools</a>
+          <a href="#"><svg aria-hidden="true"><use href="#u-plug"/></svg>Connect</a>
+          <a href="#"><svg aria-hidden="true"><use href="#u-settings"/></svg>Settings</a>
+        </div>
+      </div></div>
+
+      <h3>Talk</h3>
+      <p>
+        Two hardware chips, the orb, and what it just did. The amber dot means
+        the glasses came up playback-only — Grove would talk into your ear while
+        the phone listens, so it says so rather than letting you find out.
+      </p>
+    </article>
+
+    <!-- ----------------------------------------------------------- Tools -->
+    <article class="screen-note">
+      <div class="phone"><div class="viewport">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div>
+            <p class="s-title">Tools</p>
+            <p class="s-sub">4 of 12 ready. Grove picks one when it fits.</p>
+          </div>
+          <button class="iconbtn" aria-label="Refresh tools">
+            <svg width="14" height="14" aria-hidden="true"><use href="#u-refresh"/></svg>
+          </button>
+        </div>
+
+        <div class="s-label">Ready</div>
+        <div class="ncard">
+          <svg class="gicon" aria-hidden="true"><use href="#b-music" fill="url(#gE)"/></svg>
+          <div class="body">
+            <div class="t">Music</div>
+            <div class="d">Play, queue and skip by name.</div>
+          </div>
+          <button class="iconbtn" aria-label="Remove Music"><svg width="13" height="13" aria-hidden="true"><use href="#u-minus"/></svg></button>
+        </div>
+        <div class="ncard">
+          <svg class="gicon" aria-hidden="true"><use href="#b-messages" fill="url(#gA)"/></svg>
+          <div class="body">
+            <div class="t">Messages</div>
+            <div class="d">Send a text without looking down.</div>
+          </div>
+          <button class="iconbtn" aria-label="Remove Messages"><svg width="13" height="13" aria-hidden="true"><use href="#u-minus"/></svg></button>
+        </div>
+        <div class="ncard">
+          <svg class="gicon" aria-hidden="true"><use href="#b-reminders" fill="url(#gF)"/></svg>
+          <div class="body">
+            <div class="t">Reminders</div>
+            <div class="d">Catch a thought mid-walk.</div>
+          </div>
+          <button class="iconbtn" aria-label="Remove Reminders"><svg width="13" height="13" aria-hidden="true"><use href="#u-minus"/></svg></button>
+        </div>
+
+        <div class="s-label" style="margin-top:14px">Add</div>
+        <div class="ncard">
+          <svg class="gicon" aria-hidden="true"><use href="#b-maps" fill="url(#gC)"/></svg>
+          <div class="body">
+            <div class="t">Maps</div>
+            <div class="d">How long home, and when to leave.</div>
+          </div>
+          <button class="iconbtn solid" aria-label="Add Maps"><svg width="13" height="13" aria-hidden="true"><use href="#u-plus"/></svg></button>
+        </div>
+        <div class="ncard">
+          <svg class="gicon" aria-hidden="true"><use href="#b-photos" fill="url(#gD)"/></svg>
+          <div class="body">
+            <div class="t">Photos</div>
+            <div class="d">Find a shot by describing it.</div>
+          </div>
+          <button class="iconbtn solid" aria-label="Add Photos"><svg width="13" height="13" aria-hidden="true"><use href="#u-plus"/></svg></button>
+        </div>
+        <div class="ncard">
+          <svg class="gicon" aria-hidden="true"><use href="#b-notes" fill="url(#gB)"/></svg>
+          <div class="body">
+            <div class="t">Notes</div>
+            <div class="d">Dictate one without stopping.</div>
+          </div>
+          <button class="iconbtn solid" aria-label="Add Notes"><svg width="13" height="13" aria-hidden="true"><use href="#u-plus"/></svg></button>
+        </div>
+
+        <div class="grow"></div>
+        <div class="dock">
+          <a href="#"><svg aria-hidden="true"><use href="#u-talk"/></svg>Talk</a>
+          <a href="#" class="on"><svg aria-hidden="true"><use href="#u-tools"/></svg>Tools</a>
+          <a href="#"><svg aria-hidden="true"><use href="#u-plug"/></svg>Connect</a>
+          <a href="#"><svg aria-hidden="true"><use href="#u-settings"/></svg>Settings</a>
+        </div>
+      </div></div>
+
+      <h3>Tools</h3>
+      <p>
+        The same card everywhere: mark, name, one line on what it does, one
+        action. Ready sits above Add, so the screen answers "what can it do
+        right now" before "what else could it do".
+      </p>
+    </article>
+
+  </div>
+</div>
+</section>
+
+<!-- second pair, continuing the same grid without a rule between them -->
+<div class="wrap">
+  <div class="screens" style="margin-top:calc(var(--s8) * -1 + var(--s7))">
+
+    <!-- ----------------------------------------------------- Connections -->
+    <article class="screen-note">
+      <div class="phone"><div class="viewport">
+        <p class="s-title">Connections</p>
+        <p class="s-sub">What Grove may reach on your behalf.</p>
+
+        <div class="s-label">Connected</div>
+        <div class="ncard">
+          <svg class="gicon" aria-hidden="true"><use href="#b-music" fill="url(#gE)"/></svg>
+          <div class="body"><div class="t">Music</div><div class="d">Used by 2 tools</div></div>
+          <span class="dotm on"></span>
+        </div>
+        <div class="ncard">
+          <svg class="gicon" aria-hidden="true"><use href="#b-messages" fill="url(#gA)"/></svg>
+          <div class="body"><div class="t">Messages</div><div class="d">Used by 1 tool</div></div>
+          <span class="dotm on"></span>
+        </div>
+        <div class="ncard">
+          <svg class="gicon" aria-hidden="true"><use href="#b-googlecalendar" fill="url(#gB)"/></svg>
+          <div class="body"><div class="t">Calendar</div><div class="d">Used by 3 tools</div></div>
+          <span class="dotm on"></span>
+        </div>
+
+        <div class="s-label" style="margin-top:14px">Available</div>
+        <div class="ncard">
+          <svg class="gicon" aria-hidden="true"><use href="#b-whatsapp" fill="url(#gE)"/></svg>
+          <div class="body"><div class="t">WhatsApp</div><div class="d">Unblocks 2 tools</div></div>
+          <button class="act">Connect</button>
+        </div>
+        <div class="ncard">
+          <svg class="gicon" aria-hidden="true"><use href="#b-home" fill="url(#gF)"/></svg>
+          <div class="body"><div class="t">Home</div><div class="d">Lights, locks and heating</div></div>
+          <button class="act">Connect</button>
+        </div>
+        <div class="ncard">
+          <svg class="gicon" aria-hidden="true"><use href="#b-photos" fill="url(#gD)"/></svg>
+          <div class="body"><div class="t">Photos</div><div class="d">Unblocks 1 tool</div></div>
+          <button class="act">Connect</button>
+        </div>
+        <div class="ncard">
+          <svg class="gicon" aria-hidden="true"><use href="#b-gmail" fill="url(#gF)"/></svg>
+          <div class="body"><div class="t">Gmail</div><div class="d">Unblocks 1 tool</div></div>
+          <button class="act">Connect</button>
+        </div>
+
+        <div class="grow"></div>
+        <div class="dock">
+          <a href="#"><svg aria-hidden="true"><use href="#u-talk"/></svg>Talk</a>
+          <a href="#"><svg aria-hidden="true"><use href="#u-tools"/></svg>Tools</a>
+          <a href="#" class="on"><svg aria-hidden="true"><use href="#u-plug"/></svg>Connect</a>
+          <a href="#"><svg aria-hidden="true"><use href="#u-settings"/></svg>Settings</a>
+        </div>
+      </div></div>
+
+      <h3>Connections</h3>
+      <p>
+        Weighted to the phone in your pocket rather than the desk you left —
+        music, messages, photos, home. Each row says what connecting it buys
+        you, because "unblocks 2 tools" is a reason and a logo is not.
+      </p>
+    </article>
+
+    <!-- -------------------------------------------------------- Settings -->
+    <article class="screen-note">
+      <div class="phone"><div class="viewport">
+        <p class="s-title">Settings</p>
+        <p class="s-sub">&nbsp;</p>
+
+        <div class="s-label">Name</div>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <span style="font-weight:600">Buddy</span>
+          <span style="flex:1"></span>
+          <span style="color:var(--muted);font-size:9.5px">Hey Buddy…</span>
+        </div>
+
+        <div class="s-label" style="margin-top:16px">How it talks</div>
+        <div class="field">
+          Dry and deadpan. One aside at most, then back to the point.
+        </div>
+
+        <div class="s-label" style="margin-top:16px">Voice</div>
+        <div class="ncard" style="padding:4px 11px">
+          <div style="flex:1">
+            <div class="frow" style="padding:9px 0">
+              <span class="k">Speed</span>
+              <span class="v">1.0&times;</span>
+              <span class="stepper">
+                <button class="iconbtn" style="width:22px;height:22px" aria-label="Slower"><svg width="11" height="11" aria-hidden="true"><use href="#u-minus"/></svg></button>
+                <button class="iconbtn" style="width:22px;height:22px" aria-label="Faster"><svg width="11" height="11" aria-hidden="true"><use href="#u-plus"/></svg></button>
+              </span>
+            </div>
+            <div class="frow" style="padding:9px 0">
+              <span class="k">Keep speech on device</span>
+              <span class="switch"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="s-label" style="margin-top:16px">Hardware</div>
+        <div class="ncard">
+          <svg class="gicon sm" style="color:var(--ink-soft)" aria-hidden="true"><use href="#u-ring"/></svg>
+          <div class="body"><div class="t">Ring</div><div class="d">Armed</div></div>
+          <span class="dotm on"></span>
+        </div>
+        <div class="ncard">
+          <svg class="gicon sm" style="color:var(--ink-soft)" aria-hidden="true"><use href="#u-glasses"/></svg>
+          <div class="body"><div class="t">Glasses</div><div class="d">Playback only</div></div>
+          <span class="dotm warn"></span>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;padding:12px 2px 0;font-size:10.5px;color:var(--ink-soft)">
+          <span style="flex:1">What is my ring sending?</span>
+          <svg width="12" height="12" style="color:var(--muted)" aria-hidden="true"><use href="#u-chev"/></svg>
+        </div>
+
+        <div class="grow"></div>
+        <div class="dock">
+          <a href="#"><svg aria-hidden="true"><use href="#u-talk"/></svg>Talk</a>
+          <a href="#"><svg aria-hidden="true"><use href="#u-tools"/></svg>Tools</a>
+          <a href="#"><svg aria-hidden="true"><use href="#u-plug"/></svg>Connect</a>
+          <a href="#" class="on"><svg aria-hidden="true"><use href="#u-settings"/></svg>Settings</a>
+        </div>
+      </div></div>
+
+      <h3>Settings</h3>
+      <p>
+        Give it a name and it answers to it. Below that, one box for how it
+        should talk — the paragraph of explanation and the row of preset
+        buttons both went, because the box already says what it is.
+      </p>
+    </article>
+
+  </div>
+</div>
+
+<section>
+<div class="wrap">
+  <div class="section-head">
+    <h2>Three tiers, cheapest first.</h2>
+    <p>
+      A reply that takes four seconds feels broken in your ear in a way it never
+      did in a chat bubble, and the account model allows two of the good ones an
+      hour. So a turn only climbs when the tier below genuinely cannot serve it.
+    </p>
+  </div>
+
+  <div class="tiers">
+    <div class="tier">
+      <span class="who">Local rules</span>
+      <span class="what">Whether this sentence should cause something to happen, and which tool fits. Never a model's call.</span>
+      <span class="cost">free</span>
+    </div>
+    <div class="tier">
+      <span class="who">Light model</span>
+      <span class="what">The conversation itself, plus routing. Runs on your own network when it can.</span>
+      <span class="cost">near free</span>
+    </div>
+    <div class="tier">
+      <span class="who">Noctus</span>
+      <span class="what">Anything needing your real account — integrations, history, billing.</span>
+      <span class="cost">2 / hour</span>
+    </div>
+  </div>
+
+  <p class="measure" style="margin:var(--s5) 0 0;color:var(--ink-soft)">
+    Grove answers before it runs anything. A run can take ten seconds, and ten
+    seconds of silence reads as a crash.
+  </p>
+</div>
+</section>
+
+<section>
+<div class="wrap">
+  <div class="section-head">
+    <h2>What it cannot do.</h2>
+    <p>Constraints the product is shaped around, not gaps waiting to be filled.</p>
+  </div>
+
+  <div class="limits">
+    <div class="limit">
+      <h3>Wake from closed</h3>
+      <div>
+        <p>
+          No iOS app can be woken from a fully terminated state by a button
+          press. Grove has to be running — backgrounded, locked and pocketed are
+          all fine. Force-quitting it turns the ring off until you open it again.
+        </p>
+      </div>
+    </div>
+
+    <div class="limit">
+      <h3>Stay quiet and stay alive</h3>
+      <div>
+        <p>
+          Holding the audio session is what makes Grove the now-playing app, and
+          that is what lets the ring reach it. An idle session gets torn down, so
+          the module renders a silent loop to hold its place.
+        </p>
+        <span class="flag">Most likely cause of an App Store rejection in the project. Fine for personal builds and TestFlight.</span>
+      </div>
+    </div>
+
+    <div class="limit">
+      <h3>Drive the glasses</h3>
+      <div>
+        <p>
+          There is nothing to drive. They are an ordinary Bluetooth headset and
+          iOS handles the routing, which is why there is no Bluetooth code in the
+          app at all. The one thing worth checking is whether they connected for
+          playback only.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<div class="wrap">
+  <footer>
+    <p>
+      Interface preview. Brand marks are the real Noctus icon set; the rest is
+      one stroke family at a single weight.
+    </p>
+    <span class="built">groveapp_preview.html</span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  // The orb is the only stateful thing on the page. Pressing mic walks the
+  // states the app actually has; pressing close returns it to rest.
+  var STATES = [
+    { key:'listening', line:'Listening', cap:'play something mellow' },
+    { key:'thinking',  line:'Thinking',  cap:'…' },
+    { key:'speaking',  line:'Speaking',  cap:'Putting on the Sunday playlist.' },
+    { key:'working',   line:'Working',   cap:'Queuing it on your glasses…' },
+    { key:'idle',      line:'Ready — press to talk', cap:'Moved your two o’clock to Thursday and let Priya know.' }
+  ];
+  var i = STATES.length - 1;
+  var caption = document.getElementById('orb-caption');
+  var line    = document.getElementById('state-line');
+  var orb     = document.getElementById('orb');
+
+  function paint() {
+    var s = STATES[i];
+    caption.textContent = s.cap;
+    line.textContent = s.line;
+    orb.setAttribute('data-state', s.key);
+  }
+
+  document.getElementById('btn-mic').addEventListener('click', function () {
+    i = (i + 1) % STATES.length;
+    paint();
+  });
+  document.getElementById('btn-close').addEventListener('click', function () {
+    i = STATES.length - 1;
+    paint();
+  });
+
+  paint();
+})();
+</script>
+
+</body>
+</html>

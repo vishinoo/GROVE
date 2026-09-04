@@ -1,0 +1,9 @@
+{
+  "name": "grove-remote",
+  "version": "1.0.0",
+  "description": "Keeps Grove resident as the iOS now-playing app so the ring's media keys reach it, and reports the live audio route.",
+  "main": "index.ts",
+  "author": "Noctus",
+  "license": "MIT",
+  "homepage": "https://www.noctusai.org"
+}

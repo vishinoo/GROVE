@@ -1,20 +1,29 @@
 {
   "expo": {
-    "name": "Buddy",
-    "slug": "Buddy",
+    "name": "Grove",
+    "slug": "grove",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "buddy",
-    "userInterfaceStyle": "automatic",
+    "scheme": "grove",
+    "userInterfaceStyle": "light",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "supportsTablet": false,
+      "bundleIdentifier": "org.noctusai.grove",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "audio"
+        ],
+        "NSMicrophoneUsageDescription": "Grove listens when you press your ring, so you can talk to it through your glasses.",
+        "NSSpeechRecognitionUsageDescription": "Grove turns what you say into text so it can answer. Speech stays on this device unless you turn that off in Settings.",
+        "NSBluetoothAlwaysUsageDescription": "Grove uses your glasses and ring once you have paired them in iOS Settings."
+      }
     },
     "android": {
+      "package": "org.noctusai.grove",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#EFE9E1",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false
@@ -28,9 +37,18 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#EFE9E1",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 84
+        }
+      ],
+      "expo-web-browser",
+      "expo-secure-store",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Grove listens when you press your ring, so you can talk to it through your glasses.",
+          "speechRecognitionPermission": "Grove turns what you say into text so it can answer. Speech stays on this device unless you turn that off in Settings."
         }
       ]
     ],
