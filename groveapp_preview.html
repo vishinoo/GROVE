@@ -171,6 +171,29 @@ section{padding:var(--s8) 0;border-top:1px solid var(--line)}
 .gicon{width:22px;height:22px;flex:none;display:block}
 .gicon.sm{width:19px;height:19px}
 
+/* App icons: the real thing — a colourful tile with a white glyph on top,
+   the way the icon looks on your home screen. */
+.appicon{
+  width:30px;height:30px;border-radius:9px;flex:none;
+  display:grid;place-items:center;
+  box-shadow:inset 0 0 0 .5px rgba(0,0,0,.06);
+}
+.appicon svg{width:18px;height:18px;display:block;fill:#fff}
+.appicon.sm{width:22px;height:22px;border-radius:6.5px}
+.appicon.sm svg{width:13px;height:13px}
+
+.ai-music     {background:linear-gradient(160deg,#FC5C7D,#F62E52)}
+.ai-messages  {background:linear-gradient(160deg,#6FE87B,#1FC24A)}
+.ai-maps      {background:linear-gradient(160deg,#5BC8FA,#2A8CF0)}
+.ai-photos    {background:linear-gradient(160deg,#FDD35C,#F76B8A 55%,#8A63F5)}
+.ai-reminders {background:linear-gradient(160deg,#FF9E62,#FB4E3D)}
+.ai-home      {background:linear-gradient(160deg,#FFC64D,#FF8A28)}
+.ai-notes     {background:linear-gradient(160deg,#FFDE73,#FFB92E)}
+.ai-podcasts  {background:linear-gradient(160deg,#C08BFA,#7B3FE4)}
+.ai-googlecalendar{background:linear-gradient(160deg,#5B9BFF,#2F6BE0)}
+.ai-whatsapp  {background:linear-gradient(160deg,#5DF07D,#1EBE55)}
+.ai-gmail     {background:linear-gradient(160deg,#FF7B6B,#E8342A)}
+
 .act{
   height:26px;padding:0 11px;border-radius:8px;border:0;
   font-family:inherit;font-size:10px;font-weight:600;
@@ -183,6 +206,26 @@ section{padding:var(--s8) 0;border-top:1px solid var(--line)}
   background:var(--card);color:var(--ink-soft);cursor:pointer;
 }
 .iconbtn.solid{background:var(--ink);border-color:var(--ink);color:#fff}
+
+/* A spark is a standing job, not an app — so the card carries a schedule
+   line and the connections it draws on, and every card is the same height. */
+.spark{
+  border:1px solid var(--line);border-radius:var(--r-md);
+  padding:11px;background:var(--card);
+}
+.spark + .spark{margin-top:7px}
+.spark .top{display:flex;align-items:flex-start;gap:9px}
+.spark .t{font-size:11.5px;font-weight:600;line-height:1.3;flex:1}
+.spark .o{font-size:9.5px;color:var(--muted);line-height:1.45;margin-top:2px}
+.spark .foot{
+  display:flex;align-items:center;gap:6px;margin-top:9px;
+  padding-top:9px;border-top:1px solid var(--line-soft);
+}
+.spark .when{
+  font-size:9px;color:var(--ink-soft);font-weight:500;
+  display:flex;align-items:center;gap:4px;flex:1;
+}
+.spark .needs{display:flex;gap:3px}
 
 .pipe{height:1px;background:var(--line-soft);margin:12px 0}
 .grow{flex:1;min-height:0}
@@ -329,7 +372,7 @@ footer .built{font-size:12.5px;color:var(--muted)}
   <symbol id="u-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="u-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></symbol>
   <symbol id="u-glasses" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="14" r="3.5"/><circle cx="18.5" cy="14" r="3.5"/><path d="M9 14c0-1.5 1.3-2.5 3-2.5s3 1 3 2.5"/><path d="M2 11l2.5-4h4M22 11l-2.5-4h-4"/></symbol>
-  <symbol id="u-ring" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13.5" r="6.5"/><path d="M9.5 4h5l-1 3.4h-3L9.5 4Z"/></symbol>
+  <symbol id="u-ring" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="7.5"/></symbol>
   <symbol id="u-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></symbol>
   <symbol id="u-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 4v5h-5"/></symbol>
   <symbol id="u-leaf" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V10"/><path d="M12 14C12 10.7 9.3 8 6 8c0 3.3 2.7 6 6 6Z" fill="currentColor" stroke="none"/><path d="M12 11.5C12 7.6 14.7 4.5 18 4.5c0 3.9-2.7 7-6 7Z" fill="currentColor" stroke="none"/></symbol>
@@ -386,8 +429,8 @@ footer .built{font-size:12.5px;color:var(--muted)}
   <div class="section-head">
     <h2>Four screens, and almost no chrome.</h2>
     <p>
-      White ground, hairline cards, one icon family. Brand marks carry a soft
-      gradient and sit directly on the card — no coloured tile behind them.
+      White ground, hairline cards, and the app icons you already know. Sparks are
+      standing jobs; Connections are the apps those jobs reach into.
     </p>
   </div>
 
@@ -421,21 +464,21 @@ footer .built{font-size:12.5px;color:var(--muted)}
 
         <div class="s-label">Earlier</div>
         <div class="ncard">
-          <svg class="gicon" aria-hidden="true"><use href="#b-music" fill="url(#gE)"/></svg>
+          <span class="appicon ai-music" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-music"/></svg></span>
           <div class="body">
             <div class="t">Put on the Sunday playlist</div>
             <div class="d">Playing on your glasses.</div>
           </div>
         </div>
         <div class="ncard">
-          <svg class="gicon" aria-hidden="true"><use href="#b-googlecalendar" fill="url(#gB)"/></svg>
+          <span class="appicon ai-googlecalendar" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-googlecalendar"/></svg></span>
           <div class="body">
             <div class="t">Move my two o'clock</div>
             <div class="d">Thursday 2pm, Priya invited.</div>
           </div>
         </div>
         <div class="ncard">
-          <svg class="gicon" aria-hidden="true"><use href="#b-messages" fill="url(#gA)"/></svg>
+          <span class="appicon ai-messages" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-messages"/></svg></span>
           <div class="body">
             <div class="t">Tell Sam I'm ten minutes out</div>
             <div class="d">Sent.</div>
@@ -446,7 +489,7 @@ footer .built{font-size:12.5px;color:var(--muted)}
 
         <div class="dock">
           <a href="#" class="on"><svg aria-hidden="true"><use href="#u-talk"/></svg>Talk</a>
-          <a href="#"><svg aria-hidden="true"><use href="#u-tools"/></svg>Tools</a>
+          <a href="#"><svg aria-hidden="true"><use href="#u-tools"/></svg>Sparks</a>
           <a href="#"><svg aria-hidden="true"><use href="#u-plug"/></svg>Connect</a>
           <a href="#"><svg aria-hidden="true"><use href="#u-settings"/></svg>Settings</a>
         </div>
@@ -460,85 +503,105 @@ footer .built{font-size:12.5px;color:var(--muted)}
       </p>
     </article>
 
-    <!-- ----------------------------------------------------------- Tools -->
+    <!-- ---------------------------------------------------------- Sparks -->
     <article class="screen-note">
       <div class="phone"><div class="viewport">
         <div style="display:flex;align-items:flex-start;justify-content:space-between">
           <div>
-            <p class="s-title">Tools</p>
-            <p class="s-sub">4 of 12 ready. Grove picks one when it fits.</p>
+            <p class="s-title">Sparks</p>
+            <p class="s-sub">Standing jobs that run on their own.</p>
           </div>
-          <button class="iconbtn" aria-label="Refresh tools">
-            <svg width="14" height="14" aria-hidden="true"><use href="#u-refresh"/></svg>
+          <button class="iconbtn" aria-label="Add a spark">
+            <svg width="14" height="14" aria-hidden="true"><use href="#u-plus"/></svg>
           </button>
         </div>
 
-        <div class="s-label">Ready</div>
-        <div class="ncard">
-          <svg class="gicon" aria-hidden="true"><use href="#b-music" fill="url(#gE)"/></svg>
-          <div class="body">
-            <div class="t">Music</div>
-            <div class="d">Play, queue and skip by name.</div>
+        <div class="s-label">Running</div>
+
+        <div class="spark">
+          <div class="top">
+            <div style="flex:1">
+              <div class="t">Morning brief</div>
+              <div class="o">Your day, read out before you're up.</div>
+            </div>
+            <span class="dotm on" style="margin-top:4px"></span>
           </div>
-          <button class="iconbtn" aria-label="Remove Music"><svg width="13" height="13" aria-hidden="true"><use href="#u-minus"/></svg></button>
-        </div>
-        <div class="ncard">
-          <svg class="gicon" aria-hidden="true"><use href="#b-messages" fill="url(#gA)"/></svg>
-          <div class="body">
-            <div class="t">Messages</div>
-            <div class="d">Send a text without looking down.</div>
+          <div class="foot">
+            <span class="when">Every day, 7:00</span>
+            <span class="needs">
+              <span class="appicon sm ai-googlecalendar"><svg viewBox="0 0 24 24"><use href="#b-googlecalendar"/></svg></span>
+              <span class="appicon sm ai-gmail"><svg viewBox="0 0 24 24"><use href="#b-gmail"/></svg></span>
+            </span>
           </div>
-          <button class="iconbtn" aria-label="Remove Messages"><svg width="13" height="13" aria-hidden="true"><use href="#u-minus"/></svg></button>
-        </div>
-        <div class="ncard">
-          <svg class="gicon" aria-hidden="true"><use href="#b-reminders" fill="url(#gF)"/></svg>
-          <div class="body">
-            <div class="t">Reminders</div>
-            <div class="d">Catch a thought mid-walk.</div>
-          </div>
-          <button class="iconbtn" aria-label="Remove Reminders"><svg width="13" height="13" aria-hidden="true"><use href="#u-minus"/></svg></button>
         </div>
 
-        <div class="s-label" style="margin-top:14px">Add</div>
-        <div class="ncard">
-          <svg class="gicon" aria-hidden="true"><use href="#b-maps" fill="url(#gC)"/></svg>
-          <div class="body">
-            <div class="t">Maps</div>
-            <div class="d">How long home, and when to leave.</div>
+        <div class="spark">
+          <div class="top">
+            <div style="flex:1">
+              <div class="t">Market check</div>
+              <div class="o">What actually moved on your watchlist.</div>
+            </div>
+            <span class="dotm on" style="margin-top:4px"></span>
           </div>
-          <button class="iconbtn solid" aria-label="Add Maps"><svg width="13" height="13" aria-hidden="true"><use href="#u-plus"/></svg></button>
+          <div class="foot">
+            <span class="when">Weekdays, 16:30</span>
+            <span class="needs">
+              <span class="appicon sm ai-notes"><svg viewBox="0 0 24 24"><use href="#b-notes"/></svg></span>
+            </span>
+          </div>
         </div>
-        <div class="ncard">
-          <svg class="gicon" aria-hidden="true"><use href="#b-photos" fill="url(#gD)"/></svg>
-          <div class="body">
-            <div class="t">Photos</div>
-            <div class="d">Find a shot by describing it.</div>
+
+        <div class="spark">
+          <div class="top">
+            <div style="flex:1">
+              <div class="t">Leave now</div>
+              <div class="o">When to walk out, using live traffic.</div>
+            </div>
+            <span class="dotm on" style="margin-top:4px"></span>
           </div>
-          <button class="iconbtn solid" aria-label="Add Photos"><svg width="13" height="13" aria-hidden="true"><use href="#u-plus"/></svg></button>
+          <div class="foot">
+            <span class="when">Before every event</span>
+            <span class="needs">
+              <span class="appicon sm ai-maps"><svg viewBox="0 0 24 24"><use href="#b-maps"/></svg></span>
+              <span class="appicon sm ai-googlecalendar"><svg viewBox="0 0 24 24"><use href="#b-googlecalendar"/></svg></span>
+            </span>
+          </div>
         </div>
-        <div class="ncard">
-          <svg class="gicon" aria-hidden="true"><use href="#b-notes" fill="url(#gB)"/></svg>
-          <div class="body">
-            <div class="t">Notes</div>
-            <div class="d">Dictate one without stopping.</div>
+
+        <div class="s-label" style="margin-top:7px">Paused</div>
+
+        <div class="spark">
+          <div class="top">
+            <div style="flex:1">
+              <div class="t">Reply sweep</div>
+              <div class="o">Messages still waiting on you.</div>
+            </div>
+            <span class="dotm" style="margin-top:4px"></span>
           </div>
-          <button class="iconbtn solid" aria-label="Add Notes"><svg width="13" height="13" aria-hidden="true"><use href="#u-plus"/></svg></button>
+          <div class="foot">
+            <span class="when">Every day, 18:00</span>
+            <span class="needs">
+              <span class="appicon sm ai-messages"><svg viewBox="0 0 24 24"><use href="#b-messages"/></svg></span>
+              <span class="appicon sm ai-whatsapp"><svg viewBox="0 0 24 24"><use href="#b-whatsapp"/></svg></span>
+            </span>
+          </div>
         </div>
 
         <div class="grow"></div>
         <div class="dock">
           <a href="#"><svg aria-hidden="true"><use href="#u-talk"/></svg>Talk</a>
-          <a href="#" class="on"><svg aria-hidden="true"><use href="#u-tools"/></svg>Tools</a>
+          <a href="#" class="on"><svg aria-hidden="true"><use href="#u-tools"/></svg>Sparks</a>
           <a href="#"><svg aria-hidden="true"><use href="#u-plug"/></svg>Connect</a>
           <a href="#"><svg aria-hidden="true"><use href="#u-settings"/></svg>Settings</a>
         </div>
       </div></div>
 
-      <h3>Tools</h3>
+      <h3>Sparks</h3>
       <p>
-        The same card everywhere: mark, name, one line on what it does, one
-        action. Ready sits above Add, so the screen answers "what can it do
-        right now" before "what else could it do".
+        A spark is a standing job, not an app — "read my watchlist at half four
+        and tell me what moved". Each card carries when it runs and which
+        connections it draws on, so a spark that has gone quiet is traceable to
+        the thing it lost.
       </p>
     </article>
 
@@ -558,39 +621,39 @@ footer .built{font-size:12.5px;color:var(--muted)}
 
         <div class="s-label">Connected</div>
         <div class="ncard">
-          <svg class="gicon" aria-hidden="true"><use href="#b-music" fill="url(#gE)"/></svg>
+          <span class="appicon ai-music" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-music"/></svg></span>
           <div class="body"><div class="t">Music</div><div class="d">Used by 2 tools</div></div>
           <span class="dotm on"></span>
         </div>
         <div class="ncard">
-          <svg class="gicon" aria-hidden="true"><use href="#b-messages" fill="url(#gA)"/></svg>
+          <span class="appicon ai-messages" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-messages"/></svg></span>
           <div class="body"><div class="t">Messages</div><div class="d">Used by 1 tool</div></div>
           <span class="dotm on"></span>
         </div>
         <div class="ncard">
-          <svg class="gicon" aria-hidden="true"><use href="#b-googlecalendar" fill="url(#gB)"/></svg>
+          <span class="appicon ai-googlecalendar" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-googlecalendar"/></svg></span>
           <div class="body"><div class="t">Calendar</div><div class="d">Used by 3 tools</div></div>
           <span class="dotm on"></span>
         </div>
 
         <div class="s-label" style="margin-top:14px">Available</div>
         <div class="ncard">
-          <svg class="gicon" aria-hidden="true"><use href="#b-whatsapp" fill="url(#gE)"/></svg>
+          <span class="appicon ai-whatsapp" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-whatsapp"/></svg></span>
           <div class="body"><div class="t">WhatsApp</div><div class="d">Unblocks 2 tools</div></div>
           <button class="act">Connect</button>
         </div>
         <div class="ncard">
-          <svg class="gicon" aria-hidden="true"><use href="#b-home" fill="url(#gF)"/></svg>
+          <span class="appicon ai-home" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-home"/></svg></span>
           <div class="body"><div class="t">Home</div><div class="d">Lights, locks and heating</div></div>
           <button class="act">Connect</button>
         </div>
         <div class="ncard">
-          <svg class="gicon" aria-hidden="true"><use href="#b-photos" fill="url(#gD)"/></svg>
+          <span class="appicon ai-photos" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-photos"/></svg></span>
           <div class="body"><div class="t">Photos</div><div class="d">Unblocks 1 tool</div></div>
           <button class="act">Connect</button>
         </div>
         <div class="ncard">
-          <svg class="gicon" aria-hidden="true"><use href="#b-gmail" fill="url(#gF)"/></svg>
+          <span class="appicon ai-gmail" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-gmail"/></svg></span>
           <div class="body"><div class="t">Gmail</div><div class="d">Unblocks 1 tool</div></div>
           <button class="act">Connect</button>
         </div>
@@ -598,7 +661,7 @@ footer .built{font-size:12.5px;color:var(--muted)}
         <div class="grow"></div>
         <div class="dock">
           <a href="#"><svg aria-hidden="true"><use href="#u-talk"/></svg>Talk</a>
-          <a href="#"><svg aria-hidden="true"><use href="#u-tools"/></svg>Tools</a>
+          <a href="#"><svg aria-hidden="true"><use href="#u-tools"/></svg>Sparks</a>
           <a href="#" class="on"><svg aria-hidden="true"><use href="#u-plug"/></svg>Connect</a>
           <a href="#"><svg aria-hidden="true"><use href="#u-settings"/></svg>Settings</a>
         </div>
@@ -668,7 +731,7 @@ footer .built{font-size:12.5px;color:var(--muted)}
         <div class="grow"></div>
         <div class="dock">
           <a href="#"><svg aria-hidden="true"><use href="#u-talk"/></svg>Talk</a>
-          <a href="#"><svg aria-hidden="true"><use href="#u-tools"/></svg>Tools</a>
+          <a href="#"><svg aria-hidden="true"><use href="#u-tools"/></svg>Sparks</a>
           <a href="#"><svg aria-hidden="true"><use href="#u-plug"/></svg>Connect</a>
           <a href="#" class="on"><svg aria-hidden="true"><use href="#u-settings"/></svg>Settings</a>
         </div>
