@@ -181,6 +181,8 @@ export const fallback = {
   /** There is no model configured, so waiting will not help. */
   unconfigured: () =>
     `I've got no model to think with — add a key to your .env and restart me.`,
+  /** Asked for something Grove has no way to do, and must not pretend about. */
+  cannot: () => `I can't do that one yet.`,
   /** Heard, but nothing intelligible in it. */
   unheard: () => `I didn't catch that.`,
 } as const;

@@ -146,6 +146,20 @@ export async function setVolumeFallback(enabled: boolean): Promise<void> {
 }
 
 /**
+ * Re-take the audio session, right now.
+ *
+ * `arm` does this on foreground and after interruptions, but neither fires
+ * when the trigger is pressed with the app already backgrounded — and iOS will
+ * have quietly let the session lapse by then. Starting a recogniser against a
+ * lapsed session is what produces CoreAudio's 'what' error, so this is called
+ * immediately before recording rather than being trusted to still be true.
+ */
+export async function reactivate(): Promise<void> {
+  if (!isAvailable()) return;
+  await activate(true);
+}
+
+/**
  * Whether the native volume observer is actually installed right now.
  *
  * Asked of the native module rather than inferred from the preference,

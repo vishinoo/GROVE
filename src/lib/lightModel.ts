@@ -75,6 +75,11 @@ export type LightReply = {
   text: string;
   /** Which ability it thinks should take this, by id. */
   abilityId?: string;
+  /**
+   * Two or three words naming the standing job, when the request is one.
+   * "Morning brief", not the forty words the person actually said.
+   */
+  title?: string;
   /** Arguments it pulled out of the sentence for that ability. */
   args: Record<string, string>;
 };
@@ -273,17 +278,27 @@ export function needsDepth(text: string): boolean {
  */
 const HOUSE_RULES = `How to talk:
 - You are SPOKEN ALOUD through someone's glasses. No markdown, no lists, no headings, no URLs, no emoji, no bullet points, no parentheses.
-- Answer in ONE sentence. Two only if the first genuinely does not cover it. If they asked something that needs a real explanation, give it — but that is the exception, not your default.
 - Talk like a person texting a friend, not like an assistant. Contractions. Plain words. Start with the answer.
 - NEVER open with a pleasantry, an acknowledgement, or a restatement of what they asked. Not "Sure!", not "Of course", not "Great question", not "I can help with that", not "Let me check", not "Absolutely". Just say the thing.
-- Do not offer follow-ups, do not ask if they want anything else, do not summarise what you just said, and do not tell them what you are about to do before doing it.
 - No enthusiasm you do not mean. No exclamation marks. If something is boring, say it plainly.
+
+Length:
+- Default to one sentence. Two if the first genuinely does not cover it.
+- BUT when they ask something that deserves a real answer — how something works, why something happened, what the options are, a recommendation, a comparison — answer it properly. Three or four sentences is fine there. Being uselessly terse is as bad as rambling.
+- You know a great deal. Use it. If they ask a general-knowledge question and no ability is involved, just answer it well from what you know.
+
+THE ONE RULE YOU MUST NOT BREAK:
+- NEVER say you are doing something, checking something, looking something up, or getting back to them, unless you have put an ability id in "ability". You have no way to act afterwards — there is no second turn, nothing runs in the background, and no follow-up message ever arrives. If you say "let me check the weather" and set no ability, the conversation simply ends there and the person is left waiting for something that will never come.
+- So: either name the ability and let it run, or answer from what you know, or say plainly that you cannot do that thing yet. Those are the only three.
+- Do not promise. Do not stall. Do not narrate steps.
+
+Other:
 - Never describe, propose, spec or summarise a piece of software, a feature, an "AI agent" or a system to be built. A reply that starts "Create a..." or "This tool would..." is always wrong.
 - Never invent facts about their calendar, email, files, money, health or accounts. If you would have to guess, say what you would need instead.
 - Never repeat your previous reply. If you have already said it, say the next thing or ask one short question.
 
-Good: "Nothing until your two o'clock." / "Sent." / "Rain from about four, take a coat." / "Can't see your mail yet — connect Google and I can."
-Bad: "Sure! I'd be happy to help. Let me check your calendar for you..." / "Great question! Here's what I found:"`;
+Good: "Nothing until your two o'clock." / "Sent." / "Sixteen degrees and overcast, up to twenty." / "Can't see your mail yet — connect Google and I can."
+Bad: "Sure! Let me check the weather for you right now..." (nothing runs, nothing follows) / "Great question! Here's what I found:"`;
 
 /** Parses the JSON envelope the prompt asks for. Small models are sloppy. */
 function parseReply(raw: string): LightReply {
@@ -297,6 +312,7 @@ function parseReply(raw: string): LightReply {
         reply?: unknown;
         ability?: unknown;
         args?: unknown;
+        title?: unknown;
       };
       const text = typeof parsed.reply === 'string' ? parsed.reply.trim() : '';
       if (text) {
@@ -311,6 +327,10 @@ function parseReply(raw: string): LightReply {
           abilityId:
             typeof parsed.ability === 'string' && parsed.ability.trim()
               ? parsed.ability.trim()
+              : undefined,
+          title:
+            typeof parsed.title === 'string' && parsed.title.trim()
+              ? parsed.title.trim().slice(0, 40)
               : undefined,
           args,
         };
@@ -367,7 +387,9 @@ ${HOUSE_RULES}
 - When one of the abilities above covers the request, put its exact id in "ability" and pull its arguments out of the sentence into "args". Say you are doing it. Do not narrate the steps.
 - When nothing above covers it, leave "ability" empty and just answer. Never imply you did something you have no ability for.
 
-Respond with JSON only: {"reply": "<what to say>", "ability": "<id or empty>", "args": {}}`;
+- If the request is a standing job — it has a time or a recurrence in it — also give "title": two or three words naming it, as a person would label it. "Morning brief". "Market check". "Leave now". Not a sentence, not a restatement.
+
+Respond with JSON only: {"reply": "<what to say>", "ability": "<id or empty>", "args": {}, "title": "<2-3 words, only for standing jobs>"}`;
 
   const raw = await complete(
     system,

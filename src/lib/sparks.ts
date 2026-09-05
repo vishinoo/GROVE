@@ -36,6 +36,12 @@ export type Schedule =
 
 export type Spark = {
   id: string;
+  /**
+   * Two or three words, as a person would label it on a card. The sentence
+   * someone speaks is never a good title — it opens with "also" and carries the
+   * schedule inside it — so the name is separate from the record of the ask.
+   */
+  title: string;
   /** What you said, kept verbatim — it is the record of what you asked for. */
   said: string;
   abilityId: string;
@@ -195,7 +201,9 @@ export async function loadSparks(uid: string): Promise<Spark[]> {
     const raw = await AsyncStorage.getItem(storageKey(uid));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Spark[];
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    // Sparks saved before titles existed show their raw sentence otherwise.
+    return parsed.map((s) => ({ ...s, title: s.title || 'Standing job' }));
   } catch {
     return [];
   }
@@ -217,7 +225,7 @@ async function write(uid: string, sparks: Spark[]): Promise<void> {
  */
 export async function createSpark(
   uid: string,
-  input: { said: string; abilityId: string; args: Record<string, string> }
+  input: { said: string; title?: string; abilityId: string; args: Record<string, string> }
 ): Promise<Spark | null> {
   const schedule = parseSchedule(input.said);
   if (!schedule) return null;
@@ -225,6 +233,7 @@ export async function createSpark(
 
   const spark: Spark = {
     id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    title: (input.title || '').trim().slice(0, 40) || 'Standing job',
     said: input.said.trim().slice(0, 300),
     abilityId: input.abilityId,
     args: input.args,

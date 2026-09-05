@@ -129,6 +129,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const live = useRef({ state, persona, facts, uid });
   live.current = { state, persona, facts, uid };
   const mounted = useRef(true);
+  /** Claims a listening turn, so an interrupted start cannot finish. */
+  const listenSeq = useRef(0);
 
   /**
    * Whether a tool is still running on Noctus.
@@ -275,6 +277,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     if (reply.schedule) {
       const spark = await sparks.createSpark(account, {
         said: text,
+        title: reply.title,
         abilityId: reply.ability.id,
         args: reply.args,
       });
@@ -331,11 +334,32 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const beginListening = useCallback(
-    (continuous: boolean) => {
+    async (continuous: boolean) => {
+      // Re-taking the session is asynchronous, and the state says 'listening'
+      // for that whole window — so a second press arrives, stops a recogniser
+      // that has not started, and the original start then runs anyway against
+      // a session being reconfigured underneath it. This claim makes the last
+      // press win instead.
+      const turn = ++listenSeq.current;
+
       setProblem(null);
       setHeard('');
       setLevel(0);
       setState('listening');
+
+      // The session may have lapsed while backgrounded. Re-taking it costs a
+      // few milliseconds and is the difference between recording and a
+      // CoreAudio failure that looks like the ring not working.
+      try {
+        await trigger.reactivate();
+      } catch (error) {
+        console.log('[grove:listen] reactivate failed', error);
+      }
+
+      if (turn !== listenSeq.current || !mounted.current) {
+        console.log('[grove:listen] superseded before start');
+        return;
+      }
 
       const started = startListening(
         {
@@ -343,17 +367,20 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
             if (mounted.current) setHeard(text);
           },
           onFinal: (text) => {
+            console.log('[grove:listen] final', JSON.stringify(text));
             void exchange(text);
           },
           onLevel: (value) => {
             if (mounted.current) setLevel(value);
           },
           onError: (message) => {
+            console.log('[grove:listen] ERROR', message);
             if (!mounted.current) return;
             setProblem(message);
             setCaption(message);
           },
           onEnd: () => {
+            console.log('[grove:listen] end');
             if (!mounted.current) return;
             setLevel(0);
             // Only fall back to idle if nothing downstream took over — a final
@@ -367,6 +394,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         }
       );
 
+      console.log('[grove:listen] startListening returned', started);
       if (!started) {
         setState(restingState());
       }
@@ -392,17 +420,19 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // Barge-in. Stop talking and start listening, in that order.
     if (current === 'speaking' || isSpeaking()) {
       stopSpeaking();
-      beginListening(false);
+      void beginListening(false);
       return;
     }
     if (current === 'listening') {
+      // Also invalidates a start that is still waiting on the session.
+      listenSeq.current += 1;
       // Settle what's been said rather than discarding it.
       stopListening();
       return;
     }
     if (current === 'thinking' || current === 'working') return;
 
-    beginListening(false);
+    void beginListening(false);
   }, [beginListening]);
 
   const say = useCallback(
@@ -443,7 +473,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         case 'hold-start':
           // A held button means "I am still talking" — keep the recogniser
           // open rather than letting it endpoint at the first pause.
-          if (live.current.state !== 'listening') beginListening(true);
+          if (live.current.state !== 'listening') void beginListening(true);
           break;
         case 'hold-end':
           if (live.current.state === 'listening') stopListening();

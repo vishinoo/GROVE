@@ -25,6 +25,22 @@
 
 import { fetchJson } from './net';
 
+/**
+ * Weather codes as a person would say them, not as WMO defines them.
+ * Spoken aloud, "partly cloudy" beats "code 3".
+ */
+const SKY: Record<number, string> = {
+  0: 'clear', 1: 'mostly clear', 2: 'partly cloudy', 3: 'overcast',
+  45: 'foggy', 48: 'freezing fog',
+  51: 'drizzling', 53: 'drizzling', 55: 'drizzling heavily',
+  61: 'raining lightly', 63: 'raining', 65: 'raining hard',
+  66: 'freezing rain', 67: 'freezing rain',
+  71: 'snowing lightly', 73: 'snowing', 75: 'snowing hard', 77: 'sleeting',
+  80: 'showery', 81: 'showery', 82: 'heavy showers',
+  85: 'snow showers', 86: 'snow showers',
+  95: 'thundery', 96: 'thundery with hail', 99: 'thundery with hail',
+};
+
 export type AbilityWhere = 'device' | 'server';
 
 /** Argument schema. Deliberately tiny — the router fills these from a sentence. */
@@ -86,8 +102,11 @@ const BRIEF: Ability = {
   name: 'Briefing',
   what: 'Reads out what moved — stocks, news, or the weather.',
   where: 'server',
-  wired: true,
-  needs: [],
+  // Honest until /api/grove/brief exists on Noctus. It was `true`, which meant
+  // the router picked it, Grove said it was checking, and nothing came back —
+  // the exact failure this flag is here to prevent.
+  wired: false,
+  needs: ['a briefing endpoint on Noctus'],
   args: {
     topic: { type: 'string', what: 'what to brief on, e.g. "my watchlist" or "the news"', required: true },
   },
@@ -179,7 +198,71 @@ const MUSIC: Ability = {
   run: unwired('music', 'this build has no music access yet.'),
 };
 
+/**
+ * Weather, and the first thing here that actually works end to end.
+ *
+ * Open-Meteo needs no key, no account and no server of ours, which makes it the
+ * one capability that can be real today rather than declared and stubbed. Two
+ * calls: a name to coordinates, then the forecast.
+ *
+ * `place` is filled by the router from the sentence, or from the memory block —
+ * someone who has said "I live in Bristol" has that fact in every prompt, so
+ * "what's the weather" resolves without asking. When it cannot be resolved,
+ * Grove asks rather than guessing a city.
+ */
+const WEATHER: Ability = {
+  id: 'weather.now',
+  name: 'Weather',
+  what: 'Says what it is doing outside, and whether to take a coat.',
+  where: 'server',
+  wired: true,
+  needs: [],
+  args: {
+    place: { type: 'string', what: 'the town or city; use what you know of where they live' },
+  },
+  examples: ["what's the weather", 'do I need a coat', 'is it going to rain today'],
+  run: async (args) => {
+    const place = (args.place || '').trim();
+    if (!place) {
+      return { ok: false, spoken: 'Where? I do not know where you are.' };
+    }
+
+    try {
+      const geo = await fetch(
+        'https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name=' +
+          encodeURIComponent(place)
+      );
+      const found = (await geo.json())?.results?.[0];
+      if (!found) return { ok: false, spoken: `I could not find ${place}.` };
+
+      const url =
+        `https://api.open-meteo.com/v1/forecast?latitude=${found.latitude}` +
+        `&longitude=${found.longitude}&current=temperature_2m,weather_code` +
+        '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max' +
+        '&forecast_days=1&timezone=auto';
+      const data = await (await fetch(url)).json();
+
+      const now = Math.round(data.current.temperature_2m);
+      const sky = SKY[data.current.weather_code] ?? 'hard to say';
+      const high = Math.round(data.daily.temperature_2m_max[0]);
+      const rain = data.daily.precipitation_probability_max[0] ?? 0;
+
+      // Written to be heard: the number, the sky, and the one thing you would
+      // actually change your mind about on the way out of the door.
+      const coat = rain >= 50 ? ' Take a coat.' : rain >= 25 ? ' Might catch a shower.' : '';
+      return {
+        ok: true,
+        spoken: `${now} degrees and ${sky} in ${found.name}, up to ${high}.${coat}`,
+        detail: `${rain}% chance of rain`,
+      };
+    } catch {
+      return { ok: false, spoken: 'Could not reach the weather just then.' };
+    }
+  },
+};
+
 export const ABILITIES: Ability[] = [
+  WEATHER,
   BRIEF,
   MAIL,
   CALENDAR_READ,

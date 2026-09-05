@@ -59,6 +59,8 @@ export type GroveReply = {
   schedule?: Schedule;
   /** An ability that fits but is not built or connected yet. */
   blocked?: Ability;
+  /** A short name for the standing job, when this is one. */
+  title?: string;
   /** A fact worth keeping, pulled locally from what was said. */
   fact?: { key: string; value: string };
 };
@@ -110,6 +112,24 @@ export function detectActIntent(text: string): boolean {
   if (QUESTION_OPENERS.test(t)) return false;
   if (t.endsWith('?')) return false;
   return WORK_VERB.test(t);
+}
+
+/**
+ * Whether a reply promises something that will never arrive.
+ *
+ * Grove has exactly one turn. Nothing runs in the background, and no follow-up
+ * message is ever sent, so "let me check that for you" is not a stall — it is
+ * the end of the conversation, with the person still waiting. The prompt
+ * forbids it; this catches the times the model does it anyway.
+ */
+const PROMISES = [
+  /\b(?:let me|i'?ll|i will|going to|gonna|hang on|one (?:sec|moment|minute)|give me a (?:sec|moment|minute))\b.{0,40}\b(?:check|look|find|see|fetch|get|grab|pull|search|have a look)\b/i,
+  /\b(?:checking|looking (?:it |that )?up|fetching|getting that|on it|right (?:back|away))\b/i,
+  /\bi'?ll (?:let you know|get back to you|tell you|come back)\b/i,
+];
+
+export function promisesAction(text: string): boolean {
+  return PROMISES.some((p) => p.test(text));
 }
 
 /* -------------------------------------------------------------- routing */
@@ -204,6 +224,7 @@ export async function askGrove(
       args: light?.args ?? {},
       schedule: schedule ?? undefined,
       blocked: blocked ?? undefined,
+      title: light?.title ?? (schedule ? titleFrom(userText) : undefined),
       fact,
     };
   };
@@ -218,7 +239,15 @@ export async function askGrove(
     return settle(`${when}. I'll tell you what comes back.${caveat}`);
   }
 
-  if (light?.text) return settle(light.text);
+  // The model still sometimes says it is off to check something while naming no
+  // ability. There is no later turn to redeem that with, so the promise is
+  // caught here and replaced rather than spoken.
+  if (light?.text) {
+    if (!chosen && promisesAction(light.text)) {
+      return settle(blocked ? offlineLine(userText, { acting, blocked }) : fallback.cannot());
+    }
+    return settle(light.text);
+  }
   return settle('');
 }
 
@@ -258,6 +287,50 @@ function readableNeeds(keys: string[]): string {
   const words = keys.map((k) => k.replace(/[_-]/g, ' '));
   if (words.length <= 1) return words[0] ?? 'something connected';
   return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
+}
+
+/**
+ * A short name for a standing job, without a model.
+ *
+ * The fallback for when the cheap tier is unconfigured or declined to give one.
+ * Strips the scheduling clause and the polite preamble, because "Also, every
+ * day I'd like to go through on Google and find the..." is what someone says
+ * and never what they would write on a card.
+ */
+export function titleFrom(text: string): string {
+  // The schedule goes first. Stripping the preamble before it means a sentence
+  // like "Also, every day I'd like to..." loses "Also," and then hits "every
+  // day", so the politeness strip never fires and the title comes out as
+  // "I'd like to go" — the words that carry the least meaning in the sentence.
+  let t = ` ${text.trim()} `;
+
+  t = t.replace(
+    /\s(?:every|each)\s+(?:day|morning|evening|night|week|weekday|working day|monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?\s/gi,
+    ' '
+  );
+  t = t.replace(/\sat\s+(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|half\s+\w+|quarter\s+(?:past|to)\s+\w+)\s/gi, ' ');
+  t = t.replace(/\s(?:daily|weekly|hourly|every hour)\s/gi, ' ');
+
+  // Then peel leading filler until nothing changes — one pass is not enough,
+  // because "also" and "I'd like to" and "can you" stack up in real speech.
+  const LEADERS = [
+    /^\s*(?:also|and|so|ok(?:ay)?|hey|right|well|um|erm)[,\s]+/i,
+    /^\s*(?:i(?:'d|’d| would)?\s+(?:like|want)(?:\s+you)?(?:\s+to)?)\s+/i,
+    /^\s*(?:can|could|would)\s+you(?:\s+please)?\s+/i,
+    /^\s*(?:please|i need(?:\s+you)?\s+to|set up|create|make me|give me)\s+/i,
+  ];
+  for (let pass = 0; pass < 4; pass++) {
+    const before = t;
+    for (const rule of LEADERS) t = t.replace(rule, '');
+    if (t === before) break;
+  }
+
+  t = t.replace(/\s{2,}/g, ' ').replace(/^[,\s]+|[,.\s]+$/g, '');
+
+  const words = t.split(/\s+/).filter(Boolean).slice(0, 4);
+  const name = words.join(' ');
+  if (!name) return 'Standing job';
+  return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
 /** The request as an activity row should label it: one trimmed sentence. */

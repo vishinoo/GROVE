@@ -108,6 +108,9 @@ export function AppIcon({ name, size = 30 }: { name: AppIconName; size?: number 
  */
 export function iconForKey(key: string): AppIconName | null {
   const k = key.toLowerCase();
+  // Ability ids come through here too — "weather.now", "calendar.read".
+  if (k.startsWith('weather')) return 'maps';
+  if (k.startsWith('brief')) return 'notes';
   if (k.includes('music') || k.includes('spotify')) return 'music';
   if (k.includes('message') || k.includes('sms')) return 'messages';
   if (k.includes('calendar')) return 'calendar';
