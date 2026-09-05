@@ -408,6 +408,16 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     };
   }, [status, press, beginListening]);
 
+  /**
+   * The volume-down fallback follows the preference, but only once the session
+   * is actually held — enabling it against a module that is not holding the
+   * audio session would install a volume observer with nothing to observe.
+   */
+  useEffect(() => {
+    if (!armed) return;
+    void trigger.setVolumeFallback(persona.volumeTrigger);
+  }, [armed, persona.volumeTrigger]);
+
   // Signing out must not leave Grove holding the audio session and the remote.
   useEffect(() => {
     if (status === 'signed-out') {

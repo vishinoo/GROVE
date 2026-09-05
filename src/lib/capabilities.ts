@@ -90,6 +90,11 @@ export function reducedModeReason(): string | null {
   if (Platform.OS === 'web') {
     return 'The web preview can’t listen or reach your ring. Grove runs for real on iOS.';
   }
+  // Android reaches here with nothing missing: `full` requires the ring, and
+  // the ring is iOS-only, so it can never be true. Without this guard the
+  // notice read "This build is missing nothing" — permanently, on both the
+  // Talk and Settings screens. There is nothing to fix, so there is no notice.
+  if (report.missing.length === 0) return null;
   return `This build is missing ${readableList(report.missing)}. Grove needs a development build for those — in Expo Go you can still type to it and hear it reply.`;
 }
 

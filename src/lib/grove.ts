@@ -64,12 +64,26 @@ export function newTurn(role: Turn['role'], text: string, extra: Partial<Turn> =
 const QUESTION_OPENERS =
   /^\s*(what|what'?s|how|how'?s|why|when|where|who|which|whose|should|shall|can|could|would|will|is|are|was|were|do|does|did|have|has|am|any|tell me|explain|remind me what)\b/i;
 
-const ACT_PATTERNS = [
-  // An explicit go-ahead, usually answering something Grove just offered.
-  /^\s*(do it|go|go on|go ahead|yes(,?\s*(please|do( it)?))?|please do|run it|sort it|handle it|get on with it|make it so|now)\b/i,
-  // A verb of work aimed at Grove.
-  /\b(make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up)\b/i,
-];
+/**
+ * A go-ahead is the WHOLE sentence, not a word it happens to start with.
+ *
+ * Anchored at both ends, and that anchoring is the entire point. Matching on a
+ * prefix meant "Now what's on my calendar?" and "Go on, what did she say?" both
+ * read as instructions — they start with "now" and "go on" — and went on to
+ * pick a tool and run it. Those are questions. A gate that fires on a question
+ * is the exact failure this file exists to prevent, so nothing counts unless
+ * the user said only the go-ahead and nothing else.
+ */
+const BARE_GO_AHEAD =
+  /^\s*(?:(?:ok|okay|yes|yeah|yep|sure|right)[,.\s]+)?(?:please\s+)?(?:do it|do that|go ahead|go on|run it|sort it|handle it|get on with it|make it so|please do|go|now)[.!\s]*$/i;
+
+/** "yes", "yeah", "ok", "yes please" — answering something Grove just offered. */
+const BARE_YES =
+  /^\s*(?:(?:ok|okay|yes|yeah|yep|sure)(?:[,\s]+please)?|please do)[.!\s]*$/i;
+
+// A verb of work aimed at Grove.
+const WORK_VERB =
+  /\b(make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up)\b/i;
 
 /**
  * Whether the user wants something done, rather than discussed.
@@ -80,11 +94,11 @@ const ACT_PATTERNS = [
 export function detectActIntent(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
-  // A bare go-ahead beats the question test: "can you do it" is not a question.
-  if (ACT_PATTERNS[0].test(t)) return true;
+  // A bare go-ahead beats the question test, because it is the whole sentence.
+  if (BARE_GO_AHEAD.test(t) || BARE_YES.test(t)) return true;
   if (QUESTION_OPENERS.test(t)) return false;
   if (t.endsWith('?')) return false;
-  return ACT_PATTERNS[1].test(t);
+  return WORK_VERB.test(t);
 }
 
 /* ------------------------------------------------------------- the model */

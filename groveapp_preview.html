@@ -227,6 +227,34 @@ section{padding:var(--s8) 0;border-top:1px solid var(--line)}
 }
 .spark .needs{display:flex;gap:3px}
 
+/* First run. Each step is one decision or one thing to go and do, and the
+   ring step proves the hardware works before you are asked to trust it. */
+.ob{display:flex;flex-direction:column;height:100%}
+.ob .skip{text-align:right;font-size:10px;color:var(--muted)}
+.ob .mid{flex:1;display:flex;flex-direction:column;justify-content:center;padding:6px 0}
+.ob h4{font-size:19px;font-weight:700;letter-spacing:-.03em;line-height:1.2;margin:14px 0 7px}
+.ob p{margin:0;font-size:10.5px;line-height:1.6;color:var(--ink-soft)}
+.ob .todo{
+  margin-top:12px;padding:10px 11px;border-radius:var(--r-md);
+  background:var(--field);border:1px solid var(--line);
+  font-size:10px;line-height:1.55;color:var(--ink);
+}
+.ob .dots{display:flex;gap:5px;justify-content:center;margin-bottom:11px}
+.ob .dots i{width:5px;height:5px;border-radius:3px;background:var(--line);display:block}
+.ob .dots i.on{width:17px;background:var(--ink)}
+.btn-wide{
+  width:100%;height:36px;border-radius:var(--r-md);border:0;
+  background:var(--ink);color:#fff;font-family:inherit;
+  font-size:12px;font-weight:600;cursor:pointer;
+}
+.sig{
+  display:flex;align-items:center;gap:7px;padding:6px 0;
+  border-top:1px solid var(--line-soft);font-size:9.5px;
+}
+.sig:first-child{border-top:0}
+.sig .cmd{flex:1;color:var(--ink);font-weight:500}
+.sig .tag{color:var(--muted);font-size:8.5px}
+
 .pipe{height:1px;background:var(--line-soft);margin:12px 0}
 .grow{flex:1;min-height:0}
 
@@ -747,6 +775,137 @@ footer .built{font-size:12.5px;color:var(--muted)}
 
   </div>
 </div>
+
+<section>
+<div class="wrap">
+  <div class="section-head">
+    <h2>First run is a checklist, not a tour.</h2>
+    <p>
+      Two of the four steps happen in iOS Settings, where Grove cannot reach.
+      Someone who skips them has an app that looks fine and a pair of glasses
+      that does nothing — so the intro sends you to do them, then proves they
+      worked before it lets you past.
+    </p>
+  </div>
+
+  <div class="screens">
+
+    <!-- 1 ------------------------------------------------------------- -->
+    <article class="screen-note">
+      <div class="phone"><div class="viewport"><div class="ob">
+        <div class="skip">Skip</div>
+        <div class="mid">
+          <div class="orb" style="width:104px;height:104px;margin:0 0 4px">
+            <span class="lobe l1" style="width:68px;height:68px;filter:blur(15px)"></span>
+            <span class="lobe l2" style="width:64px;height:64px;filter:blur(15px)"></span>
+            <span class="lobe l3" style="width:58px;height:58px;filter:blur(15px)"></span>
+            <span class="lobe l4" style="width:66px;height:66px;filter:blur(15px)"></span>
+          </div>
+          <h4>What should I answer to?</h4>
+          <p>Pick anything. You will be saying it out loud in public, so pick something you do not mind saying.</p>
+          <div class="todo" style="display:flex;align-items:center;gap:8px">
+            <span style="font-weight:600;font-size:11.5px">Buddy</span>
+            <span style="flex:1"></span>
+            <span style="color:var(--muted);font-size:9.5px">Hey Buddy&hellip;</span>
+          </div>
+        </div>
+        <div class="dots"><i class="on"></i><i></i><i></i><i></i></div>
+        <button class="btn-wide">Continue</button>
+      </div></div></div>
+      <h3>Name it</h3>
+      <p>First, because everything after this refers to it by name.</p>
+    </article>
+
+    <!-- 2 ------------------------------------------------------------- -->
+    <article class="screen-note">
+      <div class="phone"><div class="viewport"><div class="ob">
+        <div class="skip">Skip</div>
+        <div class="mid">
+          <svg width="34" height="34" style="color:var(--ink)" aria-hidden="true"><use href="#u-glasses"/></svg>
+          <h4>Pair your glasses</h4>
+          <p>They are an ordinary Bluetooth headset. iOS does the routing, so there is nothing to set up in here.</p>
+          <div class="todo">
+            Settings &rsaquo; Bluetooth, and pair them. They must connect as a
+            <b>headset</b>, not playback only — otherwise Grove talks into your
+            ear while the phone listens.
+          </div>
+          <div class="ncard" style="margin-top:10px">
+            <svg class="gicon sm" style="color:var(--ink-soft)" aria-hidden="true"><use href="#u-glasses"/></svg>
+            <div class="body"><div class="t">Ray-Ban Display</div><div class="d">Headset &mdash; microphone works</div></div>
+            <span class="dotm on"></span>
+          </div>
+        </div>
+        <div class="dots"><i></i><i class="on"></i><i></i><i></i></div>
+        <button class="btn-wide">Continue</button>
+      </div></div></div>
+      <h3>Glasses</h3>
+      <p>
+        The card underneath is live. It turns green only once they are actually
+        connected with a microphone, so the step verifies itself instead of
+        asking you to take it on trust.
+      </p>
+    </article>
+
+    <!-- 3 ------------------------------------------------------------- -->
+    <article class="screen-note">
+      <div class="phone"><div class="viewport"><div class="ob">
+        <div class="skip">Skip</div>
+        <div class="mid">
+          <svg width="34" height="34" style="color:var(--ink)" aria-hidden="true"><use href="#u-ring"/></svg>
+          <h4>Press your ring</h4>
+          <p>The ring reaches Grove as a media remote — the same signal a headset&rsquo;s play button sends.</p>
+          <div class="todo">
+            Pair it in Settings, then press it a few times. Whatever it sends
+            shows up below.
+          </div>
+          <div class="ncard" style="margin-top:10px;display:block;padding:4px 11px 6px">
+            <div class="sig"><span class="dotm on"></span><span class="cmd">toggle</span><span class="tag">used</span></div>
+            <div class="sig"><span class="dotm"></span><span class="cmd">pause</span><span class="tag">merged</span></div>
+            <div class="sig"><span class="dotm on"></span><span class="cmd">toggle</span><span class="tag">used</span></div>
+          </div>
+        </div>
+        <div class="dots"><i></i><i></i><i class="on"></i><i></i></div>
+        <button class="btn-wide">This is my ring</button>
+      </div></div></div>
+      <h3>Ring</h3>
+      <p>
+        The single most useful screen in the app. Nobody ships a spec sheet with
+        a twelve-pound ring, so rather than explain what it ought to send, Grove
+        shows what yours actually sends — and "merged" is it telling you it saw
+        the double signal and treated it as one press.
+      </p>
+    </article>
+
+    <!-- 4 ------------------------------------------------------------- -->
+    <article class="screen-note">
+      <div class="phone"><div class="viewport"><div class="ob">
+        <div class="skip">&nbsp;</div>
+        <div class="mid">
+          <svg width="34" height="34" style="color:var(--ink)" aria-hidden="true"><use href="#u-plug"/></svg>
+          <h4>One thing to know</h4>
+          <p>
+            iOS will not let any app be woken from fully closed by a button
+            press. Grove has to be running for your ring to reach it.
+          </p>
+          <div class="todo">
+            Backgrounded is fine. Locked is fine. Pocketed is fine.<br>
+            <b>Swiping Grove away turns the ring off</b> until you open it again.
+          </div>
+        </div>
+        <div class="dots"><i></i><i></i><i></i><i class="on"></i></div>
+        <button class="btn-wide">Sign in with Noctus</button>
+      </div></div></div>
+      <h3>The limit</h3>
+      <p>
+        Said up front rather than discovered on a walk. It is the one thing
+        about Grove that cannot be fixed, so it is the last thing you read
+        before signing in.
+      </p>
+    </article>
+
+  </div>
+</div>
+</section>
 
 <section>
 <div class="wrap">

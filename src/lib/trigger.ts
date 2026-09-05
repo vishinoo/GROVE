@@ -33,6 +33,7 @@ import {
   onRemoteCommand,
   onRouteChange,
   requestMicrophone,
+  setVolumeTrigger as setNativeVolumeTrigger,
   type AudioRoute,
   type RemoteCommand,
   type RemoteEvent,
@@ -123,6 +124,23 @@ export async function arm(): Promise<boolean> {
 
   resident = true;
   return true;
+}
+
+/**
+ * Turn the volume-down fallback on or off.
+ *
+ * Kept separate from `arm` because it is not part of the normal story: it is
+ * for hardware that cannot reach the remote command centre at all. The J09
+ * ring this was written for sends `AC Back`, `VolumeDown` and `Sleep`, none of
+ * which iOS forwards to an app — so without this its middle button is the only
+ * one that can be made to work, and only indirectly.
+ *
+ * The cost is real and the Settings copy says so: while this is on, the
+ * phone's own volume-down button triggers Grove too.
+ */
+export async function setVolumeFallback(enabled: boolean): Promise<void> {
+  if (!isAvailable()) return;
+  await setNativeVolumeTrigger(enabled);
 }
 
 export async function disarm(): Promise<void> {

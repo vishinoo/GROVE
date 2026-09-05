@@ -20,7 +20,14 @@ export type RemoteCommand =
   | 'next'
   | 'previous'
   | 'seek-forward'
-  | 'seek-backward';
+  | 'seek-backward'
+  /**
+   * Not a transport command at all — a volume-down press, inferred from the
+   * system volume falling. It arrives on the same event because by the time it
+   * reaches JS it means the same thing: the user pressed their trigger. See
+   * `setVolumeTrigger` for why this exists and what it costs.
+   */
+  | 'volume-down';
 
 export type RemoteEvent = {
   command: RemoteCommand;
@@ -52,6 +59,8 @@ type Native = {
   isHolding(): boolean;
   getRoute(): AudioRoute;
   requestMicrophone(): Promise<boolean>;
+  setVolumeTrigger(enabled: boolean): Promise<void>;
+  isVolumeTriggerOn(): boolean;
   addListener(event: string, listener: (payload: never) => void): EventSubscription;
 };
 
@@ -105,6 +114,23 @@ export function getRoute(): AudioRoute {
 
 export async function requestMicrophone(): Promise<boolean> {
   return (await native?.requestMicrophone()) ?? false;
+}
+
+/**
+ * Watch the system volume and treat a fall as a press.
+ *
+ * For rings that send no transport commands at all — only `VolumeDown`, which
+ * iOS consumes itself and never delivers to an app. Off unless asked for,
+ * because it takes volume-down away from the user and the phone's own
+ * volume-down button fires it too; iOS reports the new level and never who
+ * caused it, so the two cannot be told apart.
+ */
+export async function setVolumeTrigger(enabled: boolean): Promise<void> {
+  await native?.setVolumeTrigger(enabled);
+}
+
+export function isVolumeTriggerOn(): boolean {
+  return native?.isVolumeTriggerOn() ?? false;
 }
 
 export function onRemoteCommand(listener: (event: RemoteEvent) => void): () => void {

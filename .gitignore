@@ -31,8 +31,11 @@ yarn-error.*
 *.pem
 
 # local env files (real API keys — never commit)
+# Broad on purpose: `.env` alone did not cover `.env.bak`, `.env.backup` or
+# `.env.old`, any of which holds the same live keys as `.env` itself.
 .env
-.env*.local
+.env.*
+!.env.example
 
 # typescript
 *.tsbuildinfo

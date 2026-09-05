@@ -216,6 +216,25 @@ export default function Settings() {
             value={armed ? 'Armed' : 'Off'}
             tone={armed ? 'live' : 'off'}
           />
+          <Row
+            label="Use the volume button"
+            hint={
+              !report.remote
+                ? 'Needs a development build.'
+                : persona.volumeTrigger
+                  ? 'Volume-down is Grove’s trigger now. The phone’s own volume-down button fires it too — iOS reports the new level, never who pressed it.'
+                  : 'For a ring that only sends volume, Home or Sleep. iOS hands none of those to an app, but the volume changing is something Grove can see.'
+            }
+            right={
+              <Switch
+                value={persona.volumeTrigger}
+                onValueChange={(volumeTrigger) => set({ volumeTrigger })}
+                disabled={!report.remote}
+                trackColor={{ true: palette.mark, false: palette.sunken }}
+                thumbColor={palette.paper}
+              />
+            }
+          />
         </Card>
 
         <Diagnostics />

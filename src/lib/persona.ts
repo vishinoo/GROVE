@@ -39,6 +39,16 @@ export type Persona = {
   delivery: Delivery;
   /** Keep recognition on-device. Off trades privacy for proper nouns. */
   preferOnDevice: boolean;
+  /**
+   * Treat the system volume falling as a trigger press.
+   *
+   * Off by default and deliberately so — it is for rings whose buttons iOS
+   * never forwards to an app, and while it is on the phone's own volume-down
+   * button triggers Grove as well. It lives here rather than in its own store
+   * because this is already where a preference that is not about manner —
+   * `preferOnDevice` — is kept and persisted.
+   */
+  volumeTrigger: boolean;
 };
 
 export type Preset = {
@@ -105,6 +115,7 @@ export const DEFAULT_PERSONA: Persona = {
   manner: PRESETS[0].manner,
   delivery: PRESETS[0].delivery,
   preferOnDevice: true,
+  volumeTrigger: false,
 };
 
 /** Beyond this, a "manner" is not a manner — it is a second system prompt. */
@@ -174,6 +185,7 @@ export async function loadPersona(): Promise<Persona> {
         voiceId: parsed.delivery?.voiceId,
       },
       preferOnDevice: parsed.preferOnDevice ?? DEFAULT_PERSONA.preferOnDevice,
+      volumeTrigger: parsed.volumeTrigger ?? DEFAULT_PERSONA.volumeTrigger,
     };
   } catch {
     return DEFAULT_PERSONA;

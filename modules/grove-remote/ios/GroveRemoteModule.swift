@@ -1,6 +1,7 @@
 import AVFoundation
 import ExpoModulesCore
 import MediaPlayer
+import UIKit
 
 /**
  * The ring, and the glasses.
@@ -34,6 +35,25 @@ public class GroveRemoteModule: Module {
   private var keepAlive: AVAudioPlayer?
   /// Whether we have taken the session and registered for the remote.
   private var holding = false
+  /// Tokens for the block-based notification observers, so they can actually
+  /// be removed again. See observeSystem().
+  private var observers: [NSObjectProtocol] = []
+
+  /// Offscreen, and present for two reasons: it is the only public way to set
+  /// the system volume, and having one in the hierarchy suppresses the volume
+  /// HUD that would otherwise flash on every trigger press.
+  private var volumeView: MPVolumeView?
+  private var volumeObservation: NSKeyValueObservation?
+  private var volumeTriggerOn = false
+  /// The level we return to after each press, so there is always room to go
+  /// down again. Kept off both ends of the range for that reason.
+  private var volumeAnchor: Float = 0.5
+  /// Our own correction changes the volume too. Without a blind window it
+  /// reads back as the user turning it up.
+  private var ignoreVolumeUntil = Date.distantPast
+
+  private static let anchorFloor: Float = 0.15
+  private static let anchorCeiling: Float = 0.85
 
   public func definition() -> ModuleDefinition {
     Name("GroveRemote")
@@ -62,6 +82,8 @@ public class GroveRemoteModule: Module {
       self.unregisterRemote()
       MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
       self.holding = false
+      self.stopObserving()
+      DispatchQueue.main.async { self.stopVolumeTrigger() }
       try? AVAudioSession.sharedInstance().setActive(
         false, options: .notifyOthersOnDeactivation)
     }
@@ -73,9 +95,13 @@ public class GroveRemoteModule: Module {
      * shows it verbatim rather than assuming.
      */
     Function("isHolding") { () -> Bool in
-      self.holding && AVAudioSession.sharedInstance().isOtherAudioPlaying == false
-        ? true
-        : self.holding
+      // Whether we still hold the session, which is all we can honestly know.
+      // This used to read `holding && !isOtherAudioPlaying ? true : holding`,
+      // which is just `holding` — the isOtherAudioPlaying test could not
+      // change the result and only implied a check that was never happening.
+      // Losing the now-playing role to another app is not observable here; JS
+      // re-arms on every foreground for exactly that reason.
+      self.holding
     }
 
     /**
@@ -101,9 +127,35 @@ public class GroveRemoteModule: Module {
       }
     }
 
+    /**
+     * The volume-button trigger — a last resort for rings that send no
+     * transport commands at all.
+     *
+     * Some cheap remotes emit only `VolumeDown`, which iOS swallows into the
+     * system volume HUD and never delivers to an app. The press is invisible,
+     * but its *effect* is not: `outputVolume` changes. Watching that turns an
+     * otherwise unreachable button into a usable trigger.
+     *
+     * Opt-in, and it has to be, because it is genuinely lossy: it takes
+     * volume-down away from the user, and the phone's own volume-down button
+     * fires it too. There is no way to tell the two apart — all iOS reports is
+     * the new level, never who caused it.
+     */
+    AsyncFunction("setVolumeTrigger") { (enabled: Bool) in
+      DispatchQueue.main.async {
+        if enabled { self.startVolumeTrigger() } else { self.stopVolumeTrigger() }
+      }
+    }
+
+    Function("isVolumeTriggerOn") { () -> Bool in
+      self.volumeTriggerOn
+    }
+
     OnDestroy {
       self.stopKeepAlive()
       self.unregisterRemote()
+      self.stopObserving()
+      self.stopVolumeTrigger()
     }
   }
 
@@ -274,22 +326,117 @@ public class GroveRemoteModule: Module {
     ]
   }
 
+  // MARK: - Volume trigger
+
+  private func startVolumeTrigger() {
+    guard !volumeTriggerOn else { return }
+
+    installVolumeView()
+
+    let session = AVAudioSession.sharedInstance()
+    volumeAnchor = min(max(session.outputVolume, Self.anchorFloor), Self.anchorCeiling)
+    setSystemVolume(volumeAnchor)
+
+    volumeObservation = session.observe(\.outputVolume, options: [.new]) {
+      [weak self] _, change in
+      guard let self, let value = change.newValue else { return }
+      DispatchQueue.main.async { self.handleVolume(value) }
+    }
+
+    volumeTriggerOn = true
+  }
+
+  private func stopVolumeTrigger() {
+    volumeObservation?.invalidate()
+    volumeObservation = nil
+    volumeView?.removeFromSuperview()
+    volumeView = nil
+    volumeTriggerOn = false
+  }
+
+  /**
+   * Only a fall counts as a press.
+   *
+   * A rise is the user deliberately turning the volume up — on this hardware
+   * the ring cannot send one — so it is followed rather than fought, which
+   * leaves the phone's volume-up button working normally. The cost is that
+   * volume-down belongs to Grove for as long as this is switched on.
+   */
+  private func handleVolume(_ value: Float) {
+    guard volumeTriggerOn, Date() >= ignoreVolumeUntil else { return }
+
+    if value < volumeAnchor - 0.005 {
+      sendEvent(
+        "onRemoteCommand",
+        ["command": "volume-down", "at": Date().timeIntervalSince1970])
+      restoreVolume()
+    } else if value > volumeAnchor + 0.005 {
+      volumeAnchor = min(max(value, Self.anchorFloor), Self.anchorCeiling)
+    }
+  }
+
+  /**
+   * Put the level back so the next press has somewhere to fall to.
+   *
+   * Deferred rather than immediate: setting the volume inside the observation
+   * that the volume changed is a good way to fight the system's own animation
+   * and lose.
+   */
+  private func restoreVolume() {
+    ignoreVolumeUntil = Date().addingTimeInterval(0.6)
+    let target = volumeAnchor
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+      self?.setSystemVolume(target)
+    }
+  }
+
+  private func setSystemVolume(_ value: Float) {
+    guard let slider = volumeView?.subviews.compactMap({ $0 as? UISlider }).first else { return }
+    slider.value = value
+    slider.sendActions(for: .valueChanged)
+  }
+
+  private func installVolumeView() {
+    guard volumeView == nil, let window = Self.hostWindow() else { return }
+    // Offscreen rather than hidden: a view with `isHidden` set does not
+    // suppress the volume HUD, and an unattached one cannot set the volume.
+    let view = MPVolumeView(frame: CGRect(x: -3000, y: -3000, width: 1, height: 1))
+    view.alpha = 0.001
+    view.isUserInteractionEnabled = false
+    window.addSubview(view)
+    volumeView = view
+  }
+
+  private static func hostWindow() -> UIWindow? {
+    let windows = UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+      .flatMap { $0.windows }
+    return windows.first { $0.isKeyWindow } ?? windows.first
+  }
+
   // MARK: - System notifications
 
   private func observeSystem() {
     let centre = NotificationCenter.default
-    centre.removeObserver(self)
+    // These are block-based observers, so the thing to remove is the token
+    // addObserver returns — NOT `self`, which was never registered as an
+    // observer and so matched nothing. activate() runs on every foreground and
+    // after every interruption, so each call used to leave another live pair
+    // behind: one route change then fired N events, and one interruption ran N
+    // handlers that each re-configured the session and re-notified JS, which
+    // called activate() again.
+    stopObserving()
 
-    centre.addObserver(
+    observers.append(centre.addObserver(
       forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
     ) { [weak self] _ in
       guard let self else { return }
       self.sendEvent("onRouteChange", self.describeRoute())
-    }
+    })
 
     // A phone call takes the session away and does not give it back. Telling
     // JS lets it re-activate on the far side rather than silently going deaf.
-    centre.addObserver(
+    observers.append(centre.addObserver(
       forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
     ) { [weak self] note in
       guard
@@ -303,7 +450,14 @@ public class GroveRemoteModule: Module {
         self?.publishNowPlaying(playing: true)
       }
       self?.sendEvent("onInterruption", ["type": type == .began ? "began" : "ended"])
-    }
+    })
+  }
+
+  /// Drops every notification observer this module registered.
+  private func stopObserving() {
+    let centre = NotificationCenter.default
+    for token in observers { centre.removeObserver(token) }
+    observers.removeAll()
   }
 
   // MARK: - Route
