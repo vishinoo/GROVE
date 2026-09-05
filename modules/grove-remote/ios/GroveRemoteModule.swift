@@ -1,5 +1,7 @@
 import AVFoundation
+import CoreLocation
 import ExpoModulesCore
+import MapKit
 import MediaPlayer
 import UIKit
 
@@ -51,6 +53,13 @@ public class GroveRemoteModule: Module {
   /// Our own correction changes the volume too. Without a blind window it
   /// reads back as the user turning it up.
   private var ignoreVolumeUntil = Date.distantPast
+
+  /// Set while a travelTime call is in flight. Only one at a time — a second
+  /// question replaces the first rather than queueing behind it.
+  private var locationManager: CLLocationManager?
+  private var locationPromise: Promise?
+  private var pendingDestination: String?
+  private var pendingDriving = true
 
   private static let anchorFloor: Float = 0.15
   private static let anchorCeiling: Float = 0.85
@@ -234,11 +243,89 @@ public class GroveRemoteModule: Module {
       ]
     }
 
+    /**
+     * How long to somewhere, and whether to leave now.
+     *
+     * MapKit rather than a routing API, because it needs no key, no account and
+     * no network call of ours — and because it is the same engine that answers
+     * the question on the lock screen, so the two never disagree.
+     *
+     * Returns the ETA in seconds and the distance; the phrasing is left to JS,
+     * where the rest of what Grove says out loud is written.
+     */
+    AsyncFunction("travelTime") { (destination: String, driving: Bool, promise: Promise) in
+      self.locationPromise = promise
+      self.pendingDestination = destination
+      self.pendingDriving = driving
+
+      DispatchQueue.main.async {
+        let manager = self.locationManager ?? CLLocationManager()
+        self.locationManager = manager
+        manager.delegate = self
+
+        switch manager.authorizationStatus {
+        case .notDetermined:
+          manager.requestWhenInUseAuthorization()
+        case .denied, .restricted:
+          self.settleLocation(["ok": false, "reason": "denied"])
+        default:
+          manager.requestLocation()
+        }
+      }
+    }
+
     OnDestroy {
       self.stopKeepAlive()
       self.unregisterRemote()
       self.stopObserving()
       self.stopVolumeTrigger()
+    }
+  }
+
+  // MARK: - Directions
+
+  /// Resolves the outstanding travelTime promise exactly once.
+  private func settleLocation(_ payload: [String: Any]) {
+    locationPromise?.resolve(payload)
+    locationPromise = nil
+    pendingDestination = nil
+  }
+
+  /**
+   * Turns a spoken place into a route from where you are standing.
+   *
+   * Geocoded rather than searched, then routed. "Home" and "work" are resolved
+   * before this is called — they are facts about a person, which is memory's
+   * job, not MapKit's.
+   */
+  private func route(from here: CLLocation, to destination: String) {
+    CLGeocoder().geocodeAddressString(destination) { [weak self] places, _ in
+      guard let self else { return }
+      guard let target = places?.first?.location else {
+        self.settleLocation(["ok": false, "reason": "notFound"])
+        return
+      }
+
+      let request = MKDirections.Request()
+      request.source = MKMapItem(placemark: MKPlacemark(coordinate: here.coordinate))
+      request.destination = MKMapItem(placemark: MKPlacemark(coordinate: target.coordinate))
+      request.transportType = self.pendingDriving ? .automobile : .walking
+      // One route: this is read aloud, and alternatives are unusable in your ear.
+      request.requestsAlternateRoutes = false
+
+      MKDirections(request: request).calculate { response, _ in
+        guard let best = response?.routes.first else {
+          self.settleLocation(["ok": false, "reason": "noRoute"])
+          return
+        }
+        self.settleLocation([
+          "ok": true,
+          "seconds": best.expectedTravelTime,
+          "metres": best.distance,
+          "name": places?.first?.name ?? destination,
+          "driving": self.pendingDriving,
+        ])
+      }
     }
   }
 
@@ -616,5 +703,37 @@ public class GroveRemoteModule: Module {
       "inputName": input?.portName ?? "",
       "inputPort": input?.portType.rawValue ?? "",
     ]
+  }
+}
+
+/**
+ * Location callbacks.
+ *
+ * A separate extension because CLLocationManagerDelegate is a different
+ * protocol with a different lifecycle from everything else in this module —
+ * it answers whenever iOS feels like it, not when it is asked.
+ */
+extension GroveRemoteModule: CLLocationManagerDelegate {
+  public func locationManager(
+    _ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]
+  ) {
+    guard let here = locations.last, let destination = pendingDestination else { return }
+    route(from: here, to: destination)
+  }
+
+  public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+    settleLocation(["ok": false, "reason": "noFix"])
+  }
+
+  public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+    switch manager.authorizationStatus {
+    case .authorizedWhenInUse, .authorizedAlways:
+      // Only if a question is still waiting — this also fires on a cold start.
+      if pendingDestination != nil { manager.requestLocation() }
+    case .denied, .restricted:
+      settleLocation(["ok": false, "reason": "denied"])
+    default:
+      break
+    }
   }
 }

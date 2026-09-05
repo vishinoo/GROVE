@@ -417,8 +417,63 @@ const WEATHER: Ability = {
   },
 };
 
+/**
+ * How long to get somewhere, and when to leave.
+ *
+ * MapKit, so no key and no account — the same engine that answers this on the
+ * lock screen, which means Grove and the phone never disagree about the ETA.
+ *
+ * "Home" and "work" resolve through memory rather than here: where you live is
+ * a fact about you, and memory.ts already carries it into every prompt, so the
+ * router fills the real place in before this ever runs.
+ */
+const DIRECTIONS: Ability = {
+  id: 'maps.eta',
+  name: 'Maps',
+  what: 'Says how long to somewhere, and when to leave.',
+  where: 'device',
+  wired: capabilities().remote,
+  needs: ['location-permission'],
+  args: {
+    to: { type: 'string', what: 'where to — use what you know of where they live or work', required: true },
+    how: { type: 'string', what: '"walking" if they said so, otherwise driving' },
+  },
+  examples: ['how long to get home', 'when should I leave for the office', 'how far is the station'],
+  run: async (args) => {
+    const to = (args.to || '').trim();
+    if (!to) return { ok: false, spoken: 'Where to?' };
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const remote = require('grove-remote') as typeof import('grove-remote');
+    const driving = !/walk|foot/i.test(args.how || '');
+    const result = await remote.travelTime(to, driving);
+
+    if (!result.ok) {
+      if (result.reason === 'denied') {
+        return { ok: false, spoken: 'I need location access. It is in iOS Settings.' };
+      }
+      if (result.reason === 'unavailable') {
+        return { ok: false, spoken: 'Directions need a development build.' };
+      }
+      if (result.reason === 'notFound') return { ok: false, spoken: `I could not find ${to}.` };
+      return { ok: false, spoken: `No route to ${to}.` };
+    }
+
+    const mins = Math.round((result.seconds ?? 0) / 60);
+    const km = (result.metres ?? 0) / 1000;
+    // Spoken, so minutes and one decimal at most — nobody acts on "23.4 minutes".
+    const how = driving ? '' : ' on foot';
+    return {
+      ok: true,
+      spoken: `${mins} minutes${how} to ${result.name ?? to}.`,
+      detail: `${km.toFixed(1)} km`,
+    };
+  },
+};
+
 export const ABILITIES: Ability[] = [
   WEATHER,
+  DIRECTIONS,
   MAIL_READ,
   MAIL_SEND,
   BRIEF,

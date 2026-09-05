@@ -31,6 +31,7 @@ import {
   isHolding,
   onInterruption,
   onRemoteCommand,
+  canSetKeepAlive,
   isVolumeTriggerOn,
   onRouteChange,
   setKeepAlive as setNativeKeepAlive,
@@ -172,6 +173,21 @@ export async function reactivate(): Promise<void> {
 }
 
 /**
+ * Go deaf to volume presses for a moment.
+ *
+ * Starting a recogniser moves the system volume — measured at roughly 700ms
+ * after the press, when its audio engine comes up — and the volume fallback
+ * cannot tell that movement from a finger. Unsuppressed it triggers a second
+ * listen, which stops the first, which is the "stuck on Listening, hears
+ * nothing" failure. Called at the start of every listen, not just the ones
+ * that re-take the session, because the echo comes from the recogniser rather
+ * than from the re-take.
+ */
+export function suppressVolumeTriggers(ms = 1400): void {
+  suppressVolumeUntil = Date.now() + ms;
+}
+
+/**
  * Let go of the audio graph so the recogniser can have it, and take it back
  * afterwards.
  *
@@ -180,7 +196,7 @@ export async function reactivate(): Promise<void> {
  * suspended and a ring that stops working until the app is reopened.
  */
 export async function setKeepAlive(playing: boolean): Promise<void> {
-  if (!isAvailable()) return;
+  if (!isAvailable() || !canSetKeepAlive()) return;
   await setNativeKeepAlive(playing);
 }
 

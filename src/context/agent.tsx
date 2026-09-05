@@ -380,33 +380,36 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       setHeard('');
       setLevel(0);
 
-      // The session lapses while backgrounded, and starting a recogniser
-      // against a lapsed one fails with a CoreAudio error that reads exactly
-      // like the ring not working. Done in the foreground too: the retrigger
-      // loop this used to cause is handled inside `reactivate` now, rather
-      // than by skipping the thing that makes recognition start at all.
-      try {
-        await trigger.reactivate();
-      } catch (error) {
-        console.log('[grove:listen] reactivate failed', error);
-      }
-
-      if (turn !== listenSeq.current || !mounted.current) {
-        // Leave the state alone: whoever superseded this turn owns it now.
-        // Setting it here is what stranded the UI on 'listening' with nothing
-        // recording, which no later press could escape.
-        return;
-      }
-
       setState('listening');
 
-      // Hand the audio graph to the recogniser. Must happen after the re-take,
-      // which starts the silence again, and must be undone on every way out.
-      try {
-        await trigger.setKeepAlive(false);
-      } catch (error) {
-        console.log('[grove:listen] keep-alive pause failed', error);
+      // Only out of the foreground.
+      //
+      // Someone wearing glasses starts talking the moment they press — they
+      // are not watching the screen for a cue — so the microphone has to be
+      // live immediately, and two round trips into native before recording is
+      // exactly the delay they would talk straight through. In the foreground
+      // the session is already held and neither call buys anything.
+      //
+      // Backgrounded is the opposite: the session has lapsed and the silence
+      // owns the audio graph, so recording cannot start until both are dealt
+      // with. There the delay is the price of it working at all.
+      if (AppState.currentState !== 'active') {
+        try {
+          await trigger.reactivate();
+          await trigger.setKeepAlive(false);
+        } catch (error) {
+          console.log('[grove:listen] session prepare failed', error);
+        }
+
+        if (turn !== listenSeq.current || !mounted.current) {
+          // Leave the state alone: whoever superseded this turn owns it now.
+          return;
+        }
       }
+
+      // Before the recogniser starts, because its engine coming up is what
+      // moves the volume and would otherwise read as a second press.
+      trigger.suppressVolumeTriggers();
 
       const started = startListening(
         {
@@ -434,7 +437,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
             clearSilence();
             // Unconditional, and not guarded by `mounted`: leaving the silence
             // paused is what would let iOS suspend Grove and kill the ring.
-            void trigger.setKeepAlive(true);
+            void trigger.setKeepAlive(true).catch(() => undefined);
             console.log('[grove:listen] end');
             if (!mounted.current) return;
             setLevel(0);
@@ -451,7 +454,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
       console.log('[grove:listen] startListening returned', started);
       if (!started) {
-        void trigger.setKeepAlive(true);
+        void trigger.setKeepAlive(true).catch(() => undefined);
         setState(restingState());
         return;
       }

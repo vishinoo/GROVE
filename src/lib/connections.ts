@@ -100,10 +100,10 @@ export const CONNECTIONS: Connection[] = [
   {
     key: 'maps',
     label: 'Maps',
-    what: 'When to leave',
+    what: 'How long, and when to leave',
     icon: 'maps',
     kind: 'device',
-    unlocks: [],
+    unlocks: ['maps.eta'],
   },
   {
     key: 'messages',
@@ -116,7 +116,9 @@ export const CONNECTIONS: Connection[] = [
     // There is no public API for reading iMessage or SMS on iOS, and no
     // entitlement that grants one. Same category as waking the app from
     // terminated with a ring press.
-    impossible: 'iOS gives no app access to your messages. Nothing can change that.',
+    impossible:
+      'iOS gives no app any way to read Messages, and no way to send one without ' +
+      'you tapping Send. No entitlement exists. A Shortcut is the only workaround.',
   },
 ];
 

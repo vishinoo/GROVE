@@ -62,7 +62,18 @@ export type MusicResult = {
   reason?: string;
 };
 
+export type TravelResult = {
+  ok: boolean;
+  seconds?: number;
+  metres?: number;
+  name?: string;
+  driving?: boolean;
+  /** 'denied' | 'notFound' | 'noRoute' | 'noFix' | 'unavailable' */
+  reason?: string;
+};
+
 type Native = {
+  travelTime(destination: string, driving: boolean): Promise<TravelResult>;
   activate(playSilence: boolean): Promise<void>;
   playMusic(query: string): Promise<MusicResult>;
   controlMusic(action: string): Promise<{ ok: boolean; title?: string }>;
@@ -146,6 +157,11 @@ export function nowPlaying(): { title: string; artist: string; playing: boolean 
   return native?.nowPlaying() ?? { title: '', artist: '', playing: false };
 }
 
+/** How long to somewhere from where you are standing, via MapKit. */
+export async function travelTime(destination: string, driving = true): Promise<TravelResult> {
+  return (await native?.travelTime(destination, driving)) ?? { ok: false, reason: 'unavailable' };
+}
+
 export async function requestMicrophone(): Promise<boolean> {
   return (await native?.requestMicrophone()) ?? false;
 }
@@ -171,7 +187,17 @@ export async function setVolumeTrigger(enabled: boolean): Promise<void> {
  * resumed — the silence is what keeps Grove from being suspended.
  */
 export async function setKeepAlive(playing: boolean): Promise<void> {
-  await native?.setKeepAlive(playing);
+  // Probed, not assumed. A binary built before this function existed still
+  // runs every other part of Grove, and the JS half is served by Metro so it
+  // is routinely newer than the native half it is talking to — exactly the
+  // situation the rest of this file is written to survive.
+  if (typeof native?.setKeepAlive !== 'function') return;
+  await native.setKeepAlive(playing);
+}
+
+/** Whether this binary can pause the silence. False on older builds. */
+export function canSetKeepAlive(): boolean {
+  return typeof native?.setKeepAlive === 'function';
 }
 
 export function isVolumeTriggerOn(): boolean {
