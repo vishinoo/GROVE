@@ -85,6 +85,8 @@ type Listener = (trigger: Trigger) => void;
 const listeners = new Set<Listener>();
 const signals: Signal[] = [];
 let lastAt = 0;
+/** Set by `reactivate`; volume presses inside this window are our own echo. */
+let suppressVolumeUntil = 0;
 let unsubscribes: (() => void)[] = [];
 let resident = false;
 
@@ -156,6 +158,12 @@ export async function setVolumeFallback(enabled: boolean): Promise<void> {
  */
 export async function reactivate(): Promise<void> {
   if (!isAvailable()) return;
+  // Re-configuring the session moves the reported output volume, and the
+  // volume fallback cannot tell that movement from a press. Left unguarded it
+  // triggers another listen, which re-takes the session, which moves the
+  // volume again — a loop that presents as "stuck on Listening" while the
+  // volume visibly bounces. So the fallback is blinded across the re-take.
+  suppressVolumeUntil = Date.now() + 800;
   await activate(true);
 }
 
@@ -211,6 +219,13 @@ export function clearSignals(): void {
  */
 function handleRemote(event: RemoteEvent): void {
   const at = event.at * 1000;
+
+  // Our own session re-take, not a finger. Recorded so the diagnostics panel
+  // shows it was seen and discarded rather than silently dropped.
+  if (event.command === 'volume-down' && Date.now() < suppressVolumeUntil) {
+    record(event, true);
+    return;
+  }
 
   if (event.command === 'seek-forward' || event.command === 'seek-backward') {
     record(event, false);

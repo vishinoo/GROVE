@@ -25,7 +25,21 @@ import type { AppIconName } from '@/components/app-icon';
 export type ConnectionKind = 'device' | 'account';
 
 export type Connection = {
+  /**
+   * The key that comes back from /api/credentials once this is connected.
+   *
+   * NOT the same as the provider you start the flow with, and conflating them
+   * is a bug you only see after a successful connect: Noctus's Google callback
+   * stores three bindings — `email`, `calendar` and `sheets` — and never one
+   * called `google`. A row keyed on the provider therefore stays on "Connect"
+   * forever, no matter how many times you complete the consent screen.
+   */
   key: string;
+  /**
+   * What to hand /api/oauth/:provider/url. Only set for account connections,
+   * and only different from `key` where one consent grants several bindings.
+   */
+  provider?: string;
   label: string;
   /** What Grove does with it, in the fewest words that are still true. */
   what: string;
@@ -41,6 +55,8 @@ export type Connection = {
    * a permanent no, stated rather than left for someone to discover.
    */
   impossible?: string;
+  /** A caveat worth reading before connecting. */
+  note?: string;
 };
 
 export const CONNECTIONS: Connection[] = [
@@ -69,12 +85,17 @@ export const CONNECTIONS: Connection[] = [
     unlocks: ['music.play'],
   },
   {
-    key: 'google',
+    key: 'email',
+    provider: 'google',
     label: 'Mail',
-    what: 'The three that matter',
+    what: 'Sends mail you dictate',
     icon: 'mail',
     kind: 'account',
-    unlocks: ['mail.search'],
+    unlocks: ['mail.send'],
+    // Worth stating on the row, because "connected" and "can read your inbox"
+    // are not the same thing here. Noctus asks Google for gmail.send and not
+    // for any read scope, so a connected account can send and cannot search.
+    note: 'Sending only — reading your inbox needs a wider Google scope on Noctus.',
   },
   {
     key: 'maps',
@@ -106,4 +127,9 @@ export function connectionByKey(key: string): Connection | undefined {
 /** The account-backed ones, which are the only keys Noctus knows about. */
 export function accountKeys(): string[] {
   return CONNECTIONS.filter((c) => c.kind === 'account').map((c) => c.key);
+}
+
+/** What to start the consent flow with, which is not always the stored key. */
+export function providerFor(connection: Connection): string {
+  return connection.provider ?? connection.key;
 }

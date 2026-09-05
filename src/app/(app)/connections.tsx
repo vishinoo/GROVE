@@ -20,7 +20,7 @@ import { Radius, Type } from '@/constants/theme';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { abilityById } from '@/lib/abilities';
-import { CONNECTIONS, type Connection } from '@/lib/connections';
+import { CONNECTIONS, providerFor, type Connection } from '@/lib/connections';
 
 export default function Connections() {
   const palette = usePalette();
@@ -39,7 +39,7 @@ export default function Connections() {
     setError(null);
     try {
       if (live.has(item.key)) await disconnect(item.key);
-      else await connect(item.key);
+      else await connect(providerFor(item));
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : 'That didn’t work.');
     } finally {
@@ -112,7 +112,7 @@ function Row({
   const note = item.impossible
     ? item.impossible
     : connected
-      ? item.what
+      ? item.note ?? item.what
       : built
         ? item.what
         : 'Not built yet';

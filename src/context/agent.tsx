@@ -363,6 +363,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       // The session may have lapsed while backgrounded. Re-taking it costs a
       // few milliseconds and is the difference between recording and a
       // CoreAudio failure that looks like the ring not working.
+      // Always, foreground included. Re-taking the session is what made
+      // recognition start reliably in the first place; the loop it caused came
+      // from nothing suppressing the volume movement it produces, and that is
+      // handled inside `reactivate` now rather than by skipping it here.
       try {
         await trigger.reactivate();
       } catch (error) {

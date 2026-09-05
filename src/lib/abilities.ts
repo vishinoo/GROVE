@@ -138,19 +138,32 @@ const BRIEF: Ability = {
   },
 };
 
+/**
+ * Mail is send-only, and that is a property of the grant rather than a choice.
+ *
+ * Noctus asks Google for `gmail.send`, `calendar`, `spreadsheets` and
+ * `userinfo.email` — there is no read scope anywhere in that list. So a
+ * connected account can send mail and cannot search it, and an ability called
+ * "find mail from Priya" would have been a promise the token could never keep.
+ *
+ * Reading the inbox is one line on the Noctus side — adding
+ * `gmail.readonly` to the scopes and reconnecting — and until someone does
+ * that, this says what it can actually do.
+ */
 const MAIL: Ability = {
-  id: 'mail.search',
+  id: 'mail.send',
   name: 'Mail',
-  what: 'Finds mail from someone, or the few that matter this morning.',
+  what: 'Sends a message you dictate.',
   where: 'server',
   wired: false,
-  needs: ['google'],
+  needs: ['email', 'a send endpoint on Noctus'],
   args: {
-    from: { type: 'string', what: 'who it is from, if they named someone' },
-    about: { type: 'string', what: 'what it is about' },
+    to: { type: 'string', what: 'who it goes to', required: true },
+    subject: { type: 'string', what: 'the subject line' },
+    body: { type: 'string', what: 'what it says', required: true },
   },
-  examples: ['anything from Priya', 'what came in overnight', 'read me my important mail'],
-  run: unwired('mail', 'your Google account is not connected yet.'),
+  examples: ['email Priya to say I am running late', 'send Sam the address'],
+  run: unwired('mail', 'Noctus has no send endpoint yet, so nothing would leave.'),
 };
 
 const CALENDAR_READ: Ability = {
