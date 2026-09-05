@@ -32,6 +32,16 @@
 
 const GEMINI_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '';
 const GEMINI_MODEL = process.env.EXPO_PUBLIC_GEMINI_MODEL || 'gemini-2.5-flash-lite';
+/**
+ * The rung above, used only when the cheap one genuinely cannot serve a turn.
+ *
+ * Unset by default, and that is the right default. Grove's per-turn job is
+ * small — read one sentence, answer in one sentence, name one of six abilities
+ * — and a model twenty times the price is twenty times the price for the same
+ * answer. This exists so the escalation path is written down and measurable,
+ * not because most turns need it.
+ */
+const GEMINI_MODEL_DEEP = process.env.EXPO_PUBLIC_GEMINI_MODEL_DEEP || '';
 const OLLAMA_URL = (process.env.EXPO_PUBLIC_OLLAMA_URL ?? '').replace(/\/$/, '');
 const OLLAMA_MODEL = process.env.EXPO_PUBLIC_OLLAMA_MODEL || 'llama3.2';
 
@@ -121,14 +131,15 @@ async function askOllama(
 async function askGemini(
   system: string,
   messages: LightMessage[],
-  json: boolean
+  json: boolean,
+  model: string = GEMINI_MODEL
 ): Promise<string | null> {
   if (!GEMINI_KEY) return null;
   try {
     const response = await withTimeout(TIMEOUT_MS, (signal) =>
       fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-          GEMINI_MODEL
+          model
         )}:generateContent`,
         {
           method: 'POST',
@@ -168,15 +179,48 @@ async function askGemini(
 async function complete(
   system: string,
   messages: LightMessage[],
-  json = false
+  json = false,
+  deep = false
 ): Promise<string | null> {
+  // Ollama is free, so it takes everything it can — including the deep turns,
+  // where "free and adequate" beats "paid and slightly better".
   if (await probeOllama()) {
     const local = await askOllama(system, messages, json);
     if (local !== null) return local;
     // A reachable-but-failing Ollama shouldn't strand the turn.
     ollamaReachable = false;
   }
-  return askGemini(system, messages, json);
+  const model = deep && GEMINI_MODEL_DEEP ? GEMINI_MODEL_DEEP : GEMINI_MODEL;
+  const answer = await askGemini(system, messages, json, model);
+  // A deep model that is misconfigured or retired must not take the turn down
+  // with it — fall back to the one we know works rather than going silent.
+  if (answer === null && model !== GEMINI_MODEL) {
+    return askGemini(system, messages, json, GEMINI_MODEL);
+  }
+  return answer;
+}
+
+/**
+ * Whether a turn is worth the dearer model.
+ *
+ * Local and keyword-based, like every other consequential decision here, and
+ * for the same reason: asking a model whether it needs a better model is both
+ * circular and something you pay for on every single turn.
+ *
+ * The signals are the ones that actually correlate with a cheap model
+ * struggling — being asked to explain, compare or reason rather than fetch, and
+ * sheer length. Everything else, which is nearly everything Grove hears, stays
+ * on the cheap tier.
+ */
+const DEEP_SIGNALS =
+  /\b(why|explain|compare|difference between|pros and cons|walk me through|reason|analyse|analyze|summari[sz]e (?:this|that|the)|draft|write me)\b/i;
+
+export function needsDepth(text: string): boolean {
+  if (!GEMINI_MODEL_DEEP) return false;
+  const t = text.trim();
+  // Long enough that it is a paragraph rather than an instruction.
+  if (t.length > 240) return true;
+  return DEEP_SIGNALS.test(t);
 }
 
 /* ----------------------------------------------------------------- tasks */
@@ -297,7 +341,8 @@ Respond with JSON only: {"reply": "<what to say>", "ability": "<id or empty>", "
   const raw = await complete(
     system,
     [...history.slice(-8), { role: 'user', content: userText.slice(0, 4000) }],
-    true
+    true,
+    needsDepth(userText)
   );
   if (!raw) return null;
   return parseReply(raw);
