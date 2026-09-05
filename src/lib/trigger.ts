@@ -31,6 +31,7 @@ import {
   isHolding,
   onInterruption,
   onRemoteCommand,
+  isVolumeTriggerOn,
   onRouteChange,
   requestMicrophone,
   setVolumeTrigger as setNativeVolumeTrigger,
@@ -143,6 +144,18 @@ export async function setVolumeFallback(enabled: boolean): Promise<void> {
   await setNativeVolumeTrigger(enabled);
 }
 
+/**
+ * Whether the native volume observer is actually installed right now.
+ *
+ * Asked of the native module rather than inferred from the preference,
+ * because the whole point is to catch the case where the two disagree — a
+ * toggle that is on while nothing is listening looks identical, from the
+ * outside, to hardware that sends nothing.
+ */
+export function isVolumeFallbackOn(): boolean {
+  return isVolumeTriggerOn();
+}
+
 export async function disarm(): Promise<void> {
   for (const off of unsubscribes) off();
   unsubscribes = [];
@@ -207,6 +220,10 @@ function emit(trigger: Trigger): void {
 }
 
 function record(event: RemoteEvent, coalesced: boolean): void {
+  // Printed as well as recorded: the diagnostics panel needs the app open on
+  // that screen, and the interesting presses happen with the phone locked.
+  console.log('[grove:trigger]', event.command, event.phase ?? '', coalesced ? 'merged' : 'used');
+
   const at = event.at * 1000;
   const previous = signals[signals.length - 1];
 

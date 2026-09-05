@@ -42,6 +42,23 @@ const GEMINI_MODEL = process.env.EXPO_PUBLIC_GEMINI_MODEL || 'gemini-2.5-flash-l
  * not because most turns need it.
  */
 const GEMINI_MODEL_DEEP = process.env.EXPO_PUBLIC_GEMINI_MODEL_DEEP || '';
+
+/**
+ * The model we fall back to when a configured one turns out not to exist.
+ *
+ * Google retires model ids, and a retired id returns 404 — which from inside
+ * the app is indistinguishable from having no key at all: the call fails, the
+ * turn falls through to local rules, and Grove says it has nothing to think
+ * with. Someone then spends an afternoon re-checking a key that was fine.
+ *
+ * So a 404 is treated as "that model is gone" rather than "the request failed",
+ * and the turn is retried once against an id known to be current. Being wrong
+ * about the model in .env should cost a slightly different model, not silence.
+ */
+const SAFE_MODEL = 'gemini-2.5-flash-lite';
+
+/** Model ids that answered 404 this run. Not retried; not asked about twice. */
+const retired = new Set<string>();
 const OLLAMA_URL = (process.env.EXPO_PUBLIC_OLLAMA_URL ?? '').replace(/\/$/, '');
 const OLLAMA_MODEL = process.env.EXPO_PUBLIC_OLLAMA_MODEL || 'llama3.2';
 
@@ -164,7 +181,11 @@ async function askGemini(
         }
       )
     );
-    if (!response.ok) return null;
+    if (!response.ok) {
+      // 404 means the id is gone, not that the request went wrong.
+      if (response.status === 404) retired.add(model);
+      return null;
+    }
     const data = (await response.json()) as {
       candidates?: { content?: { parts?: { text?: string }[] } }[];
     };
@@ -190,14 +211,21 @@ async function complete(
     // A reachable-but-failing Ollama shouldn't strand the turn.
     ollamaReachable = false;
   }
-  const model = deep && GEMINI_MODEL_DEEP ? GEMINI_MODEL_DEEP : GEMINI_MODEL;
+  const wanted = deep && GEMINI_MODEL_DEEP ? GEMINI_MODEL_DEEP : GEMINI_MODEL;
+  // Skip anything already known to be gone rather than spending a round trip
+  // rediscovering it on every turn.
+  const model = retired.has(wanted) ? SAFE_MODEL : wanted;
+
   const answer = await askGemini(system, messages, json, model);
-  // A deep model that is misconfigured or retired must not take the turn down
-  // with it — fall back to the one we know works rather than going silent.
-  if (answer === null && model !== GEMINI_MODEL) {
-    return askGemini(system, messages, json, GEMINI_MODEL);
+  if (answer !== null) return answer;
+
+  // Either the deep tier is misconfigured, or the id in .env has been retired.
+  // One retry against something current, rather than reporting no model at all.
+  if (model !== SAFE_MODEL && retired.has(model)) {
+    return askGemini(system, messages, json, SAFE_MODEL);
   }
-  return answer;
+  if (model !== GEMINI_MODEL) return askGemini(system, messages, json, GEMINI_MODEL);
+  return null;
 }
 
 /**

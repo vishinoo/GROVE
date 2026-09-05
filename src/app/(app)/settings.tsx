@@ -223,13 +223,20 @@ export default function Settings() {
 function Diagnostics() {
   const palette = usePalette();
   const [signals, setSignals] = useState(() => trigger.recentSignals());
+  // Read from the native module rather than from the preference. When the
+  // switch is on and this is off, the observer failed to install — which is
+  // invisible otherwise and looks exactly like a ring that sends nothing.
+  const [volumeWatch, setVolumeWatch] = useState(() => trigger.isVolumeFallbackOn());
   const [open, setOpen] = useState(false);
 
   // Polled rather than subscribed: the point is to watch it while pressing a
   // button, and a one-second refresh is invisible to a person doing that.
   useEffect(() => {
     if (!open) return;
-    const timer = setInterval(() => setSignals(trigger.recentSignals()), 700);
+    const timer = setInterval(() => {
+      setSignals(trigger.recentSignals());
+      setVolumeWatch(trigger.isVolumeFallbackOn());
+    }, 700);
     return () => clearInterval(timer);
   }, [open]);
 
@@ -261,6 +268,24 @@ function Diagnostics() {
             Press each button and watch. If nothing appears, your ring isn’t sending media keys
             and can’t reach Grove — check it starts and stops music from the lock screen.
           </Text>
+
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 9,
+              paddingBottom: 10,
+              marginBottom: 6,
+              borderBottomWidth: 1,
+              borderBottomColor: palette.line,
+            }}
+          >
+            <Dot tone={volumeWatch ? 'live' : 'off'} size={6} />
+            <Mono color={palette.ink} style={{ flex: 1 }}>
+              volume watch
+            </Mono>
+            <Mono>{volumeWatch ? 'listening' : 'not installed'}</Mono>
+          </View>
 
           {signals.length === 0 ? (
             <Mono>No signals yet</Mono>
