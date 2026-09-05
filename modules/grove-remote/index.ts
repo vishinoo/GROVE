@@ -72,6 +72,7 @@ type Native = {
   getRoute(): AudioRoute;
   requestMicrophone(): Promise<boolean>;
   setVolumeTrigger(enabled: boolean): Promise<void>;
+  setKeepAlive(playing: boolean): Promise<void>;
   isVolumeTriggerOn(): boolean;
   addListener(event: string, listener: (payload: never) => void): EventSubscription;
 };
@@ -160,6 +161,17 @@ export async function requestMicrophone(): Promise<boolean> {
  */
 export async function setVolumeTrigger(enabled: boolean): Promise<void> {
   await native?.setVolumeTrigger(enabled);
+}
+
+/**
+ * Pause or resume the silence that holds the session.
+ *
+ * Paused for the length of a recognition, because iOS will not start the
+ * recogniser's audio engine alongside it in the background. Must always be
+ * resumed — the silence is what keeps Grove from being suspended.
+ */
+export async function setKeepAlive(playing: boolean): Promise<void> {
+  await native?.setKeepAlive(playing);
 }
 
 export function isVolumeTriggerOn(): boolean {

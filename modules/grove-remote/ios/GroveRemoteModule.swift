@@ -152,6 +152,33 @@ public class GroveRemoteModule: Module {
     }
 
     /**
+     * Hand the audio graph over, briefly.
+     *
+     * The silence that keeps Grove resident also occupies the session's
+     * output, and in the background iOS refuses to start the recogniser's
+     * engine alongside it — that is CoreAudio's 'what' error, and it is
+     * precisely why the ring reaches Grove from a pocket but listening then
+     * fails. Pausing the player for the length of a recognition is the trade.
+     *
+     * Safe, because the session stays active and the remote stays registered
+     * either way, and recording is itself audio activity — so the app does not
+     * become suspendable while the silence is paused. It only becomes
+     * suspendable if the silence never comes back, which is why every exit
+     * path from listening resumes it.
+     */
+    AsyncFunction("setKeepAlive") { (playing: Bool) in
+      DispatchQueue.main.async {
+        if playing {
+          self.startKeepAlive()
+        } else {
+          // Paused rather than torn down: resuming is then instant and does
+          // not re-read the file.
+          self.keepAlive?.pause()
+        }
+      }
+    }
+
+    /**
      * Play something from the user's own music library.
      *
      * `systemMusicPlayer` rather than `applicationMusicPlayer`, deliberately:

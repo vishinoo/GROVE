@@ -400,6 +400,14 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
       setState('listening');
 
+      // Hand the audio graph to the recogniser. Must happen after the re-take,
+      // which starts the silence again, and must be undone on every way out.
+      try {
+        await trigger.setKeepAlive(false);
+      } catch (error) {
+        console.log('[grove:listen] keep-alive pause failed', error);
+      }
+
       const started = startListening(
         {
           onPartial: (text) => {
@@ -424,6 +432,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           },
           onEnd: () => {
             clearSilence();
+            // Unconditional, and not guarded by `mounted`: leaving the silence
+            // paused is what would let iOS suspend Grove and kill the ring.
+            void trigger.setKeepAlive(true);
             console.log('[grove:listen] end');
             if (!mounted.current) return;
             setLevel(0);
@@ -440,6 +451,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
       console.log('[grove:listen] startListening returned', started);
       if (!started) {
+        void trigger.setKeepAlive(true);
         setState(restingState());
         return;
       }

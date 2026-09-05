@@ -186,19 +186,36 @@ const MAIL_SEND: Ability = {
   wired: true,
   needs: ['email'],
   args: {
-    to: { type: 'string', what: 'who it goes to — an address, or a name you have mentioned', required: true },
+    to: { type: 'string', what: 'who it goes to — a name is fine, it will be looked up', required: true },
     subject: { type: 'string', what: 'the subject line' },
     body: { type: 'string', what: 'what it says', required: true },
   },
   examples: ['email Priya to say I am running late', 'send Sam the address'],
   run: async (args) => {
-    const to = (args.to || '').trim();
+    const asked = (args.to || '').trim();
     const body = (args.body || '').trim();
-    if (!to || !body) return { ok: false, spoken: 'Who to, and saying what?' };
-    // Mail is the one thing here that cannot be taken back, so an address that
-    // is not an address is refused rather than guessed at.
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
-      return { ok: false, spoken: `I need ${to}'s email address.` };
+    if (!asked || !body) return { ok: false, spoken: 'Who to, and saying what?' };
+
+    // A name is what people say; an address is what mail needs. Looked up in
+    // your contacts rather than demanded, because you obviously know who Priya
+    // is and being asked for her address is the friction this exists to remove.
+    let to = asked;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(asked)) {
+      const found = await fetchJson<{ matches?: { name: string; email: string }[] }>(
+        `/api/grove/contact?name=${encodeURIComponent(asked)}`
+      );
+      const matches = found?.matches ?? [];
+      if (matches.length === 0) return { ok: false, spoken: `I have no address for ${asked}.` };
+      // Two people with the same first name is a question, not a coin toss —
+      // and mail is the one ability here that cannot be taken back.
+      if (matches.length > 1) {
+        return {
+          ok: false,
+          spoken: `I have ${matches.length} people called ${asked}. Which one?`,
+          detail: matches.map((m) => `${m.name} — ${m.email}`).join('\n'),
+        };
+      }
+      to = matches[0].email;
     }
 
     const data = await fetchJson<{ sent?: boolean }>('/api/grove/mail', {
@@ -206,7 +223,7 @@ const MAIL_SEND: Ability = {
       body: { to, subject: args.subject || '', body },
     });
     return data?.sent
-      ? { ok: true, spoken: 'Sent.' }
+      ? { ok: true, spoken: asked === to ? 'Sent.' : `Sent to ${asked}.` }
       : { ok: false, spoken: 'That did not send.' };
   },
 };

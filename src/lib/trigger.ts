@@ -33,6 +33,7 @@ import {
   onRemoteCommand,
   isVolumeTriggerOn,
   onRouteChange,
+  setKeepAlive as setNativeKeepAlive,
   requestMicrophone,
   setVolumeTrigger as setNativeVolumeTrigger,
   type AudioRoute,
@@ -168,6 +169,19 @@ export async function reactivate(): Promise<void> {
   // the window in which a press cannot cancel a listen as short as possible.
   suppressVolumeUntil = Date.now() + 1400;
   await activate(true);
+}
+
+/**
+ * Let go of the audio graph so the recogniser can have it, and take it back
+ * afterwards.
+ *
+ * Every caller must pair these. The silence is what keeps Grove resident in
+ * the background, so one that is paused and never resumed is a Grove that gets
+ * suspended and a ring that stops working until the app is reopened.
+ */
+export async function setKeepAlive(playing: boolean): Promise<void> {
+  if (!isAvailable()) return;
+  await setNativeKeepAlive(playing);
 }
 
 /**
