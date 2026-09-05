@@ -1,27 +1,21 @@
 /**
  * Sparks.
  *
- * This screen replaces the Noctus catalogue, and it is deliberately not a
- * catalogue. There is nothing to browse and nothing to install: a spark exists
- * because you said something with a recurrence in it, and the list is a record
- * of what you asked for rather than a shop.
+ * A spark is a standing instruction: something to do, and what sets it off.
  *
- * THE CARD
+ * It used to be a picked ability plus a bag of arguments, chosen from a list of
+ * six. That was the wrong shape twice over — it could only express things
+ * someone had already written a function for, and it put a dropdown in front of
+ * a person who had just said what they wanted out loud. "Read my email for
+ * anything from Priya and tell me what she said" had nowhere to go.
  *
- * Name, what it does, then a footer carrying when it runs and which apps it
- * reaches into. The name matters more than it looks: a spark used to show the
- * sentence someone spoke, which opens with "also" and carries the schedule
- * inside it, so every card read as a wall of truncated speech. What you said is
- * still kept — it moves into the detail, where it belongs, along with the
- * ability and the arguments pulled out of it.
+ * So the card carries a sentence you can edit and a trigger you can change, and
+ * the ability is worked out when it runs rather than chosen up front. What it
+ * touches is shown, not selected.
  *
- * Tapping opens that detail rather than a separate screen, because it is three
- * facts and a sentence, and pushing a route for that is ceremony.
- *
- * Underneath sits the honest list of what Grove can do at all, including the
- * abilities that are declared but not built, greyed rather than hidden. An
- * assistant that quietly lacks a capability is worse than one that says so,
- * because you find out mid-walk.
+ * The list of everything Grove can do used to sit underneath. It has gone:
+ * Connections already answers "what can this reach", and the same information
+ * in two places means one of them is wrong the moment either changes.
  */
 
 import { useState } from 'react';
@@ -29,12 +23,12 @@ import { Pressable, Switch, Text, TextInput, View } from 'react-native';
 
 import { AppIcon, iconForKey, type AppIconName } from '@/components/app-icon';
 import { Icon } from '@/components/icon';
-import { Card, Dot, Empty, Mono, Screen, Section } from '@/components/ui';
+import { Card, Empty, Mono, Screen, Section } from '@/components/ui';
 import { Radius, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { usePalette } from '@/hooks/use-palette';
-import { ABILITIES, abilityById, type Ability } from '@/lib/abilities';
-import { describeSchedule, parseSchedule, type Spark } from '@/lib/sparks';
+import { abilityById, type Ability } from '@/lib/abilities';
+import { describeTrigger, parseSchedule, phraseTrigger, type Spark } from '@/lib/sparks';
 
 export default function Sparks() {
   const { sparks, setSparkEnabled, editSpark, deleteSpark } = useAgent();
@@ -42,11 +36,14 @@ export default function Sparks() {
   return (
     <Screen
       title="Sparks"
-      subtitle="Standing jobs. Ask for something with a time in it and it turns up here."
+      subtitle="Standing instructions. Say what you want and when, and it turns up here."
     >
       {sparks.length === 0 ? (
         <Empty
-          text={'Nothing standing yet. Try “brief me on my watchlist every weekday morning”.'}
+          text={
+            'Nothing standing yet. Try “every weekday at eight, check my email for anything ' +
+            'from Priya and tell me what she said”.'
+          }
         />
       ) : (
         <Section>
@@ -61,12 +58,6 @@ export default function Sparks() {
           ))}
         </Section>
       )}
-
-      <Section label="What Grove can do">
-        {ABILITIES.map((ability) => (
-          <AbilityRow key={ability.id} ability={ability} />
-        ))}
-      </Section>
     </Screen>
   );
 }
@@ -86,21 +77,21 @@ function SparkCard({
 }: {
   spark: Spark;
   onToggle: (next: boolean) => void;
-  onEdit: (patch: Partial<Pick<Spark, 'title' | 'abilityId' | 'schedule'>>) => void;
+  onEdit: (patch: Partial<Pick<Spark, 'title' | 'instruction' | 'trigger'>>) => void;
   onDelete: () => void;
 }) {
   const palette = usePalette();
   const [open, setOpen] = useState(false);
 
-  const ability = abilityById(spark.abilityId);
+  const ability = spark.abilityId ? abilityById(spark.abilityId) : undefined;
   const tiles = icons(ability);
 
   return (
-    <Card style={{ marginBottom: 8, paddingVertical: 0, paddingHorizontal: 0 }}>
+    <Card style={{ marginBottom: 8, paddingHorizontal: 0, paddingVertical: 0 }}>
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
-        accessibilityLabel={`${spark.title}. ${describeSchedule(spark.schedule)}. Tap for detail.`}
+        accessibilityLabel={`${spark.title}. ${describeTrigger(spark.trigger)}. Tap to edit.`}
         onPress={() => setOpen((was) => !was)}
         style={({ pressed }) => ({ padding: 13, opacity: pressed ? 0.7 : 1 })}
       >
@@ -110,7 +101,7 @@ function SparkCard({
               {spark.title}
             </Text>
             <Text style={[Type.bodySm, { color: palette.muted }]} numberOfLines={2}>
-              {ability?.what ?? 'Waiting on an ability that is not built yet.'}
+              {spark.instruction}
             </Text>
           </View>
           <Switch
@@ -121,7 +112,7 @@ function SparkCard({
           />
         </View>
 
-        {/* When it runs, and what it reaches into. */}
+        {/* What sets it off, and what it reaches into. */}
         <View
           style={{
             flexDirection: 'row',
@@ -133,8 +124,8 @@ function SparkCard({
             borderTopColor: palette.line,
           }}
         >
-          <Text style={[Type.bodySm, { color: palette.inkSoft, flex: 1 }]}>
-            {describeSchedule(spark.schedule)}
+          <Text style={[Type.bodySm, { color: palette.inkSoft, flex: 1 }]} numberOfLines={1}>
+            {describeTrigger(spark.trigger)}
           </Text>
           {tiles.map((name) => (
             <AppIcon key={name} name={name} size={22} />
@@ -152,11 +143,6 @@ function SparkCard({
             borderTopColor: palette.line,
           }}
         >
-          {/*
-            Editable, because a spark is built from one spoken sentence and
-            speech is misheard. Without this the only repair for a wrong time is
-            to delete the job and say the whole thing again.
-          */}
           <Field
             label="Name"
             value={spark.title}
@@ -164,67 +150,49 @@ function SparkCard({
             onCommit={(title) => onEdit({ title })}
           />
 
+          {/*
+            Free text, not a picker. This is the whole instruction, and it can
+            describe things the ability list does not cover yet — which is the
+            point, because the list grows and the sentence should not have to be
+            rewritten when it does.
+          */}
           <Field
-            label="When"
-            value={describeSchedule(spark.schedule)}
-            placeholder="every weekday at 7"
-            help="Say it how you would out loud — “every weekday at half four”."
+            label="What it does"
+            value={spark.instruction}
+            placeholder="check my email for anything from Priya and tell me what she said"
+            multiline
+            onCommit={(instruction) => onEdit({ instruction })}
+          />
+
+          <Field
+            label="What sets it off"
+            value={describeTrigger(spark.trigger)}
+            placeholder="every weekday at 8, or: when I say play my favourite song"
+            help={'A time — “every weekday at half four” — or a phrase: “when I say wind down”.'}
             onCommit={(said) => {
               const schedule = parseSchedule(said);
-              // Silently keeping the old schedule would be worse than refusing:
-              // the card would show a time nobody set.
-              if (schedule) onEdit({ schedule });
+              if (schedule) {
+                onEdit({ trigger: { kind: 'schedule', schedule } });
+                return;
+              }
+              const phrase = phraseTrigger(said) ?? said.replace(/^when(?:ever)? i say\s+/i, '');
+              // Refusing beats silently keeping the old trigger, which would
+              // leave the card showing a time nobody set.
+              if (phrase.trim()) onEdit({ trigger: { kind: 'phrase', phrase: phrase.trim() } });
             }}
           />
 
-          <Mono style={{ marginTop: 14, marginBottom: 5 }}>What it does</Mono>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-            {ABILITIES.filter((a) => a.wired).map((a) => {
-              const on = a.id === spark.abilityId;
-              return (
-                <Pressable
-                  key={a.id}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: on }}
-                  accessibilityLabel={a.name}
-                  onPress={() => onEdit({ abilityId: a.id })}
-                  style={({ pressed }) => ({
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 6,
-                    paddingVertical: 7,
-                    paddingHorizontal: 10,
-                    borderRadius: Radius.pill,
-                    backgroundColor: on ? palette.mark : palette.sunken,
-                    borderWidth: 1,
-                    borderColor: on ? palette.mark : palette.line,
-                    opacity: pressed ? 0.7 : 1,
-                  })}
-                >
-                  <Text
-                    style={{
-                      fontFamily: Type.cardTitle.fontFamily,
-                      fontSize: 12.5,
-                      color: on ? palette.raised : palette.ink,
-                    }}
-                  >
-                    {a.name}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <Detail label="Needs">
-            {tiles.length > 0 || (ability?.needs.length ?? 0) > 0
-              ? (ability?.needs ?? []).join(', ').replace(/-permission/g, ' access') || 'Nothing'
-              : 'Nothing'}
+          <Detail label="Reaches">
+            {ability
+              ? [ability.name, ...ability.needs].join(', ').replace(/-permission/g, ' access')
+              : 'Worked out when it runs.'}
           </Detail>
-          <Detail label="You said">{spark.said}</Detail>
           <Detail label="Runs">
-            {spark.schedulable
-              ? 'On Noctus, at the stated time, whether or not your phone is awake.'
-              : 'Only while Grove is running — it catches up next time you pick the phone up.'}
+            {spark.trigger.kind === 'phrase'
+              ? 'When you say it, so Grove has to be listening.'
+              : spark.schedulable
+                ? 'On Noctus, at the stated time, whether or not your phone is awake.'
+                : 'Only while Grove is running — it catches up next time you pick the phone up.'}
           </Detail>
 
           <Pressable
@@ -246,19 +214,21 @@ function SparkCard({
  * One editable line.
  *
  * Commits on blur rather than on every keystroke, so a half-typed time is never
- * parsed and saved as a schedule nobody meant.
+ * parsed and saved as a trigger nobody meant.
  */
 function Field({
   label,
   value,
   placeholder,
   help,
+  multiline,
   onCommit,
 }: {
   label: string;
   value: string;
   placeholder: string;
   help?: string;
+  multiline?: boolean;
   onCommit: (next: string) => void;
 }) {
   const palette = usePalette();
@@ -277,15 +247,18 @@ function Field({
         }}
         placeholder={placeholder}
         placeholderTextColor={palette.muted}
+        multiline={multiline}
         style={{
           backgroundColor: palette.sunken,
           borderWidth: 1,
           borderColor: palette.line,
           borderRadius: Radius.well,
           paddingHorizontal: 11,
-          paddingVertical: 9,
+          paddingVertical: 10,
+          minHeight: multiline ? 68 : undefined,
           fontFamily: Type.body.fontFamily,
           fontSize: 14,
+          lineHeight: 20,
           color: palette.ink,
         }}
       />
@@ -299,47 +272,9 @@ function Field({
 function Detail({ label, children }: { label: string; children: string }) {
   const palette = usePalette();
   return (
-    <View style={{ marginTop: 12 }}>
+    <View style={{ marginTop: 14 }}>
       <Mono style={{ marginBottom: 3 }}>{label}</Mono>
       <Text style={[Type.bodySm, { color: palette.ink, lineHeight: 19 }]}>{children}</Text>
     </View>
-  );
-}
-
-function AbilityRow({ ability }: { ability: Ability }) {
-  const palette = usePalette();
-  const tile = iconForKey(ability.id) ?? iconForKey(ability.name);
-
-  return (
-    <Card style={{ marginBottom: 8, opacity: ability.wired ? 1 : 0.55 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
-        {tile ? <AppIcon name={tile} size={30} /> : <Dot tone={ability.wired ? 'live' : 'off'} />}
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text style={[Type.cardTitle, { color: palette.ink }]}>{ability.name}</Text>
-          <Text style={[Type.bodySm, { color: palette.muted }]}>{ability.what}</Text>
-        </View>
-        <Mono>
-          {ability.wired ? (ability.where === 'device' ? 'on phone' : 'anywhere') : 'not built'}
-        </Mono>
-      </View>
-
-      {/* Why it is not built, rather than leaving it greyed with no reason. */}
-      {!ability.wired && ability.needs.length > 0 ? (
-        <Text
-          style={[
-            Type.bodySm,
-            {
-              color: palette.muted,
-              marginTop: 9,
-              paddingTop: 9,
-              borderTopWidth: 1,
-              borderTopColor: palette.line,
-            },
-          ]}
-        >
-          Needs {ability.needs.join(', ').replace(/-permission/g, ' access')}.
-        </Text>
-      ) : null}
-    </Card>
   );
 }

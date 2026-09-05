@@ -182,12 +182,12 @@ export default function Settings() {
 
       {/* ----------------------------------------------------------- memory */}
 
-      <Section label="What Grove remembers">
+      <Section label="Memory">
         {facts.length === 0 ? (
           <Card>
             <Text style={[Type.bodySm, { color: palette.muted }]}>
-              Nothing yet. Tell it something about you and it keeps it here, where you can delete
-              it.
+              Nothing yet. Anything you tell Grove about yourself is kept here, and nowhere
+              else — you can read every line of it and delete any of them.
             </Text>
           </Card>
         ) : (

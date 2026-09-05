@@ -34,7 +34,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import { capabilities } from '@/lib/capabilities';
 import { askGrove, newTurn, type Turn, type TurnTool } from '@/lib/grove';
-import { abortListening, startListening, stopListening } from '@/lib/listen';
+import { abortListening, isListening, startListening, stopListening } from '@/lib/listen';
 import {
   DEFAULT_PERSONA,
   fallback,
@@ -127,8 +127,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    * forever. These are the live values.
    */
   const history = useRef<Turn[]>([]);
-  const live = useRef({ state, persona, facts, uid });
-  live.current = { state, persona, facts, uid };
+  const live = useRef({ state, persona, facts, uid, sparks: sparkList });
+  live.current = { state, persona, facts, uid, sparks: sparkList };
   const mounted = useRef(true);
   /** Claims a listening turn, so an interrupted start cannot finish. */
   const listenSeq = useRef(0);
@@ -235,13 +235,19 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
     const { persona: voice, facts: known, uid: account } = live.current;
 
+    // A phrase trigger turns your own words into a button, so it is checked
+    // before anything is routed: "play my favourite song" should run the spark
+    // you taught, not be re-interpreted from scratch every time.
+    const taught = sparks.matchPhrase(text, live.current.sparks);
+    const asked = taught ? taught.instruction : text;
+
     setHeard('');
     setCaption(text);
     setState('thinking');
 
     let reply;
     try {
-      reply = await askGrove(history.current, text, { persona: voice, facts: known });
+      reply = await askGrove(history.current, asked, { persona: voice, facts: known });
     } catch (error) {
       const message = error instanceof Error ? error.message : fallback.stuck();
       if (!mounted.current) return;
@@ -282,12 +288,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
     // A recurrence makes this a standing job rather than a one-off. Saved and
     // not run now: the point of "every morning" is that it happens then.
-    if (reply.schedule) {
+    if (reply.schedule && !taught) {
       const spark = await sparks.createSpark(account, {
         said: text,
         title: reply.title,
-        abilityId: reply.ability.id,
-        args: reply.args,
+        instruction: reply.instruction,
+        abilityId: reply.ability?.id ?? null,
       });
       if (spark && mounted.current) setSparkList(await sparks.loadSparks(account));
       return;
@@ -353,7 +359,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       setProblem(null);
       setHeard('');
       setLevel(0);
-      setState('listening');
 
       // The session may have lapsed while backgrounded. Re-taking it costs a
       // few milliseconds and is the difference between recording and a
@@ -365,9 +370,13 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (turn !== listenSeq.current || !mounted.current) {
-        console.log('[grove:listen] superseded before start');
+        // Leave the state alone: whoever superseded this turn owns it now.
+        // Setting it here is what stranded the UI on 'listening' with nothing
+        // recording, which no later press could escape.
         return;
       }
+
+      setState('listening');
 
       const started = startListening(
         {
@@ -432,6 +441,13 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     if (current === 'listening') {
+      // A state of 'listening' with nothing actually recording is a desync —
+      // stopping it would do nothing and leave the app stuck there forever, so
+      // treat it as a fresh press instead of a stop.
+      if (!isListening()) {
+        void beginListening(false);
+        return;
+      }
       // Also invalidates a start that is still waiting on the session.
       listenSeq.current += 1;
       // Settle what's been said rather than discarding it.

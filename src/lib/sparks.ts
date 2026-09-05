@@ -26,7 +26,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { abilityById, isSchedulable } from './abilities';
+import { isSchedulable } from './abilities';
 
 export type Schedule =
   | { kind: 'daily'; at: string }
@@ -34,22 +34,48 @@ export type Schedule =
   | { kind: 'weekly'; day: number; at: string }
   | { kind: 'hourly' };
 
+/**
+ * What sets a spark off.
+ *
+ * Two kinds, because "every weekday at seven" and "whenever I say play my
+ * favourite song" are both standing instructions and only one of them is a
+ * clock. A phrase trigger is how you teach Grove a shorthand: the words become
+ * the button.
+ */
+export type Trigger =
+  | { kind: 'schedule'; schedule: Schedule }
+  | { kind: 'phrase'; phrase: string };
+
 export type Spark = {
   id: string;
   /**
    * Two or three words, as a person would label it on a card. The sentence
    * someone speaks is never a good title — it opens with "also" and carries the
-   * schedule inside it — so the name is separate from the record of the ask.
+   * schedule inside it — so the name is separate from the instruction.
    */
   title: string;
-  /** What you said, kept verbatim — it is the record of what you asked for. */
-  said: string;
-  abilityId: string;
-  args: Record<string, string>;
-  schedule: Schedule;
   /**
-   * False when the spark touches a device ability. It still runs, but only
-   * when Grove is awake, and the UI has to say that rather than imply 7am.
+   * What it should do, in your words.
+   *
+   * This used to be a stored ability id and a bag of arguments, chosen from a
+   * fixed list. That was the wrong shape: it could only ever express the six
+   * things someone had already written functions for, so "read my email for
+   * anything from Priya and tell me what she said" had nowhere to go. It is
+   * plain language now, resolved to an ability when it runs, which means the
+   * instruction can say more than the ability list currently knows how to do —
+   * and says it in a form that still makes sense when the list grows.
+   */
+  instruction: string;
+  trigger: Trigger;
+  /**
+   * The ability this currently resolves to, kept only so the card can show
+   * which apps it touches and whether it can run with the phone asleep. Not
+   * chosen by hand, and recomputed whenever the instruction changes.
+   */
+  abilityId: string | null;
+  /**
+   * False when the spark needs the phone. It still runs, but only when Grove is
+   * awake, and the UI has to say that rather than imply 7am.
    */
   schedulable: boolean;
   enabled: boolean;
@@ -171,6 +197,11 @@ export function parseSchedule(text: string): Schedule | null {
   return null;
 }
 
+/** What sets it off, in a phrase — for the card and for saying back. */
+export function describeTrigger(t: Trigger): string {
+  return t.kind === 'schedule' ? describeSchedule(t.schedule) : `When you say “${t.phrase}”`;
+}
+
 /** "Every weekday at 07:00" — for the card, and for confirming out loud. */
 export function describeSchedule(s: Schedule): string {
   switch (s.kind) {
@@ -203,7 +234,22 @@ export async function loadSparks(uid: string): Promise<Spark[]> {
     const parsed = JSON.parse(raw) as Spark[];
     if (!Array.isArray(parsed)) return [];
     // Sparks saved before titles existed show their raw sentence otherwise.
-    return parsed.map((s) => ({ ...s, title: s.title || 'Standing job' }));
+    // Sparks saved before instructions and triggers existed carried a `said`
+    // string and a bare `schedule`. Migrated rather than dropped.
+    return parsed.map((raw) => {
+      const old = raw as Spark & { said?: string; schedule?: Schedule };
+      return {
+        ...old,
+        title: old.title || 'Standing job',
+        instruction: old.instruction || old.said || '',
+        trigger:
+          old.trigger ??
+          (old.schedule
+            ? { kind: 'schedule' as const, schedule: old.schedule }
+            : { kind: 'phrase' as const, phrase: '' }),
+        abilityId: old.abilityId ?? null,
+      };
+    });
   } catch {
     return [];
   }
@@ -225,20 +271,27 @@ async function write(uid: string, sparks: Spark[]): Promise<void> {
  */
 export async function createSpark(
   uid: string,
-  input: { said: string; title?: string; abilityId: string; args: Record<string, string> }
+  input: { said: string; title?: string; instruction?: string; abilityId?: string | null }
 ): Promise<Spark | null> {
   const schedule = parseSchedule(input.said);
-  if (!schedule) return null;
-  if (!abilityById(input.abilityId)) return null;
+  const phrase = phraseTrigger(input.said);
+  // No clock and no phrase means this was a one-off. Saying it once should not
+  // quietly enrol you in a daily job.
+  if (!schedule && !phrase) return null;
+
+  const trigger: Trigger = schedule
+    ? { kind: 'schedule', schedule }
+    : { kind: 'phrase', phrase: phrase as string };
+
+  const abilityId = input.abilityId ?? null;
 
   const spark: Spark = {
     id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
     title: (input.title || '').trim().slice(0, 40) || 'Standing job',
-    said: input.said.trim().slice(0, 300),
-    abilityId: input.abilityId,
-    args: input.args,
-    schedule,
-    schedulable: isSchedulable([input.abilityId]),
+    instruction: (input.instruction || input.said).trim().slice(0, 400),
+    trigger,
+    abilityId,
+    schedulable: trigger.kind === 'schedule' && abilityId ? isSchedulable([abilityId]) : false,
     enabled: true,
     lastRun: null,
     createdAt: new Date().toISOString(),
@@ -247,6 +300,41 @@ export async function createSpark(
   const existing = await loadSparks(uid);
   await write(uid, [spark, ...existing].slice(0, LIMIT));
   return spark;
+}
+
+/**
+ * A phrase someone wants to become a shortcut.
+ *
+ * "whenever I say X", "when I say X" — the words become the button. Deliberately
+ * narrow: only an explicit "when I say" counts, because inferring that an
+ * ordinary sentence was meant as a standing trigger is how Grove would start
+ * firing at things you only said once.
+ */
+export function phraseTrigger(text: string): string | null {
+  const hit =
+    /\b(?:when(?:ever)?|any time|each time)\s+i\s+say\s+["“']?(.+?)["”']?\s*(?:,|then|it should|just|please|$)/i.exec(
+      text.trim()
+    );
+  const phrase = hit?.[1]?.trim().replace(/[.?!]+$/, '');
+  return phrase && phrase.length >= 2 ? phrase.slice(0, 80) : null;
+}
+
+/**
+ * The spark a spoken sentence should fire, if any.
+ *
+ * Substring both ways, so "play my favourite song" matches whether the trigger
+ * was stored longer or shorter than what was actually said.
+ */
+export function matchPhrase(text: string, sparks: Spark[]): Spark | null {
+  const said = text.toLowerCase().trim().replace(/[.?!]+$/, '');
+  if (said.length < 2) return null;
+  for (const spark of sparks) {
+    if (!spark.enabled || spark.trigger.kind !== 'phrase') continue;
+    const phrase = spark.trigger.phrase.toLowerCase().trim();
+    if (!phrase) continue;
+    if (said === phrase || said.includes(phrase) || phrase.includes(said)) return spark;
+  }
+  return null;
 }
 
 /**
@@ -264,18 +352,22 @@ export async function createSpark(
 export async function editSpark(
   uid: string,
   id: string,
-  patch: Partial<Pick<Spark, 'title' | 'said' | 'abilityId' | 'args' | 'schedule'>>
+  patch: Partial<Pick<Spark, 'title' | 'instruction' | 'trigger' | 'abilityId'>>
 ): Promise<Spark[]> {
   const next = (await loadSparks(uid)).map((spark) => {
     if (spark.id !== id) return spark;
-    const abilityId = patch.abilityId ?? spark.abilityId;
-    if (!abilityById(abilityId)) return spark;
+    const merged = { ...spark, ...patch };
+    // Recomputed rather than carried over: changing either the instruction or
+    // the trigger can change whether this runs with the phone asleep, and a
+    // stale flag there is the difference between a 7am briefing and silence.
     return {
-      ...spark,
-      ...patch,
-      abilityId,
-      title: (patch.title ?? spark.title).trim().slice(0, 40) || spark.title,
-      schedulable: isSchedulable([abilityId]),
+      ...merged,
+      title: merged.title.trim().slice(0, 40) || spark.title,
+      instruction: merged.instruction.trim().slice(0, 400) || spark.instruction,
+      schedulable:
+        merged.trigger.kind === 'schedule' && merged.abilityId
+          ? isSchedulable([merged.abilityId])
+          : false,
     };
   });
   await write(uid, next);
@@ -311,22 +403,27 @@ export function dueSparks(sparks: Spark[], now = new Date()): Spark[] {
 }
 
 function isDue(spark: Spark, now: Date): boolean {
+  // A phrase trigger has no clock. It fires when you say the words, and is
+  // never "overdue".
+  if (spark.trigger.kind !== 'schedule') return false;
+  const schedule = spark.trigger.schedule;
+
   const last = spark.lastRun ? new Date(spark.lastRun).getTime() : 0;
   if (!Number.isFinite(last)) return true;
 
   const sinceLast = now.getTime() - last;
-  if (spark.schedule.kind === 'hourly') return sinceLast >= 3_600_000;
+  if (schedule.kind === 'hourly') return sinceLast >= 3_600_000;
 
   // Anything else runs at most once a day, and only after its stated time.
   if (sinceLast < 20 * 3_600_000) return false;
 
-  if (spark.schedule.kind === 'weekdays') {
+  if (schedule.kind === 'weekdays') {
     const day = now.getDay();
     if (day === 0 || day === 6) return false;
   }
-  if (spark.schedule.kind === 'weekly' && now.getDay() !== spark.schedule.day) return false;
+  if (schedule.kind === 'weekly' && now.getDay() !== schedule.day) return false;
 
-  const [h, m] = spark.schedule.at.split(':').map(Number);
+  const [h, m] = schedule.at.split(':').map(Number);
   const dueToday = new Date(now);
   dueToday.setHours(h, m, 0, 0);
   return now >= dueToday;

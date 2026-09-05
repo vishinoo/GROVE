@@ -61,6 +61,12 @@ export type GroveReply = {
   blocked?: Ability;
   /** A short name for the standing job, when this is one. */
   title?: string;
+  /**
+   * What the standing job should do, in plain language, with the scheduling
+   * clause taken out. Stored on the spark and re-read when it runs, so an
+   * instruction can say more than today's ability list knows how to do.
+   */
+  instruction?: string;
   /** A fact worth keeping, pulled locally from what was said. */
   fact?: { key: string; value: string };
 };
@@ -225,6 +231,7 @@ export async function askGrove(
       schedule: schedule ?? undefined,
       blocked: blocked ?? undefined,
       title: light?.title ?? (schedule ? titleFrom(userText) : undefined),
+      instruction: schedule ? instructionFrom(userText) : undefined,
       fact,
     };
   };
@@ -331,6 +338,27 @@ export function titleFrom(text: string): string {
   const name = words.join(' ');
   if (!name) return 'Standing job';
   return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+/**
+ * The request with its scheduling clause removed.
+ *
+ * "Brief me on my watchlist every weekday at half four" is stored as "brief me
+ * on my watchlist" — the schedule already lives on the trigger, and repeating
+ * it inside the instruction means a spark that is edited to a new time still
+ * reads as the old one.
+ */
+export function instructionFrom(text: string): string {
+  let t = ` ${text.trim()} `;
+  t = t.replace(
+    /\s(?:every|each)\s+(?:day|morning|evening|night|week|weekday|working day|monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?\s/gi,
+    ' '
+  );
+  t = t.replace(/\sat\s+(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|half\s+\w+|quarter\s+(?:past|to)\s+\w+)\s/gi, ' ');
+  t = t.replace(/\s(?:daily|weekly|hourly|every hour)\s/gi, ' ');
+  t = t.replace(/^\s*(?:also|and|so|ok(?:ay)?|hey|right)[,\s]+/i, ' ');
+  t = t.replace(/\s{2,}/g, ' ').trim().replace(/^[,\s]+|[,\s]+$/g, '');
+  return t || text.trim();
 }
 
 /** The request as an activity row should label it: one trimmed sentence. */

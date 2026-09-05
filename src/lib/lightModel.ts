@@ -387,7 +387,8 @@ ${HOUSE_RULES}
 - When one of the abilities above covers the request, put its exact id in "ability" and pull its arguments out of the sentence into "args". Say you are doing it. Do not narrate the steps.
 - When nothing above covers it, leave "ability" empty and just answer. Never imply you did something you have no ability for.
 
-- If the request is a standing job — it has a time or a recurrence in it — also give "title": two or three words naming it, as a person would label it. "Morning brief". "Market check". "Leave now". Not a sentence, not a restatement.
+- If the request is a standing job — it has a time, a recurrence, or a "whenever I say..." in it — also give "title": two or three words naming it, as a person would label it. "Morning brief". "Market check". "Leave now". Not a sentence, not a restatement.
+- A standing job may describe more than you can do this second. That is fine and you should still take it: it is stored as an instruction and re-read every time it runs, so it will start working the day the ability behind it exists. Say plainly which part does not work yet rather than refusing the whole thing.
 
 Respond with JSON only: {"reply": "<what to say>", "ability": "<id or empty>", "args": {}, "title": "<2-3 words, only for standing jobs>"}`;
 
