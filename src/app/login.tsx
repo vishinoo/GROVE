@@ -46,6 +46,7 @@ export default function Login() {
   const [backend, setBackend] = useState('');
   const [rescue, setRescue] = useState('');
   const [showRescue, setShowRescue] = useState(false);
+  const [showRedirect, setShowRedirect] = useState(false);
 
   useEffect(() => {
     void getNoctusUrl().then(setBackend);
@@ -106,6 +107,27 @@ export default function Login() {
             text="Supabase isn't configured in this build, so sign-in can't complete. Set EXPO_PUBLIC_NOCTUS_SUPABASE_URL and the anon key in .env."
             tone="info"
           />
+        ) : null}
+
+        {/*
+          Shown before anything goes wrong, not after. Google sign-in fails on a
+          fresh project for exactly one reason — this URL is not on Supabase's
+          allowlist — and the failure looks like the button doing nothing, so the
+          address is on screen from the start.
+        */}
+        {configured ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Copy redirect URL ${redirectTo}`}
+            onPress={() => setShowRedirect((was) => !was)}
+            style={{ marginBottom: 14 }}
+          >
+            <Text style={[Type.bodySm, { color: palette.muted }]}>
+              {showRedirect
+                ? `Supabase → Authentication → URL Configuration → Redirect URLs must include:\n${redirectTo}`
+                : 'Sign-in bouncing you to the Noctus website? Tap here.'}
+            </Text>
+          </Pressable>
         ) : null}
 
         <Pressable

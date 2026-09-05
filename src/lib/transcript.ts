@@ -28,13 +28,17 @@ export type Entry = {
 };
 
 /**
- * Older entries are dropped rather than kept forever.
+ * Fifteen exchanges, and everything past that is deleted rather than archived.
  *
- * Two hundred exchanges is weeks of ordinary use and a few hundred kilobytes;
- * an unbounded log on a device is a slow leak that eventually makes the
- * Activity list janky and the app slower to start.
+ * This is a privacy cap as much as a storage one: Grove is listening while you
+ * walk around, and a log that keeps every word you have ever said to it is a
+ * liability sitting on the phone. Fifteen is enough to scroll back through what
+ * just happened and not enough to be a record of your life.
+ *
+ * Durable things you actually want kept go in memory.ts as facts you can read
+ * and delete, not in here.
  */
-const LIMIT = 200;
+const LIMIT = 15;
 
 function key(uid: string): string {
   return `grove:activity:v1:${uid}`;

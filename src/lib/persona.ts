@@ -34,6 +34,11 @@ export type Delivery = {
 };
 
 export type Persona = {
+  /**
+   * What Grove answers to. Yours to choose, because you say it out loud in
+   * public and "Grove" is not everyone's idea of a thing to say on a train.
+   */
+  name: string;
   /** The user's own words for how Grove should talk. May be empty. */
   manner: string;
   delivery: Delivery;
@@ -111,7 +116,12 @@ export const PRESETS: Preset[] = [
   },
 ];
 
+/** A name is a name. Past this it is a sentence, and it gets said aloud. */
+export const NAME_LIMIT = 24;
+export const DEFAULT_NAME = 'Grove';
+
 export const DEFAULT_PERSONA: Persona = {
+  name: DEFAULT_NAME,
   manner: PRESETS[0].manner,
   delivery: PRESETS[0].delivery,
   preferOnDevice: true,
@@ -160,8 +170,11 @@ export const fallback = {
     const plural = what.length > 1;
     return `I can't see your ${readable(what)} from here. Connect ${plural ? 'them' : 'it'} and I can.`;
   },
-  /** Nothing upstream answered at all. */
+  /** Nothing upstream answered at all, but there was something to answer. */
   stuck: () => `Nothing came back just then. Give me a moment and ask again.`,
+  /** There is no model configured, so waiting will not help. */
+  unconfigured: () =>
+    `I've got no model to think with — add a key to your .env and restart me.`,
   /** Heard, but nothing intelligible in it. */
   unheard: () => `I didn't catch that.`,
 } as const;
@@ -178,6 +191,10 @@ export async function loadPersona(): Promise<Persona> {
     // Merged rather than trusted: a persona written by an older build is
     // missing fields this one reads, and a half-empty persona makes Grove mute.
     return {
+      name:
+        typeof parsed.name === 'string' && parsed.name.trim()
+          ? parsed.name.slice(0, NAME_LIMIT)
+          : DEFAULT_NAME,
       manner: typeof parsed.manner === 'string' ? parsed.manner : DEFAULT_PERSONA.manner,
       delivery: {
         rate: clamp(parsed.delivery?.rate, 0.6, 1.5, DEFAULT_PERSONA.delivery.rate),

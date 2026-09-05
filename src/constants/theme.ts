@@ -1,62 +1,66 @@
 /**
  * Grove's design tokens.
  *
- * The whole palette comes out of the logo, which is two colours and nothing
- * else: a black mark on warm paper. That constraint is the design — Grove is
- * a companion to a piece of hardware you are wearing, not an app you look at,
- * so the screen's job is to report state legibly at a glance and then get out
- * of the way.
+ * The palette is white, and that is a change of mind. It used to be warm paper
+ * and black ink taken from the logo, which read as a printed instrument panel.
+ * The trouble was that it had no room for the one thing Grove actually needs to
+ * show: a soft, shifting mass of colour that means "I am listening to you".
+ * Against warm paper that mass fought the ground. Against white it is the only
+ * colour on the screen.
  *
  * Two rules hold the look together:
  *
- *   MONOCHROME    Everything structural is ink on paper. There are no
- *                 decorative colours, no per-object identity colours, and
- *                 nothing is tinted to look friendly.
+ *   HAIRLINES, NOT SHADOWS   Structure comes from a one-pixel line and the
+ *                            step between the page and a card. Almost nothing
+ *                            is elevated; the two things that genuinely float
+ *                            over content have `lift` and nothing else does.
  *
- *   ONE SIGNAL    Colour means live hardware, and only that. `signal` marks a
- *                 device that is actually connected and a session that is
- *                 actually listening; `alert` marks something a person has to
- *                 fix. Both are rationed to dots, hairlines and short labels —
- *                 never a fill, never a background. If colour ever starts
- *                 meaning "this is a button", the signal stops working.
+ *   COLOUR MEANS ONE THING   The orb, and the app icons. Everything structural
+ *                            is ink on white. `signal` marks live hardware,
+ *                            `alert` marks something to fix, and both are
+ *                            rationed to dots and short labels — never a fill.
+ *                            If colour starts meaning "this is a button", the
+ *                            signal stops working.
  */
 
 import { Platform } from 'react-native';
 
 export const Colors = {
   light: {
-    /** The logo's own ground. Every screen sits on this. */
-    paper: '#EFE9E1',
-    /** Cards and sheets: lifted off the paper, not stamped onto it. */
-    raised: '#F8F5F1',
-    /** Pressed/inset wells — the inverse of raised. */
-    sunken: '#E5DED4',
-    /** The logo's own black, reserved for the mark and for primary fills. */
-    mark: '#000000',
-    /** Body ink. Fractionally warm so it doesn't vibrate against the paper. */
-    ink: '#12100D',
-    inkSoft: '#5A544A',
-    muted: '#8F877A',
-    line: 'rgba(18,16,13,0.13)',
-    lineStrong: 'rgba(18,16,13,0.26)',
+    /**
+     * The ground cards sit on. Deliberately not white: a white card on a white
+     * page has no edge, and the card system is what makes the lists readable.
+     */
+    paper: '#F4F5F7',
+    /** Cards, sheets, fields with content. */
+    raised: '#FFFFFF',
+    /** Inset wells — the text box, stepper buttons. */
+    sunken: '#F6F7F9',
+    /** Primary fills and the mark. */
+    mark: '#16181D',
+    ink: '#16181D',
+    inkSoft: '#5B6069',
+    muted: '#9096A0',
+    line: '#E8EAEE',
+    lineStrong: '#D7DAE0',
     /** Live hardware, live microphone. Never a background. */
-    signal: '#1B7F4C',
+    signal: '#22C55E',
     /** Something the user has to fix. Never a background. */
-    alert: '#B3341F',
-    shadow: '#12100D',
+    alert: '#F59E0B',
+    shadow: '#16181D',
   },
   dark: {
-    paper: '#0D0C0A',
-    raised: '#171512',
-    sunken: '#080706',
-    mark: '#EFE9E1',
-    ink: '#EFE9E1',
-    inkSoft: '#A79F92',
-    muted: '#777064',
-    line: 'rgba(239,233,225,0.14)',
-    lineStrong: 'rgba(239,233,225,0.28)',
-    signal: '#3FBE7C',
-    alert: '#E4674F',
+    paper: '#0D0E11',
+    raised: '#17191E',
+    sunken: '#101216',
+    mark: '#F4F5F7',
+    ink: '#F4F5F7',
+    inkSoft: '#A2A8B3',
+    muted: '#6E7480',
+    line: '#252932',
+    lineStrong: '#333843',
+    signal: '#4ADE80',
+    alert: '#FBBF24',
     shadow: '#000000',
   },
 } as const;
@@ -66,19 +70,28 @@ export type ThemeName = keyof typeof Colors;
 export type Palette = { [K in keyof (typeof Colors)['light']]: string };
 
 /**
- * Corner radii.
+ * The orb's colours, and the gradients the app icons are built from.
  *
- * Tighter than an app that wants to feel soft. Grove reports on hardware, so
- * it reads better as instrument panel than as chat client — the only fully
- * round things are the trigger and the status dots.
+ * Kept here rather than inside the orb so that an app icon and the orb are
+ * visibly from the same set — those are the only two places colour appears.
  */
+export const Spectrum = {
+  mint: '#5EEAD4',
+  sky: '#7DD3FC',
+  indigo: '#A5B4FC',
+  violet: '#C4B5FD',
+  pink: '#F9A8D4',
+  green: '#86EFAC',
+} as const;
+
 export const Radius = {
   control: 14,
-  card: 18,
-  sheet: 26,
-  well: 12,
+  card: 16,
+  sheet: 28,
+  well: 10,
+  tile: 9,
   pill: 999,
-} as const;
+};
 
 export const Space = {
   screenX: 20,
@@ -90,26 +103,25 @@ export const Space = {
 /**
  * Elevation is deliberately almost absent.
  *
- * Structure is carried by hairlines and by the paper/raised step, because a
- * shadow-led interface reads as decorative and this one has to read as
- * instrumentation. `lift` exists for the two things that genuinely float over
- * content: the tab dock and the trigger.
+ * Structure is carried by hairlines and by the paper/raised step. `lift` exists
+ * for the two things that genuinely float over content: the tab dock, and the
+ * card the orb sits on.
  */
 export const Elevation = {
   lift: Platform.select({
     ios: {
-      shadowColor: '#12100D',
-      shadowOpacity: 0.1,
-      shadowRadius: 18,
+      shadowColor: '#16181D',
+      shadowOpacity: 0.07,
+      shadowRadius: 20,
       shadowOffset: { width: 0, height: 8 },
     },
-    android: { elevation: 6 },
+    android: { elevation: 5 },
     default: {},
   }),
   liftSm: Platform.select({
     ios: {
-      shadowColor: '#12100D',
-      shadowOpacity: 0.07,
+      shadowColor: '#16181D',
+      shadowOpacity: 0.05,
       shadowRadius: 8,
       shadowOffset: { width: 0, height: 3 },
     },
@@ -118,34 +130,43 @@ export const Elevation = {
   }),
 } as const;
 
+/**
+ * One typeface, doing every job.
+ *
+ * This replaces three — Bricolage for display, Instrument for body, Space Mono
+ * for labels. That set gave the app a bookish character that fought what it is:
+ * something you glance at while walking. Hierarchy now comes from weight and
+ * size, and it is two fewer network fonts to block first paint on.
+ */
 export const Fonts = {
-  display: 'BricolageGrotesque_800ExtraBold',
-  displaySemi: 'BricolageGrotesque_600SemiBold',
-  body: 'InstrumentSans_400Regular',
-  bodyMedium: 'InstrumentSans_500Medium',
-  bodySemi: 'InstrumentSans_600SemiBold',
-  mono: 'SpaceMono_400Regular',
+  display: 'Inter_700Bold',
+  displaySemi: 'Inter_600SemiBold',
+  body: 'Inter_400Regular',
+  bodyMedium: 'Inter_500Medium',
+  bodySemi: 'Inter_600SemiBold',
+  mono: 'Inter_500Medium',
 } as const;
 
 /**
- * The uppercase micro-label the machine reports in: device names, tool ids,
- * signal strength, diagnostics. Mono because most of what it carries is
- * identifiers and numbers, and those should not reflow as they change.
+ * The small label above a group — "Connected", "Running", "Hardware".
+ *
+ * It used to be uppercase mono with wide tracking, which is the standard way
+ * to make a label look technical and the standard way to make it hard to read
+ * at a glance. Sentence case, medium weight, muted.
  */
 export const monoLabel = {
-  fontFamily: Fonts.mono,
-  fontSize: 9.5,
-  letterSpacing: 1.3,
-  textTransform: 'uppercase' as const,
+  fontFamily: Fonts.bodySemi,
+  fontSize: 11.5,
+  letterSpacing: 0.1,
 };
 
 export const Type = {
-  /** The one big word on the Talk screen: "Listening", "Thinking". */
-  state: { fontFamily: Fonts.display, fontSize: 34, letterSpacing: -1.4 },
-  screenTitle: { fontFamily: Fonts.display, fontSize: 27, letterSpacing: -1.1 },
-  cardTitle: { fontFamily: Fonts.displaySemi, fontSize: 15.5, letterSpacing: -0.2 },
-  body: { fontFamily: Fonts.body, fontSize: 14.5, lineHeight: 21 },
+  /** The one word under the orb: "Listening", "Thinking". */
+  state: { fontFamily: Fonts.displaySemi, fontSize: 21, letterSpacing: -0.5 },
+  screenTitle: { fontFamily: Fonts.display, fontSize: 26, letterSpacing: -0.9 },
+  cardTitle: { fontFamily: Fonts.bodySemi, fontSize: 14.5, letterSpacing: -0.15 },
+  body: { fontFamily: Fonts.body, fontSize: 14.5, lineHeight: 22 },
   bodySm: { fontFamily: Fonts.body, fontSize: 12.5, lineHeight: 18 },
-  /** What Grove last said, shown large enough to read across a room. */
-  caption: { fontFamily: Fonts.body, fontSize: 16, lineHeight: 24 },
+  /** What Grove last said. Centred under the orb, read at arm's length. */
+  caption: { fontFamily: Fonts.body, fontSize: 15.5, lineHeight: 23 },
 } as const;

@@ -27,7 +27,7 @@
 
 import { abilityById, isSchedulable, usableAbilities, type Ability } from './abilities';
 import { asPromptBlock, factFrom, type Fact } from './memory';
-import { lightTurn, type LightMessage } from './lightModel';
+import { isLightModelConfigured, lightTurn, type LightMessage } from './lightModel';
 import { fallback, mannerDirective, type Persona } from './persona';
 import { describeSchedule, parseSchedule, type Schedule } from './sparks';
 
@@ -181,6 +181,7 @@ export async function askGrove(
     abilities: usableAbilities().map((a) => ({ id: a.id, what: a.what })),
     manner: mannerDirective(persona),
     memory: asPromptBlock(facts),
+    name: persona.name,
   });
 
   // The model sees the whole set and the sentence, so it beats keywords on
@@ -246,6 +247,10 @@ function offlineLine(
     return `${describeSchedule(context.schedule)}. I'll tell you what comes back.`;
   }
   if (context.ability || context.acting) return fallback.onIt(userText);
+  // "Try again" is a lie when there is no model to try. An unconfigured build
+  // fails this way on every single turn, and telling someone to wait a moment
+  // sends them round that loop for as long as their patience lasts.
+  if (!isLightModelConfigured()) return fallback.unconfigured();
   return fallback.stuck();
 }
 

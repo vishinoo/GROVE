@@ -1,107 +1,45 @@
 /**
  * Connections.
  *
- * The integrations Grove's tools depend on. This screen exists because the
- * failure it prevents is invisible: a tool that can't run because Gmail was
- * never connected fails silently in your ear, while you are walking, with no
- * screen being looked at.
+ * Six things, each drawn as the app icon you already recognise. This screen
+ * exists because the failure it prevents is invisible: an ability that cannot
+ * run because the calendar was never granted fails silently in your ear, while
+ * you are walking, with no screen being looked at.
  *
- * So each row carries the one fact that makes it worth acting on — how many
- * tools it would unblock. "Calendar — unblocks 3 tools" is a reason to connect
- * something; a bare list of logos is not.
+ * So every row says what Grove does with it rather than just naming it, and the
+ * two rows that can never work say so outright instead of offering a button
+ * that leads nowhere.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
-import { Icon } from '@/components/icon';
-import { Card, Dot, Empty, Mono, Notice, Screen, Section } from '@/components/ui';
+import { AppIcon } from '@/components/app-icon';
+import { Card, Mono, Notice, Screen, Section } from '@/components/ui';
 import { Radius, Type } from '@/constants/theme';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
-import { fetchOAuthProviders } from '@/lib/noctusApi';
-import { ABILITIES } from '@/lib/abilities';
-
-type Integration = {
-  key: string;
-  label: string;
-  connected: boolean;
-  /** Abilities that are waiting on exactly this. */
-  unblocks: number;
-  /** Abilities that would use it. */
-  wantedBy: number;
-};
+import { abilityById } from '@/lib/abilities';
+import { CONNECTIONS, type Connection } from '@/lib/connections';
 
 export default function Connections() {
   const palette = usePalette();
   const { connections, connect, disconnect, notice, dismissNotice } = useSession();
 
-  const [providers, setProviders] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    void (async () => {
-      try {
-        const available = await fetchOAuthProviders(controller.signal);
-        // Noctus reports a map of provider → enabled; only the enabled ones
-        // can actually complete a consent flow, so the rest are not offered.
-        setProviders(Object.entries(available).filter(([, on]) => on).map(([key]) => key));
-      } catch {
-        // Falling back to what the tools themselves ask for still produces a
-        // usable screen — it just can't list providers nothing needs yet.
-      } finally {
-        setLoading(false);
-      }
-    })();
-    return () => controller.abort();
-  }, []);
+  const live = new Set(connections);
+  const connected = CONNECTIONS.filter((c) => live.has(c.key));
+  const rest = CONNECTIONS.filter((c) => !live.has(c.key));
 
-  /**
-   * The union of what Noctus can broker and what Grove's abilities ask for.
-   *
-   * Neither source alone is right: providers alone lists things nothing here
-   * needs, and ability needs alone would hide an integration until something
-   * that wants it exists. Note that several abilities need a *device*
-   * permission rather than an account — those are not OAuth and never appear
-   * in /api/credentials, so they are filtered out here and asked for on the
-   * phone instead.
-   */
-  const integrations = useMemo<Integration[]>(() => {
-    const keys = new Set<string>(providers);
-    for (const ability of ABILITIES) {
-      for (const need of ability.needs) {
-        if (!need.endsWith('-permission')) keys.add(need);
-      }
-    }
-
-    const live = new Set(connections);
-
-    return [...keys]
-      .map((key) => ({
-        key,
-        label: prettify(key),
-        connected: live.has(key),
-        unblocks: ABILITIES.filter((a) => !a.wired && a.needs.includes(key)).length,
-        wantedBy: ABILITIES.filter((a) => a.needs.includes(key)).length,
-      }))
-      .sort(
-        (a, b) =>
-          Number(b.connected) - Number(a.connected) ||
-          b.unblocks - a.unblocks ||
-          b.wantedBy - a.wantedBy ||
-          a.label.localeCompare(b.label)
-      );
-  }, [providers, connections]);
-
-  const act = async (integration: Integration) => {
-    setWorking(integration.key);
+  const act = async (item: Connection) => {
+    if (item.impossible) return;
+    setWorking(item.key);
     setError(null);
     try {
-      if (integration.connected) await disconnect(integration.key);
-      else await connect(integration.key);
+      if (live.has(item.key)) await disconnect(item.key);
+      else await connect(item.key);
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : 'That didn’t work.');
     } finally {
@@ -109,131 +47,125 @@ export default function Connections() {
     }
   };
 
-  const connected = integrations.filter((i) => i.connected);
-  const rest = integrations.filter((i) => !i.connected);
-
   return (
-    <Screen
-      title="Connections"
-      subtitle="What Grove may reach on your behalf."
-    >
+    <Screen title="Connections" subtitle="What Grove may reach on your behalf.">
       {notice ? <Notice text={notice} onDismiss={dismissNotice} /> : null}
       {error ? <Notice text={error} onDismiss={() => setError(null)} /> : null}
 
-      {loading && integrations.length === 0 ? (
-        <View style={{ paddingVertical: 40, alignItems: 'center' }}>
-          <ActivityIndicator color={palette.muted} />
-        </View>
-      ) : null}
-
       {connected.length > 0 ? (
         <Section label="Connected">
-          {connected.map((integration) => (
-            <IntegrationRow
-              key={integration.key}
-              integration={integration}
-              busy={working === integration.key}
-              onPress={() => void act(integration)}
+          {connected.map((item) => (
+            <Row
+              key={item.key}
+              item={item}
+              connected
+              busy={working === item.key}
+              onPress={() => void act(item)}
             />
           ))}
         </Section>
       ) : null}
 
-      {rest.length > 0 ? (
-        <Section label={connected.length > 0 ? 'Available' : undefined}>
-          {rest.map((integration) => (
-            <IntegrationRow
-              key={integration.key}
-              integration={integration}
-              busy={working === integration.key}
-              onPress={() => void act(integration)}
-            />
-          ))}
-        </Section>
-      ) : null}
+      <Section label={connected.length > 0 ? 'Available' : undefined}>
+        {rest.map((item) => (
+          <Row
+            key={item.key}
+            item={item}
+            connected={false}
+            busy={working === item.key}
+            onPress={() => void act(item)}
+          />
+        ))}
+      </Section>
 
-      {!loading && integrations.length === 0 ? (
-        <Empty text="Nothing to connect yet." />
-      ) : null}
+      <Text
+        style={[
+          Type.bodySm,
+          { color: palette.muted, paddingHorizontal: 2, marginTop: 4 },
+        ]}
+      >
+        Calendar, Reminders, Music and Maps are permissions on this phone. Mail
+        is an account, so it opens a browser.
+      </Text>
     </Screen>
   );
 }
 
-function IntegrationRow({
-  integration,
+function Row({
+  item,
+  connected,
   busy,
   onPress,
 }: {
-  integration: Integration;
+  item: Connection;
+  connected: boolean;
   busy: boolean;
   onPress: () => void;
 }) {
   const palette = usePalette();
 
-  const reason = integration.connected
-    ? integration.wantedBy > 0
-      ? `Used by ${integration.wantedBy} ${integration.wantedBy === 1 ? 'ability' : 'abilities'}`
-      : 'Connected'
-    : integration.unblocks > 0
-      ? `Unblocks ${integration.unblocks} ${integration.unblocks === 1 ? 'ability' : 'abilities'}`
-      : integration.wantedBy > 0
-        ? `Needed by ${integration.wantedBy} ${integration.wantedBy === 1 ? 'ability' : 'abilities'}`
-        : 'Not needed yet';
+  // An ability that exists but has no code behind it yet is a different thing
+  // from a platform that will never allow it, and the row says which.
+  const built = item.unlocks.some((id) => abilityById(id)?.wired);
+  const disabled = Boolean(item.impossible);
+
+  const note = item.impossible
+    ? item.impossible
+    : connected
+      ? item.what
+      : built
+        ? item.what
+        : 'Not built yet';
 
   return (
-    <Card style={{ marginBottom: 8 }}>
+    <Card style={{ marginBottom: 8, opacity: disabled ? 0.55 : 1 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
-        <Dot tone={integration.connected ? 'live' : integration.unblocks > 0 ? 'alert' : 'off'} />
+        <AppIcon name={item.icon} size={32} />
 
         <View style={{ flex: 1, gap: 2 }}>
-          <Text style={[Type.cardTitle, { color: palette.ink }]}>{integration.label}</Text>
-          <Mono>{reason}</Mono>
+          <Text style={[Type.cardTitle, { color: palette.ink }]}>{item.label}</Text>
+          <Text style={[Type.bodySm, { color: palette.muted }]} numberOfLines={2}>
+            {note}
+          </Text>
         </View>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`${integration.connected ? 'Disconnect' : 'Connect'} ${integration.label}`}
-          disabled={busy}
-          onPress={onPress}
-          style={({ pressed }) => ({
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 6,
-            height: 34,
-            paddingHorizontal: 13,
-            borderRadius: Radius.well,
-            backgroundColor: integration.connected ? 'transparent' : palette.mark,
-            borderWidth: 1,
-            borderColor: integration.connected ? palette.line : palette.mark,
-            opacity: busy ? 0.4 : pressed ? 0.75 : 1,
-          })}
-        >
-          {busy ? (
-            <ActivityIndicator size="small" color={palette.muted} />
-          ) : (
-            <>
-              {integration.connected ? null : (
-                <Icon name="plug" size={14} color={palette.paper} />
-              )}
+        {disabled ? (
+          <Mono color={palette.muted}>Can’t</Mono>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${connected ? 'Disconnect' : 'Connect'} ${item.label}`}
+            disabled={busy}
+            onPress={onPress}
+            style={({ pressed }) => ({
+              height: 34,
+              minWidth: 76,
+              paddingHorizontal: 13,
+              borderRadius: Radius.well,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: connected ? 'transparent' : palette.mark,
+              borderWidth: 1,
+              borderColor: connected ? palette.line : palette.mark,
+              opacity: busy ? 0.4 : pressed ? 0.75 : 1,
+            })}
+          >
+            {busy ? (
+              <ActivityIndicator size="small" color={palette.muted} />
+            ) : (
               <Text
                 style={{
                   fontFamily: Type.cardTitle.fontFamily,
                   fontSize: 13,
-                  color: integration.connected ? palette.inkSoft : palette.paper,
+                  color: connected ? palette.inkSoft : palette.raised,
                 }}
               >
-                {integration.connected ? 'Disconnect' : 'Connect'}
+                {connected ? 'Disconnect' : 'Connect'}
               </Text>
-            </>
-          )}
-        </Pressable>
+            )}
+          </Pressable>
+        )}
       </View>
     </Card>
   );
-}
-
-/** "google_calendar" → "Google calendar". Noctus's keys are snake_case. */
-function prettify(key: string): string {
-  const words = key.replace(/[_-]+/g, ' ').trim();
-  return words.charAt(0).toUpperCase() + words.slice(1);
 }

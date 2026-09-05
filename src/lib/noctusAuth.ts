@@ -238,8 +238,11 @@ export async function signInWithNoctus(): Promise<Session | null> {
     // this means Supabase rejected `redirectTo` (it isn't in the project's
     // allowlist) and sent the user to the project's Site URL instead — the
     // tokens are appended to *that* page's URL rather than coming back here.
+    // Naming the exact URL matters. The fix is one paste into a Supabase
+    // settings page, and without the string in front of them people reasonably
+    // conclude the button is broken rather than unconfigured.
     throw new SignInIncomplete(
-      'Noctus signed you in but sent you to its website instead of back here, because this app’s redirect isn’t allowlisted in Supabase yet. Copy the address bar from that page and paste it below to finish.'
+      `Google signed you in, then Supabase sent you to Noctus's website instead of back here — this app's redirect isn't on its allowlist.\n\nFix it once: Supabase → Authentication → URL Configuration → Redirect URLs, add:\n${redirectTo}\n\nOr paste the address bar from that page below to finish this time.`
     );
   }
   if (result.type !== 'success') return null;

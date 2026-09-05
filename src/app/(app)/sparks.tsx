@@ -14,6 +14,7 @@
 
 import { Switch, Text, View } from 'react-native';
 
+import { AppIcon, iconForKey } from '@/components/app-icon';
 import { Icon } from '@/components/icon';
 import { Card, Dot, Empty, Mono, Screen, Section } from '@/components/ui';
 import { Type } from '@/constants/theme';
@@ -148,14 +149,13 @@ function AbilityRow({
   onDevice: boolean;
 }) {
   const palette = usePalette();
+  const tile = iconForKey(name);
 
   return (
     <Card style={{ marginBottom: 8, opacity: wired ? 1 : 0.55 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
-        <View style={{ paddingTop: 5 }}>
-          <Dot tone={wired ? 'live' : 'off'} />
-        </View>
-        <View style={{ flex: 1, gap: 3 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
+        {tile ? <AppIcon name={tile} size={30} /> : <Dot tone={wired ? 'live' : 'off'} />}
+        <View style={{ flex: 1, gap: 2 }}>
           <Text style={[Type.cardTitle, { color: palette.ink }]}>{name}</Text>
           <Text style={[Type.bodySm, { color: palette.muted }]}>{what}</Text>
         </View>
