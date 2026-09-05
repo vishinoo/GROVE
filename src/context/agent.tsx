@@ -477,8 +477,19 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    * audio session would install a volume observer with nothing to observe.
    */
   useEffect(() => {
+    console.log('[grove:volume] effect', { armed, want: persona.volumeTrigger });
     if (!armed) return;
-    void trigger.setVolumeFallback(persona.volumeTrigger);
+    // Not `void`: a rejection here is the difference between "the hardware
+    // sends nothing" and "the native call failed", and those look identical
+    // from the outside.
+    trigger
+      .setVolumeFallback(persona.volumeTrigger)
+      .then(() => {
+        console.log('[grove:volume] native now', trigger.isVolumeFallbackOn());
+      })
+      .catch((error: unknown) => {
+        console.log('[grove:volume] FAILED', error);
+      });
   }, [armed, persona.volumeTrigger]);
 
   // Signing out must not leave Grove holding the audio session and the remote.

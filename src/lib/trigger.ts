@@ -140,6 +140,7 @@ export async function arm(): Promise<boolean> {
  * phone's own volume-down button triggers Grove too.
  */
 export async function setVolumeFallback(enabled: boolean): Promise<void> {
+  console.log('[grove:volume] setVolumeFallback', enabled, 'native available:', isAvailable());
   if (!isAvailable()) return;
   await setNativeVolumeTrigger(enabled);
 }

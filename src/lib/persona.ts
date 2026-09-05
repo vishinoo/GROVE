@@ -39,6 +39,12 @@ export type Persona = {
    * public and "Grove" is not everyone's idea of a thing to say on a train.
    */
   name: string;
+  /**
+   * The chosen system voice, or unset to let speak.ts pick the best installed
+   * one. Kept beside the manner rather than inside `delivery` because it is a
+   * thing the user chooses, not a synthesiser parameter.
+   */
+  voiceId?: string;
   /** The user's own words for how Grove should talk. May be empty. */
   manner: string;
   delivery: Delivery;
@@ -195,6 +201,7 @@ export async function loadPersona(): Promise<Persona> {
         typeof parsed.name === 'string' && parsed.name.trim()
           ? parsed.name.slice(0, NAME_LIMIT)
           : DEFAULT_NAME,
+      voiceId: typeof parsed.voiceId === 'string' ? parsed.voiceId : undefined,
       manner: typeof parsed.manner === 'string' ? parsed.manner : DEFAULT_PERSONA.manner,
       delivery: {
         rate: clamp(parsed.delivery?.rate, 0.6, 1.5, DEFAULT_PERSONA.delivery.rate),

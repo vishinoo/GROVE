@@ -28,7 +28,9 @@ import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
 import { MANNER_LIMIT, NAME_LIMIT, type Persona } from '@/lib/persona';
+import { availableVoices, bestVoiceId, hasEnhancedVoice, speak } from '@/lib/speak';
 import * as trigger from '@/lib/trigger';
+import type * as SpeechTypes from 'expo-speech';
 
 export default function Settings() {
   const palette = usePalette();
@@ -94,7 +96,12 @@ export default function Settings() {
       </Section>
 
       <Section label="Voice">
-        <Card style={{ paddingVertical: 2 }}>
+        <VoicePicker
+          selected={persona.voiceId}
+          onSelect={(voiceId) => set({ voiceId })}
+          delivery={persona.delivery}
+        />
+        <Card style={{ paddingVertical: 2, marginTop: 10 }}>
           <Stepper
             label="Speed"
             value={persona.delivery.rate}
@@ -209,6 +216,147 @@ export default function Settings() {
         />
       </Section>
     </Screen>
+  );
+}
+
+/**
+ * Which voice Grove speaks in.
+ *
+ * The list is scored in speak.ts rather than shown in device order, because the
+ * order iOS returns is arbitrary and its first entry is usually a compact voice.
+ *
+ * The notice at the top is the only advice on this screen worth giving. iOS
+ * ships every language with a small "compact" voice and offers a much better
+ * one as a download — until someone fetches it, no amount of rate and pitch
+ * tuning stops it sounding like a satnav. That download is free and is a bigger
+ * improvement than anything this app can do in code.
+ */
+function VoicePicker({
+  selected,
+  onSelect,
+  delivery,
+}: {
+  selected?: string;
+  onSelect: (id: string) => void;
+  delivery: Persona['delivery'];
+}) {
+  const palette = usePalette();
+  const [voices, setVoices] = useState<SpeechTypes.Voice[]>([]);
+  const [enhanced, setEnhanced] = useState(true);
+  const [auto, setAuto] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const [list, hasGood, fallback] = await Promise.all([
+        availableVoices(),
+        hasEnhancedVoice(),
+        bestVoiceId(),
+      ]);
+      if (!alive) return;
+      setVoices(list.slice(0, 8));
+      setEnhanced(hasGood);
+      setAuto(fallback);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const current = selected ?? auto ?? undefined;
+  const chosen = voices.find((v) => v.identifier === current);
+
+  const preview = (id: string) =>
+    speak('This is how I sound. Press your ring whenever you want me.', {
+      ...delivery,
+      voiceId: id,
+    });
+
+  return (
+    <>
+      {!enhanced ? (
+        <Notice
+          tone="info"
+          text={
+            'These are the small built-in voices, which is why it sounds synthetic. ' +
+            'iOS Settings > Accessibility > Spoken Content > Voices > English — download ' +
+            'an Enhanced or Premium one. It is free and it is the biggest difference available.'
+          }
+        />
+      ) : null}
+
+      {/*
+        Collapsed to a single row. Eight voices is a wall of near-identical
+        names, and the only one that matters day to day is the one in use.
+      */}
+      <Card style={{ paddingVertical: 2 }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          accessibilityLabel={`Voice: ${chosen?.name ?? 'automatic'}. Tap to change.`}
+          onPress={() => setOpen((was) => !was)}
+          style={({ pressed }) => ({
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10,
+            paddingVertical: 13,
+            opacity: pressed ? 0.6 : 1,
+          })}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={[Type.body, { color: palette.ink }]}>
+              {chosen?.name ?? 'Best available'}
+            </Text>
+            <Text style={[Type.bodySm, { color: palette.muted }]}>
+              {chosen
+                ? `${chosen.language}${chosen.quality === 'Enhanced' ? ' · enhanced' : ''}`
+                : 'Chosen for you'}
+            </Text>
+          </View>
+          {voices.length > 0 ? <Mono>{voices.length}</Mono> : null}
+          <Icon name={open ? 'down' : 'chevron'} size={14} color={palette.muted} />
+        </Pressable>
+
+        {open
+          ? voices.map((voice) => {
+              const on = voice.identifier === current;
+              return (
+                <Pressable
+                  key={voice.identifier}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: on }}
+                  accessibilityLabel={`${voice.name}, ${voice.quality}`}
+                  onPress={() => {
+                    onSelect(voice.identifier);
+                    // Hearing it is the only way to choose one.
+                    preview(voice.identifier);
+                  }}
+                  style={({ pressed }) => ({
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 10,
+                    paddingVertical: 11,
+                    borderTopWidth: 1,
+                    borderTopColor: palette.line,
+                    opacity: pressed ? 0.6 : 1,
+                  })}
+                >
+                  <Dot tone={on ? 'live' : 'off'} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[Type.body, { color: palette.ink }]}>{voice.name}</Text>
+                    <Text style={[Type.bodySm, { color: palette.muted }]}>
+                      {voice.language}
+                      {voice.quality === 'Enhanced' ? ' · enhanced' : ''}
+                    </Text>
+                  </View>
+                  <Icon name="talk" size={15} color={palette.muted} />
+                </Pressable>
+              );
+            })
+          : null}
+      </Card>
+    </>
   );
 }
 

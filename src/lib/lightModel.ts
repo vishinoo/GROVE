@@ -31,7 +31,7 @@
  */
 
 const GEMINI_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '';
-const GEMINI_MODEL = process.env.EXPO_PUBLIC_GEMINI_MODEL || 'gemini-2.5-flash-lite';
+const GEMINI_MODEL = process.env.EXPO_PUBLIC_GEMINI_MODEL || 'gemini-3.1-flash-lite';
 /**
  * The rung above, used only when the cheap one genuinely cannot serve a turn.
  *
@@ -55,7 +55,10 @@ const GEMINI_MODEL_DEEP = process.env.EXPO_PUBLIC_GEMINI_MODEL_DEEP || '';
  * and the turn is retried once against an id known to be current. Being wrong
  * about the model in .env should cost a slightly different model, not silence.
  */
-const SAFE_MODEL = 'gemini-2.5-flash-lite';
+// Verified working on 2026-09-05. Note it is NOT the cheapest on the price
+// list — gemini-2.5-flash-lite is, but Google has closed that one to new API
+// keys, so it is not a safe fallback however cheap it looks.
+const SAFE_MODEL = 'gemini-3.1-flash-lite';
 
 /** Model ids that answered 404 this run. Not retried; not asked about twice. */
 const retired = new Set<string>();

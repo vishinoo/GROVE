@@ -80,8 +80,10 @@ async function checkGemini(key, model) {
   if (response.status === 400 && /API key not valid/i.test(reason)) {
     say(`  ✗ the key is rejected. Check it at https://aistudio.google.com/apikey`);
   } else if (response.status === 404) {
-    say(`  ✗ "${model}" does not exist or is retired.`);
-    say(`    This is the one that looks like a missing key from inside the app.`);
+    say(`  ✗ "${model}" is not available to this key.`);
+    // Google's message names the replacement, which is the whole answer.
+    if (reason) say(`    Google says: ${reason}`);
+    say(`    This is the failure that looks like a missing key from inside the app.`);
   } else if (response.status === 429) {
     say(`  ✗ out of quota for ${model}.`);
   } else if (response.status === 403) {
@@ -120,7 +122,7 @@ async function checkOllama(url, model) {
 (async () => {
   const env = readEnv();
   const key = env.EXPO_PUBLIC_GEMINI_API_KEY || '';
-  const model = env.EXPO_PUBLIC_GEMINI_MODEL || 'gemini-2.5-flash-lite';
+  const model = env.EXPO_PUBLIC_GEMINI_MODEL || 'gemini-3.1-flash-lite';
   const deep = env.EXPO_PUBLIC_GEMINI_MODEL_DEEP || '';
   const ollamaUrl = env.EXPO_PUBLIC_OLLAMA_URL || '';
   const ollamaModel = env.EXPO_PUBLIC_OLLAMA_MODEL || 'llama3.2:1b';
