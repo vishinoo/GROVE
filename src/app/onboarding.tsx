@@ -22,6 +22,7 @@ import { Orb } from '@/components/orb';
 import { Button, Card, Dot, Mono } from '@/components/ui';
 import { Radius, Space, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
+import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { markOnboardingSeen } from '@/lib/firstRun';
 import { NAME_LIMIT } from '@/lib/persona';
@@ -35,13 +36,18 @@ export default function Onboarding() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [index, setIndex] = useState(0);
+  const { status } = useSession();
 
   const step = STEPS[index];
   const last = index === STEPS.length - 1;
 
   const finish = async () => {
     await markOnboardingSeen();
-    router.replace('/login');
+    // Where the intro lets you out depends on whether you are already signed
+    // in. It used to always land on /login, which meant replaying it — or
+    // being sent through it by a stray dev flag — threw away a perfectly good
+    // session and asked for Google again.
+    router.replace(status === 'signed-in' ? '/(app)' : '/login');
   };
 
   const advance = () => (last ? void finish() : setIndex((n) => n + 1));
@@ -97,7 +103,10 @@ export default function Onboarding() {
             />
           ))}
         </View>
-        <Button label={last ? 'Sign in with Noctus' : 'Continue'} onPress={advance} />
+        <Button
+          label={last ? (status === 'signed-in' ? 'Done' : 'Sign in with Noctus') : 'Continue'}
+          onPress={advance}
+        />
       </View>
     </View>
   );

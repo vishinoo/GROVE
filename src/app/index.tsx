@@ -28,12 +28,15 @@ export default function Index() {
     );
   }
 
-  // Ahead of the session check on purpose: while iterating on the intro you
-  // are almost always already signed in, and the shortcut below would skip it.
-  if (ALWAYS_SHOW_ONBOARDING) return <Redirect href="/onboarding" />;
-
   // A live session means this app has been used before, so the intro is only
   // ever in the way — it belongs in front of people who haven't signed in.
+  //
+  // This deliberately outranks ALWAYS_SHOW_ONBOARDING. That flag used to come
+  // first, so a machine with it set walked a signed-in user through the intro
+  // on every launch and then dropped them at /login — which reads as being
+  // signed out, and means doing Google again, several times a day. A dev
+  // convenience must not be able to look like a broken session.
   if (status === 'signed-in') return <Redirect href="/(app)" />;
+  if (ALWAYS_SHOW_ONBOARDING) return <Redirect href="/onboarding" />;
   return <Redirect href={seenIntro ? '/login' : '/onboarding'} />;
 }
