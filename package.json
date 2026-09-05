@@ -47,7 +47,8 @@
     "ios": "node scripts/check-node.js && expo start --ios",
     "web": "node scripts/check-node.js && expo start --web",
     "lint": "expo lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check-model": "node scripts/check-model.js"
   },
   "private": true,
   "engines": {
