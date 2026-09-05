@@ -249,6 +249,39 @@ export async function createSpark(
   return spark;
 }
 
+/**
+ * Edits a spark in place.
+ *
+ * A spark is made from one spoken sentence, and speech is misheard — the wrong
+ * time, the wrong ability, a title built from the wrong four words. Without
+ * this the only repair is to delete it and say the whole thing again, which is
+ * a poor trade for a typo in a time.
+ *
+ * `schedulable` is recomputed rather than carried over, because changing the
+ * ability can change whether the job can run with the phone asleep, and a stale
+ * flag there is the difference between a 7am briefing and one that never comes.
+ */
+export async function editSpark(
+  uid: string,
+  id: string,
+  patch: Partial<Pick<Spark, 'title' | 'said' | 'abilityId' | 'args' | 'schedule'>>
+): Promise<Spark[]> {
+  const next = (await loadSparks(uid)).map((spark) => {
+    if (spark.id !== id) return spark;
+    const abilityId = patch.abilityId ?? spark.abilityId;
+    if (!abilityById(abilityId)) return spark;
+    return {
+      ...spark,
+      ...patch,
+      abilityId,
+      title: (patch.title ?? spark.title).trim().slice(0, 40) || spark.title,
+      schedulable: isSchedulable([abilityId]),
+    };
+  });
+  await write(uid, next);
+  return next;
+}
+
 export async function setSparkEnabled(
   uid: string,
   id: string,

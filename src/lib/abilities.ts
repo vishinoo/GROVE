@@ -23,6 +23,15 @@
  * Grove is up, and the UI has to say so rather than quietly not happening.
  */
 
+import {
+  addReminder,
+  ensureCalendarAccess,
+  ensureRemindersAccess,
+  eventsAhead,
+  moveEvent,
+  readWhen,
+  sayWhen,
+} from './deviceCalendar';
 import { fetchJson } from './net';
 
 /**
@@ -149,11 +158,34 @@ const CALENDAR_READ: Ability = {
   name: 'Calendar',
   what: 'Says what is on, and what is next.',
   where: 'device',
-  wired: false,
+  wired: true,
   needs: ['calendar-permission'],
   args: { when: { type: 'string', what: 'the day, e.g. "today" or "Thursday"' } },
   examples: ["what's on today", 'when is my next thing', 'am I free at four'],
-  run: unwired('calendar', 'this build has no calendar access yet.'),
+  run: async (args) => {
+    if (!(await ensureCalendarAccess())) {
+      return { ok: false, spoken: 'I need permission to see your calendar. It is in iOS Settings.' };
+    }
+    // "tomorrow" and "this week" are the two that need a different window;
+    // everything else is the day in front of you.
+    const asked = (args.when || '').toLowerCase();
+    const hours = /\bweek\b/.test(asked) ? 24 * 7 : /\btomorrow\b/.test(asked) ? 48 : 24;
+
+    const events = await eventsAhead(hours);
+    if (events === null) return { ok: false, spoken: 'Could not read your calendar.' };
+    if (events.length === 0) {
+      return { ok: true, spoken: hours > 24 ? 'Nothing this week.' : 'Nothing on.' };
+    }
+
+    // Spoken, so the first two and a count — a read-out list is unusable in
+    // your ear past about three items.
+    const [first, second] = events;
+    const rest = events.length - 2;
+    let line = `${first.title} at ${sayWhen(first.start)}`;
+    if (second) line += `, then ${second.title} at ${sayWhen(second.start)}`;
+    if (rest > 0) line += `, and ${rest} more`;
+    return { ok: true, spoken: `${line}.`, detail: `${events.length} in the next ${hours}h` };
+  },
 };
 
 const CALENDAR_MOVE: Ability = {
@@ -161,14 +193,25 @@ const CALENDAR_MOVE: Ability = {
   name: 'Move an event',
   what: 'Moves something already in your calendar.',
   where: 'device',
-  wired: false,
+  wired: true,
   needs: ['calendar-permission'],
   args: {
     event: { type: 'string', what: 'which event', required: true },
     to: { type: 'string', what: 'the new time', required: true },
   },
   examples: ['move my two o’clock to Thursday', 'push the dentist back an hour'],
-  run: unwired('moving events', 'this build has no calendar access yet.'),
+  run: async (args) => {
+    const which = (args.event || '').trim();
+    const when = readWhen(args.to || '');
+    if (!which) return { ok: false, spoken: 'Which one?' };
+    // Refusing to guess is the point. A misread date moves a real appointment.
+    if (!when) return { ok: false, spoken: 'When do you want it moved to?' };
+
+    const result = await moveEvent(which, when);
+    return result.ok
+      ? { ok: true, spoken: `Moved ${result.title} to ${sayWhen(when)}.` }
+      : { ok: false, spoken: `I could not find ${which} in your calendar.` };
+  },
 };
 
 const REMIND: Ability = {
@@ -176,14 +219,26 @@ const REMIND: Ability = {
   name: 'Reminder',
   what: 'Catches a thought without you stopping.',
   where: 'device',
-  wired: false,
+  wired: true,
   needs: ['reminders-permission'],
   args: {
     what: { type: 'string', what: 'the thing to remember', required: true },
     when: { type: 'string', what: 'when to be reminded' },
   },
   examples: ['remind me to call the landlord', 'remind me to buy milk at six'],
-  run: unwired('reminders', 'this build has no reminders access yet.'),
+  run: async (args) => {
+    const what = (args.what || '').trim().replace(/^to\s+/i, '');
+    if (!what) return { ok: false, spoken: 'Remind you to do what?' };
+    if (!(await ensureRemindersAccess())) {
+      return { ok: false, spoken: 'I need permission for Reminders. It is in iOS Settings.' };
+    }
+    // A reminder with no time is still a useful reminder, unlike a moved event
+    // with no time — so this one does not refuse.
+    const due = args.when ? readWhen(args.when) : null;
+    const saved = await addReminder(what, due);
+    if (!saved) return { ok: false, spoken: 'Could not save that reminder.' };
+    return { ok: true, spoken: due ? `Reminder set for ${sayWhen(due)}.` : 'Added to your reminders.' };
+  },
 };
 
 const MUSIC: Ability = {

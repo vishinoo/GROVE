@@ -15,7 +15,7 @@
 
 import { Platform } from 'react-native';
 
-export type Capability = 'speech' | 'remote' | 'haptics';
+export type Capability = 'speech' | 'remote' | 'haptics' | 'calendar';
 
 export type CapabilityReport = {
   /** On-device speech recognition — the ear. */
@@ -23,6 +23,8 @@ export type CapabilityReport = {
   /** The audio session + ring trigger module. */
   remote: boolean;
   haptics: boolean;
+  /** Events and reminders. Present in Expo Go, unlike the other two. */
+  calendar: boolean;
   /**
    * True only when every part of the always-on story is present. When false,
    * Grove still works — you type instead of talking, and the phone speaks the
@@ -65,11 +67,17 @@ export function capabilities(): CapabilityReport {
 
   const haptics = Platform.OS !== 'web' && probe(() => require('expo-haptics').impactAsync);
 
+  // Unlike speech recognition and the ring module, this one ships inside Expo
+  // Go — so calendar and reminders work without a device build, which makes
+  // them the cheapest real capability Grove has.
+  const calendar =
+    Platform.OS !== 'web' && probe(() => require('expo-calendar').getEventsAsync);
+
   const missing: string[] = [];
   if (!speech) missing.push('speech recognition');
   if (!remote && Platform.OS === 'ios') missing.push('the ring trigger');
 
-  cached = { speech, remote, haptics, full: speech && remote, missing };
+  cached = { speech, remote, haptics, calendar, full: speech && remote, missing };
   return cached;
 }
 /* eslint-enable @typescript-eslint/no-require-imports */

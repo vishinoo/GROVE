@@ -19,7 +19,11 @@
         "NSMicrophoneUsageDescription": "Grove listens when you press your ring, so you can talk to it through your glasses.",
         "NSSpeechRecognitionUsageDescription": "Grove turns what you say into text so it can answer. Speech stays on this device unless you turn that off in Settings.",
         "NSBluetoothAlwaysUsageDescription": "Grove uses your glasses and ring once you have paired them in iOS Settings.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCalendarsUsageDescription": "Grove reads your day out and moves things when you ask it to.",
+        "NSCalendarsFullAccessUsageDescription": "Grove reads your day out and moves things when you ask it to.",
+        "NSRemindersUsageDescription": "Grove saves the things you ask it to remember.",
+        "NSRemindersFullAccessUsageDescription": "Grove saves the things you ask it to remember."
       }
     },
     "android": {

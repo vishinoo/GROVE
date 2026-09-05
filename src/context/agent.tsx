@@ -86,6 +86,7 @@ type AgentValue = {
   /** Standing jobs, newest first. */
   sparks: sparks.Spark[];
   setSparkEnabled: (id: string, enabled: boolean) => Promise<void>;
+  editSpark: (id: string, patch: Parameters<typeof sparks.editSpark>[2]) => Promise<void>;
   deleteSpark: (id: string) => Promise<void>;
 
   /** The trigger, however it was pressed — ring, screen or keyboard. */
@@ -204,6 +205,13 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const setSparkEnabled = useCallback(async (id: string, enabled: boolean) => {
     setSparkList(await sparks.setSparkEnabled(live.current.uid, id, enabled));
   }, []);
+
+  const editSpark = useCallback(
+    async (id: string, patch: Parameters<typeof sparks.editSpark>[2]) => {
+      setSparkList(await sparks.editSpark(live.current.uid, id, patch));
+    },
+    []
+  );
 
   const deleteSpark = useCallback(async (id: string) => {
     setSparkList(await sparks.deleteSpark(live.current.uid, id));
@@ -551,6 +559,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       forgetEverything,
       sparks: sparkList,
       setSparkEnabled,
+      editSpark,
       deleteSpark,
       press,
       say,
@@ -572,6 +581,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       forgetEverything,
       sparkList,
       setSparkEnabled,
+      editSpark,
       deleteSpark,
       press,
       say,

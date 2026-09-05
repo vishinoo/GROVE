@@ -107,27 +107,7 @@ export default function Talk() {
           <View style={{ marginTop: 32 }}>
             <Mono style={{ marginBottom: 10 }}>Recent</Mono>
             {activity.map((entry) => (
-              <Card key={entry.id} style={{ marginBottom: 8 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
-                  {entry.tool ? <ToolMark name={entry.tool.name} /> : null}
-
-                  <View style={{ flex: 1, gap: 3 }}>
-                    <View style={{ flexDirection: 'row', gap: 10 }}>
-                      <Text
-                        style={[Type.bodySm, { color: palette.muted, flex: 1 }]}
-                        numberOfLines={1}
-                      >
-                        {entry.said}
-                      </Text>
-                      <Mono>{when(entry.at)}</Mono>
-                    </View>
-
-                    <Text style={[Type.body, { color: palette.ink }]} numberOfLines={3}>
-                      {entry.tool?.detail ?? entry.replied}
-                    </Text>
-                  </View>
-                </View>
-              </Card>
+              <LogRow key={entry.id} entry={entry} />
             ))}
           </View>
         ) : null}
@@ -192,11 +172,103 @@ export default function Talk() {
   );
 }
 
-/** The app tile for whatever ran, when one of them did. */
-function ToolMark({ name }: { name: string }) {
-  const icon = iconForKey(name);
-  if (!icon) return null;
-  return <AppIcon name={icon} size={30} />;
+/**
+ * One exchange, and what came of it.
+ *
+ * Collapsed to the two lines that matter — what you said, what happened — and
+ * expanding to the rest. This is the only record that anything happened at all:
+ * it all took place while you were looking somewhere else, so "did that
+ * reminder actually get set" is a question with no other way to answer it.
+ */
+function LogRow({ entry }: { entry: ReturnType<typeof useAgent>['activity'][number] }) {
+  const palette = usePalette();
+  const [open, setOpen] = useState(false);
+
+  const tool = entry.tool;
+  const icon = tool ? iconForKey(tool.name) : null;
+  const failed = tool?.state === 'failed' || tool?.state === 'blocked';
+
+  return (
+    <Card style={{ marginBottom: 8, paddingHorizontal: 0, paddingVertical: 0 }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${entry.said}. Tap for detail.`}
+        onPress={() => setOpen((was) => !was)}
+        style={({ pressed }) => ({ padding: 13, opacity: pressed ? 0.7 : 1 })}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+          {icon ? <AppIcon name={icon} size={30} /> : null}
+          <View style={{ flex: 1, gap: 3 }}>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <Text style={[Type.bodySm, { color: palette.muted, flex: 1 }]} numberOfLines={1}>
+                {entry.said}
+              </Text>
+              <Mono>{when(entry.at)}</Mono>
+            </View>
+            <Text style={[Type.body, { color: palette.ink }]} numberOfLines={open ? undefined : 2}>
+              {tool?.detail ?? entry.replied}
+            </Text>
+          </View>
+        </View>
+
+        {/* A run that failed is the thing you most need to see, so it is on the
+            collapsed card rather than hidden one tap away. */}
+        {tool ? (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 7,
+              marginTop: 10,
+              paddingTop: 10,
+              borderTopWidth: 1,
+              borderTopColor: palette.line,
+            }}
+          >
+            <Dot tone={failed ? 'alert' : tool.state === 'done' ? 'live' : 'off'} />
+            <Text style={[Type.bodySm, { color: palette.inkSoft, flex: 1 }]}>
+              {tool.name}
+              {tool.state === 'done' ? ' ran' : tool.state === 'running' ? ' running' : ` ${tool.state}`}
+            </Text>
+            <Icon name={open ? 'down' : 'chevron'} size={13} color={palette.muted} />
+          </View>
+        ) : null}
+      </Pressable>
+
+      {open ? (
+        <View
+          style={{
+            paddingHorizontal: 13,
+            paddingBottom: 13,
+            borderTopWidth: 1,
+            borderTopColor: palette.line,
+          }}
+        >
+          <LogLine label="You said">{entry.said}</LogLine>
+          <LogLine label="Grove said">{entry.replied}</LogLine>
+          {tool ? <LogLine label="Ability">{`${tool.name} — ${tool.state}`}</LogLine> : null}
+          {tool?.detail ? <LogLine label="Result">{tool.detail}</LogLine> : null}
+          {tool?.needs?.length ? (
+            <LogLine label="Needed">
+              {tool.needs.join(', ').replace(/-permission/g, ' access')}
+            </LogLine>
+          ) : null}
+          <LogLine label="When">{new Date(entry.at).toLocaleString()}</LogLine>
+        </View>
+      ) : null}
+    </Card>
+  );
+}
+
+function LogLine({ label, children }: { label: string; children: string }) {
+  const palette = usePalette();
+  return (
+    <View style={{ marginTop: 12 }}>
+      <Mono style={{ marginBottom: 3 }}>{label}</Mono>
+      <Text style={[Type.bodySm, { color: palette.ink, lineHeight: 19 }]}>{children}</Text>
+    </View>
+  );
 }
 
 /**
