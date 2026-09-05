@@ -20,20 +20,21 @@ import { Radius, Type } from '@/constants/theme';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { fetchOAuthProviders } from '@/lib/noctusApi';
+import { ABILITIES } from '@/lib/abilities';
 
 type Integration = {
   key: string;
   label: string;
   connected: boolean;
-  /** Tools that are installed and waiting on exactly this. */
+  /** Abilities that are waiting on exactly this. */
   unblocks: number;
-  /** Tools in the catalogue that would need it. */
+  /** Abilities that would use it. */
   wantedBy: number;
 };
 
 export default function Connections() {
   const palette = usePalette();
-  const { tools, connections, connect, disconnect, notice, dismissNotice } = useSession();
+  const { connections, connect, disconnect, notice, dismissNotice } = useSession();
 
   const [providers, setProviders] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,15 +60,22 @@ export default function Connections() {
   }, []);
 
   /**
-   * The union of what Noctus offers and what the installed tools ask for.
+   * The union of what Noctus can broker and what Grove's abilities ask for.
    *
-   * Neither source alone is right: providers alone lists things no tool needs,
-   * and tool bindings alone hides an integration until something that wants it
-   * has already been added.
+   * Neither source alone is right: providers alone lists things nothing here
+   * needs, and ability needs alone would hide an integration until something
+   * that wants it exists. Note that several abilities need a *device*
+   * permission rather than an account — those are not OAuth and never appear
+   * in /api/credentials, so they are filtered out here and asked for on the
+   * phone instead.
    */
   const integrations = useMemo<Integration[]>(() => {
     const keys = new Set<string>(providers);
-    for (const tool of tools) for (const need of tool.needs) keys.add(need);
+    for (const ability of ABILITIES) {
+      for (const need of ability.needs) {
+        if (!need.endsWith('-permission')) keys.add(need);
+      }
+    }
 
     const live = new Set(connections);
 
@@ -76,10 +84,8 @@ export default function Connections() {
         key,
         label: prettify(key),
         connected: live.has(key),
-        unblocks: tools.filter(
-          (t) => t.state === 'blocked' && t.missing.includes(key) && t.missing.length === 1
-        ).length,
-        wantedBy: tools.filter((t) => t.needs.includes(key)).length,
+        unblocks: ABILITIES.filter((a) => !a.wired && a.needs.includes(key)).length,
+        wantedBy: ABILITIES.filter((a) => a.needs.includes(key)).length,
       }))
       .sort(
         (a, b) =>
@@ -88,7 +94,7 @@ export default function Connections() {
           b.wantedBy - a.wantedBy ||
           a.label.localeCompare(b.label)
       );
-  }, [providers, tools, connections]);
+  }, [providers, connections]);
 
   const act = async (integration: Integration) => {
     setWorking(integration.key);
@@ -109,7 +115,7 @@ export default function Connections() {
   return (
     <Screen
       title="Connections"
-      subtitle="What Grove is allowed to reach on your behalf. Connecting one here unblocks the tools that need it."
+      subtitle="What Grove may reach on your behalf."
     >
       {notice ? <Notice text={notice} onDismiss={dismissNotice} /> : null}
       {error ? <Notice text={error} onDismiss={() => setError(null)} /> : null}
@@ -147,7 +153,7 @@ export default function Connections() {
       ) : null}
 
       {!loading && integrations.length === 0 ? (
-        <Empty text="Nothing to connect yet. Add a tool first — its integrations will appear here." />
+        <Empty text="Nothing to connect yet." />
       ) : null}
     </Screen>
   );
@@ -166,12 +172,12 @@ function IntegrationRow({
 
   const reason = integration.connected
     ? integration.wantedBy > 0
-      ? `Used by ${integration.wantedBy} ${integration.wantedBy === 1 ? 'tool' : 'tools'}`
+      ? `Used by ${integration.wantedBy} ${integration.wantedBy === 1 ? 'ability' : 'abilities'}`
       : 'Connected'
     : integration.unblocks > 0
-      ? `Unblocks ${integration.unblocks} ${integration.unblocks === 1 ? 'tool' : 'tools'}`
+      ? `Unblocks ${integration.unblocks} ${integration.unblocks === 1 ? 'ability' : 'abilities'}`
       : integration.wantedBy > 0
-        ? `Needed by ${integration.wantedBy} ${integration.wantedBy === 1 ? 'tool' : 'tools'}`
+        ? `Needed by ${integration.wantedBy} ${integration.wantedBy === 1 ? 'ability' : 'abilities'}`
         : 'Not needed yet';
 
   return (

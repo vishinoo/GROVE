@@ -12,11 +12,14 @@
       "bundleIdentifier": "org.noctusai.grove",
       "infoPlist": {
         "UIBackgroundModes": [
+          "audio",
+          "audio",
           "audio"
         ],
         "NSMicrophoneUsageDescription": "Grove listens when you press your ring, so you can talk to it through your glasses.",
         "NSSpeechRecognitionUsageDescription": "Grove turns what you say into text so it can answer. Speech stays on this device unless you turn that off in Settings.",
-        "NSBluetoothAlwaysUsageDescription": "Grove uses your glasses and ring once you have paired them in iOS Settings."
+        "NSBluetoothAlwaysUsageDescription": "Grove uses your glasses and ring once you have paired them in iOS Settings.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -28,6 +31,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
+        "android.permission.RECORD_AUDIO",
         "android.permission.RECORD_AUDIO"
       ]
     },
@@ -65,6 +69,12 @@
         "projectId": "8b493531-b29b-42cf-8b96-3cbf2883e999"
       }
     },
-    "owner": "vishnukrish"
+    "owner": "vishnukrish",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/8b493531-b29b-42cf-8b96-3cbf2883e999"
+    }
   }
 }

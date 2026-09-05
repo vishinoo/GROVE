@@ -1,8 +1,12 @@
 /**
  * Noctus API client.
  *
- * Grove never does the work itself when a tool covers it — it calls the tool,
- * agent runs on Noctus. This is the whole seam between the two systems.
+ * Noctus is plumbing, not a brain. It authenticates the user, brokers OAuth on
+ * their behalf, and (soon) holds the model key and runs scheduled sparks. It
+ * has no opinion about what Grove can do — that lives in abilities.ts.
+ *
+ * The agent catalogue this file used to talk to is gone. It was 74 business
+ * agents and three of them resembled anything a person does with their own day.
  *
  * Auth is a Supabase JWT in an Authorization header, which is what
  * Backend/middleware/auth.js verifies. Endpoints and payload shapes here match
@@ -172,53 +176,6 @@ export type NoctusUser = {
   plan?: string;
 };
 
-export type NoctusAgentTemplate = {
-  id: string;
-  title: string;
-  description: string;
-  category?: string;
-  tags?: string[];
-  requiredBindings?: string[];
-  icon?: string;
-};
-
-export type NoctusSpark = {
-  id: string;
-  title: string;
-  description?: string;
-  category?: string;
-  agentIds?: string[];
-  kpiLabels?: string[];
-};
-
-export type NoctusInstance = {
-  instanceId: string;
-  agentId: string;
-  title?: string;
-  status?: string;
-  description?: string;
-  category?: string;
-  bindings?: Record<string, unknown>;
-  installedAt?: string;
-};
-
-/* --------------------------------------------------------------- catalogue */
-
-/** Public — the app can show the catalogue before anyone signs in. */
-export function fetchSparks(signal?: AbortSignal): Promise<{ sparks: NoctusSpark[] }> {
-  return request('/api/agents/sparks', { auth: false, signal });
-}
-
-export function fetchBuiltinAgents(
-  signal?: AbortSignal
-): Promise<{ agents: NoctusAgentTemplate[] }> {
-  return request('/api/agents/builtin', { auth: false, signal });
-}
-
-export function fetchOAuthProviders(signal?: AbortSignal): Promise<Record<string, boolean>> {
-  return request('/api/oauth/providers', { auth: false, signal });
-}
-
 /* ---------------------------------------------------------------- account */
 
 export function fetchMe(): Promise<{ user: NoctusUser }> {
@@ -230,83 +187,13 @@ export function syncAccount(displayName?: string): Promise<{ user: NoctusUser }>
   return request('/api/auth/sync', { method: 'POST', body: { displayName } });
 }
 
-/* ----------------------------------------------------------------- crew */
-
-export function fetchMyInstances(signal?: AbortSignal): Promise<{ agents: NoctusInstance[] }> {
-  return request('/api/agents/my', { signal });
-}
-
-/**
- * Adding a Grove tool creates a custom spark on Noctus: a named bundle of
- * whichever built-in agents cover the job. The user never sees the bundle —
- * they see one agent with a face and a name.
- */
-export function createCustomSpark(input: {
-  title: string;
-  description: string;
-  category?: string;
-  agentIds: string[];
-}): Promise<{ sparkId: string; newInstalls: number; results: { instanceId: string }[] }> {
-  return request('/api/agents/create-custom-spark', { method: 'POST', body: input });
-}
-
-export function installSpark(sparkId: string): Promise<unknown> {
-  return request(`/api/agents/install-spark/${encodeURIComponent(sparkId)}`, { method: 'POST' });
-}
-
-/** One node's result inside a run. Shape comes from engine/executor.js. */
-export type RunStep = {
-  nodeId?: string;
-  label?: string;
-  type?: string;
-  success?: boolean;
-  error?: string;
-  output?: unknown;
-  result?: unknown;
-  skipped?: boolean;
-  note?: string;
-};
-
-export type RunResult = {
-  executionId?: string;
-  success?: boolean;
-  error?: string;
-  requiresPayment?: boolean;
-  duration?: number;
-  steps?: RunStep[];
-};
-
-export function runInstance(instanceId: string, input?: unknown): Promise<RunResult> {
-  return request(`/api/agents/my/${encodeURIComponent(instanceId)}/run`, {
-    method: 'POST',
-    body: input ?? {},
-  });
-}
-
-/** Everything an agent has produced, newest first — its visible output. */
-export function fetchInstanceLogs(
-  instanceId: string,
-  signal?: AbortSignal
-): Promise<{ logs: (RunResult & { id?: string; timestamp?: string })[] }> {
-  return request(`/api/agents/my/${encodeURIComponent(instanceId)}/logs`, { signal });
-}
-
-/** Connect a binding so an agent can leave pending_setup and actually run. */
-export function setBinding(
-  instanceId: string,
-  bindings: Record<string, unknown>
-): Promise<unknown> {
-  return request(`/api/agents/my/${encodeURIComponent(instanceId)}/binding`, {
-    method: 'PATCH',
-    body: { bindings },
-  });
-}
-
-export function removeInstance(instanceId: string): Promise<unknown> {
-  return request(`/api/agents/my/${encodeURIComponent(instanceId)}`, { method: 'DELETE' });
-}
-
 /* --------------------------------------------------------- integrations */
+
+/** Which providers this Noctus can actually complete a consent flow for. */
+export function fetchOAuthProviders(signal?: AbortSignal): Promise<Record<string, boolean>> {
+  return request('/api/oauth/providers', { auth: false, signal });
+}
+
 
 /** The integration layer: which of the user's connections are live. */
 export function fetchConnections(signal?: AbortSignal): Promise<{ connected: string[] }> {

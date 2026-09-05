@@ -1,33 +1,40 @@
 /**
  * Grove's brain.
  *
- * The model runs on Noctus, not here. Noctus already holds the provider keys
- * and already knows the account's tools, connections and history, so Grove
- * sends the conversation there and gets a reply back. No LLM key ships in this
- * app — a mobile client cannot keep one secret.
+ * WHAT CHANGED, AND WHY
  *
- * On top of that, this file owns the one decision Noctus has no opinion about
- * and that must never be delegated to a model: whether a sentence should cause
- * something to *happen*. Grove is talked to hands-free, often while the user is
- * doing something else and not looking at anything, so the gap between "what's
- * in my inbox" and "reply to that" is the difference between a useful
- * assistant and one that sends mail on your behalf because it misheard. That
- * rule is local, keyword-based and deliberately boring.
+ * This used to send every turn to Indy on Noctus, pick from a catalogue of 74
+ * Noctus agents, and run one there. All three are gone. The catalogue was a
+ * business-agent catalogue — Marketing, Sales, Wholesale Fulfilment — and
+ * three of its seventy-four were shaped like anything a person does with their
+ * own day. Indy was capped at two messages an hour, which is not a budget you
+ * can hold a conversation inside.
+ *
+ * So Noctus is plumbing now: it brokers OAuth, it will hold the model key, and
+ * it runs scheduled sparks while the phone sleeps. It has no opinion about what
+ * Grove can do. That lives in abilities.ts, as functions.
+ *
+ * TWO DECISIONS STAY LOCAL AND STAY BORING
+ *
+ *   detectActIntent  — whether a sentence should cause something to happen.
+ *   parseSchedule    — whether it should keep happening.
+ *
+ * Both are keyword-based, both are biased toward "no", and neither is ever
+ * delegated to a model. A false negative costs one more sentence. A false
+ * positive sends mail you did not write, or wakes you at seven every morning
+ * for something you asked once.
  */
 
-import { isIndyBlocked, recordIndyResponse } from './indyBudget';
+import { abilityById, isSchedulable, usableAbilities, type Ability } from './abilities';
+import { asPromptBlock, factFrom, type Fact } from './memory';
 import { lightTurn, type LightMessage } from './lightModel';
 import { fallback, mannerDirective, type Persona } from './persona';
-import { getNoctusUrl, isDevSession, NoctusError } from './noctusApi';
-import { DEV_TOKEN, getSession } from './noctusAuth';
-import { pickTool, blockedToolFor, usableTools, type OutputStep, type Tool } from './tools';
+import { describeSchedule, parseSchedule, type Schedule } from './sparks';
 
 export type TurnTool = {
   name: string;
   state: 'running' | 'done' | 'failed' | 'blocked';
   detail?: string;
-  steps?: OutputStep[];
-  /** Integrations to connect before this could work. */
   needs?: string[];
 };
 
@@ -35,7 +42,6 @@ export type Turn = {
   id: string;
   role: 'user' | 'assistant';
   text: string;
-  /** Set when a tool ran for this turn. */
   tool?: TurnTool;
   createdAt: string;
 };
@@ -43,10 +49,18 @@ export type Turn = {
 export type GroveReply = {
   /** What Grove says. Always non-empty. */
   text: string;
-  /** The tool that should run, when the user asked for something to happen. */
-  tool?: Tool;
-  /** A tool that fits but can't run yet, so the UI can offer the fix. */
-  blocked?: Tool;
+  /** The ability to run now, when the user asked for something to happen. */
+  ability?: Ability;
+  args: Record<string, string>;
+  /**
+   * Set when the sentence carried a recurrence, so the caller saves a spark
+   * instead of just running the thing once.
+   */
+  schedule?: Schedule;
+  /** An ability that fits but is not built or connected yet. */
+  blocked?: Ability;
+  /** A fact worth keeping, pulled locally from what was said. */
+  fact?: { key: string; value: string };
 };
 
 export function newTurn(role: Turn['role'], text: string, extra: Partial<Turn> = {}): Turn {
@@ -70,9 +84,7 @@ const QUESTION_OPENERS =
  * Anchored at both ends, and that anchoring is the entire point. Matching on a
  * prefix meant "Now what's on my calendar?" and "Go on, what did she say?" both
  * read as instructions — they start with "now" and "go on" — and went on to
- * pick a tool and run it. Those are questions. A gate that fires on a question
- * is the exact failure this file exists to prevent, so nothing counts unless
- * the user said only the go-ahead and nothing else.
+ * pick something and run it. Those are questions.
  */
 const BARE_GO_AHEAD =
   /^\s*(?:(?:ok|okay|yes|yeah|yep|sure|right)[,.\s]+)?(?:please\s+)?(?:do it|do that|go ahead|go on|run it|sort it|handle it|get on with it|make it so|please do|go|now)[.!\s]*$/i;
@@ -81,15 +93,14 @@ const BARE_GO_AHEAD =
 const BARE_YES =
   /^\s*(?:(?:ok|okay|yes|yeah|yep|sure)(?:[,\s]+please)?|please do)[.!\s]*$/i;
 
-// A verb of work aimed at Grove.
+/** A verb of work aimed at Grove. */
 const WORK_VERB =
-  /\b(make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up)\b/i;
+  /\b(make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up|play|read|brief|tell me about)\b/i;
 
 /**
  * Whether the user wants something done, rather than discussed.
  *
- * This gates every tool run, so it errs toward "no". A false negative costs
- * the user one more sentence; a false positive sends an email.
+ * This gates every ability run, so it errs toward "no".
  */
 export function detectActIntent(text: string): boolean {
   const t = text.trim();
@@ -101,69 +112,36 @@ export function detectActIntent(text: string): boolean {
   return WORK_VERB.test(t);
 }
 
-/* ------------------------------------------------------------- the model */
-
-type IndyResponse = {
-  reply?: string;
-  actions?: unknown[];
-  rateLimited?: boolean;
-  remaining?: number;
-};
-
-export type IndyReply = {
-  text: string;
-  /**
-   * True when the cap was hit. The endpoint answers 200 with the "you've used
-   * all N messages this hour" notice in `reply`, so without this flag that
-   * notice gets spoken aloud as though Grove said it.
-   */
-  rateLimited: boolean;
-};
-
-async function token(): Promise<string> {
-  if (await isDevSession()) return DEV_TOKEN;
-  const session = await getSession();
-  if (!session) throw new NoctusError('Not signed in to Noctus.', 401);
-  return session.access_token;
-}
+/* -------------------------------------------------------------- routing */
 
 /**
- * Sends the conversation to Noctus and returns its reply. History is trimmed
- * to the last dozen turns, which is what the endpoint keeps anyway.
+ * Which ability, if any, a sentence is asking for — without a model.
+ *
+ * The fallback for when the cheap tier is unconfigured or unreachable, and the
+ * sanity check on what it returns. Scores an ability's own example sentences
+ * against the words in the request, which is crude and entirely predictable.
  */
-export async function askNoctus(history: Turn[], userText: string): Promise<IndyReply> {
-  const base = await getNoctusUrl();
-  const messages = [...history, newTurn('user', userText)]
-    .slice(-12)
-    .map((t) => ({ role: t.role, content: t.text.slice(0, 4000) }));
+export function pickAbility(text: string): Ability | null {
+  const haystack = text.toLowerCase();
+  const words = new Set(
+    haystack
+      .split(/[^a-z]+/)
+      .filter((w) => w.length > 3)
+      .slice(0, 24)
+  );
+  if (words.size === 0) return null;
 
-  const response = await fetch(`${base}/api/indy/chat`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: `Bearer ${await token()}`,
-    },
-    body: JSON.stringify({ messages }),
-  });
+  const scored = usableAbilities()
+    .map((ability) => {
+      const corpus = `${ability.name} ${ability.what} ${ability.examples.join(' ')}`.toLowerCase();
+      let score = 0;
+      for (const w of words) if (corpus.includes(w)) score += 1;
+      return { ability, score };
+    })
+    .filter((s) => s.score > 1)
+    .sort((a, b) => b.score - a.score);
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    let parsed: { error?: string } | null = null;
-    try {
-      parsed = JSON.parse(detail);
-    } catch {
-      parsed = null;
-    }
-    throw new NoctusError(
-      parsed?.error || `Grove couldn't answer (${response.status})`,
-      response.status
-    );
-  }
-
-  const data = (await response.json()) as IndyResponse;
-  await recordIndyResponse(data);
-  return { text: (data.reply || '').trim(), rateLimited: data.rateLimited === true };
+  return scored[0]?.ability ?? null;
 }
 
 /** The shape the cheap tier wants: role and content, oldest first. */
@@ -172,128 +150,108 @@ function toLightHistory(history: Turn[]): LightMessage[] {
 }
 
 export type GroveContext = {
-  tools: Tool[];
   persona: Persona;
+  facts: Fact[];
 };
 
 /**
  * One turn of conversation with Grove.
  *
- * Three tiers, cheapest first, because Indy is capped per hour and was being
- * spent on small talk:
+ * Two tiers now, not three:
  *
- *   0  local rules   free      whether this is an instruction; which tool
- *   1  light model   ~free     the conversation itself
- *   2  Indy          capped    anything needing the real account
+ *   0  local rules   free   act intent, recurrence, and a keyword fallback
+ *   1  light model   cheap  the conversation, and choosing the ability
  *
- * A turn only climbs when the tier below genuinely can't serve it, and every
- * tier fails downward — an unconfigured or unreachable light model behaves
- * exactly as if it were not there.
+ * The tier that was capped is gone, so there is no budget to run out of and no
+ * branch here that has to apologise for one.
  */
 export async function askGrove(
   history: Turn[],
   userText: string,
   context: GroveContext
 ): Promise<GroveReply> {
-  const { tools, persona } = context;
+  const { persona, facts } = context;
 
-  // Tier 0. Whether anything is allowed to run. Never a model's call.
+  // Tier 0. Whether anything is allowed to run, and whether it recurs.
   const acting = detectActIntent(userText);
-  const manner = mannerDirective(persona);
+  const schedule = acting ? parseSchedule(userText) : null;
 
-  // Tier 1. Also the router: it answers, it names the tool that fits, or it
-  // says the request needs the account — the only thing worth spending Indy on.
+  // Tier 1. Answers, and names the ability that fits.
   const light = await lightTurn(toLightHistory(history), userText, {
-    tools: usableTools(tools).map((t) => ({ name: t.name, what: t.what })),
-    manner,
+    abilities: usableAbilities().map((a) => ({ id: a.id, what: a.what })),
+    manner: mannerDirective(persona),
+    memory: asPromptBlock(facts),
   });
 
-  // The model sees the whole belt and the sentence, so it beats keywords on
-  // anything phrased indirectly. It also invents names, so a pick matching no
-  // real tool is discarded rather than trusted.
-  const named = light?.toolName
-    ? usableTools(tools).find((t) => t.name.toLowerCase() === light.toolName!.toLowerCase())
-    : undefined;
+  // The model sees the whole set and the sentence, so it beats keywords on
+  // anything phrased indirectly. It also invents ids, so a pick matching no
+  // real ability is discarded rather than trusted.
+  const named = light?.abilityId ? abilityById(light.abilityId) : undefined;
+  const chosen = acting ? (named?.wired ? named : pickAbility(userText)) : null;
 
-  const tool = acting ? named ?? pickTool(userText, tools) : undefined;
+  // Something would fit, but it is not built or connected yet. Saying which is
+  // the difference between a dead end and an instruction.
+  const blocked = !chosen && acting && named && !named.wired ? named : null;
 
-  // Nothing usable fits, but something *would* if it were connected. Saying
-  // which one is the difference between a dead end and an instruction — and it
-  // is the single most common confusion when there is no screen being looked at.
-  const blocked = !tool && acting ? blockedToolFor(userText, tools) : null;
+  const fact = factFrom(userText) ?? undefined;
 
   const settle = (text: string): GroveReply => {
     const usable = text.trim();
     return {
-      // An empty reply is never acceptable: Grove is speaking, and silence
-      // reads as a crash. Whatever else failed, it says something true.
-      text: usable || offlineLine(userText, { acting, tool, blocked }),
-      tool: tool ?? undefined,
+      text: usable || offlineLine(userText, { acting, ability: chosen, blocked, schedule }),
+      ability: chosen ?? undefined,
+      args: light?.args ?? {},
+      schedule: schedule ?? undefined,
       blocked: blocked ?? undefined,
+      fact,
     };
   };
 
-  if (light && !light.escalate) return settle(light.text);
-
-  // Tier 2. Skipped outright once the cap is known to be spent — another
-  // request would only come back with the same notice.
-  if (await isIndyBlocked()) {
-    if (light) return settle(light.text);
-    // With a tool on the job, the cap is irrelevant to what was asked: the run
-    // happens on Noctus either way. Only mention it when it is the real reason
-    // there is no answer.
-    if (tool) return settle('');
-    return settle(
-      "You've used this hour's messages, so I can't check your account right now."
-    );
+  // A recurrence is worth confirming out loud, because it is the one thing
+  // here that keeps happening after the conversation ends.
+  if (schedule && chosen) {
+    const when = describeSchedule(schedule);
+    const caveat = isSchedulable([chosen.id])
+      ? ''
+      : ' It needs Grove running, so it will catch up when you next pick me up.';
+    return settle(`${when}. I'll tell you what comes back.${caveat}`);
   }
 
-  try {
-    const indy = await askNoctus(history, userText);
-
-    // Capped mid-flight. The endpoint's own text explains the cap, which is
-    // worth saying only when there is nothing better to say.
-    if (indy.rateLimited) {
-      if (light) return settle(light.text);
-      return tool ? settle('') : settle(indy.text);
-    }
-    if (indy.text) return settle(indy.text);
-    if (light) return settle(light.text);
-    return settle('');
-  } catch (error) {
-    if (error instanceof NoctusError && error.status === 401) throw error;
-
-    // Indy is unreachable. The cheap tier may already have an answer, and the
-    // tools still exist either way — say so plainly rather than inventing one.
-    if (light) return settle(light.text);
-    return settle('');
-  }
+  if (light?.text) return settle(light.text);
+  return settle('');
 }
 
 /**
  * What Grove says when no model answered at all.
  *
- * Reached on an unconfigured build, a dead network or a spent budget — exactly
- * when silence would be read as a crash. Every branch is written to be true
- * whatever went wrong: none of them claims that anything ran.
+ * Reached on an unconfigured build, a dead network, or a light tier that timed
+ * out — exactly when silence would read as a crash. Every branch is written to
+ * be true whatever went wrong: none of them claims that anything ran.
  */
 function offlineLine(
   userText: string,
-  context: { acting: boolean; tool?: Tool | null; blocked?: Tool | null }
+  context: {
+    acting: boolean;
+    ability?: Ability | null;
+    blocked?: Ability | null;
+    schedule?: Schedule | null;
+  }
 ): string {
   if (context.blocked) {
-    return `${context.blocked.name} would cover that, but it needs ${readableNeeds(
-      context.blocked.missing
-    )} connected first.`;
+    return context.blocked.needs.length > 0
+      ? `${context.blocked.name} would cover that, but it needs ${readableNeeds(context.blocked.needs)} first.`
+      : `${context.blocked.name} would cover that, but it isn't built yet.`;
   }
-  if (context.tool) return fallback.onIt(userText);
-  if (context.acting) return fallback.onIt(userText);
+  if (context.schedule && context.ability) {
+    return `${describeSchedule(context.schedule)}. I'll tell you what comes back.`;
+  }
+  if (context.ability || context.acting) return fallback.onIt(userText);
   return fallback.stuck();
 }
 
 function readableNeeds(keys: string[]): string {
-  const words = keys.map((k) => k.replace(/_/g, ' '));
-  if (words.length <= 1) return words[0] ?? 'an integration';
+  const words = keys.map((k) => k.replace(/[_-]/g, ' '));
+  if (words.length <= 1) return words[0] ?? 'something connected';
   return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
 }
 

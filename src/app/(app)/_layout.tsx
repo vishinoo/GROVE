@@ -9,7 +9,7 @@ import { usePalette } from '@/hooks/use-palette';
 
 const TABS: { name: string; label: string; icon: IconName }[] = [
   { name: 'index', label: 'Talk', icon: 'talk' },
-  { name: 'tools', label: 'Tools', icon: 'tools' },
+  { name: 'sparks', label: 'Sparks', icon: 'tools' },
   { name: 'connections', label: 'Connect', icon: 'plug' },
   { name: 'settings', label: 'Settings', icon: 'settings' },
 ];
@@ -21,7 +21,7 @@ export default function AppLayout() {
   return (
     <Tabs screenOptions={{ headerShown: false }} tabBar={(props) => <Dock {...props} />}>
       <Tabs.Screen name="index" />
-      <Tabs.Screen name="tools" />
+      <Tabs.Screen name="sparks" />
       <Tabs.Screen name="connections" />
       <Tabs.Screen name="settings" />
     </Tabs>

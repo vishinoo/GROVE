@@ -33,7 +33,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { capabilities } from '@/lib/capabilities';
-import { askGrove, newTurn, shortTask, type Turn, type TurnTool } from '@/lib/grove';
+import { askGrove, newTurn, type Turn, type TurnTool } from '@/lib/grove';
 import { abortListening, startListening, stopListening } from '@/lib/listen';
 import {
   DEFAULT_PERSONA,
@@ -43,7 +43,8 @@ import {
   type Persona,
 } from '@/lib/persona';
 import { isSpeaking, speak, stopSpeaking } from '@/lib/speak';
-import { runTool } from '@/lib/tools';
+import * as memory from '@/lib/memory';
+import * as sparks from '@/lib/sparks';
 import * as transcript from '@/lib/transcript';
 import * as trigger from '@/lib/trigger';
 import { useSession } from './session';
@@ -77,6 +78,16 @@ type AgentValue = {
   activity: transcript.Entry[];
   clearActivity: () => Promise<void>;
 
+  /** The small set of durable facts Grove keeps. Readable and deletable. */
+  facts: memory.Fact[];
+  forgetFact: (id: string) => Promise<void>;
+  forgetEverything: () => Promise<void>;
+
+  /** Standing jobs, newest first. */
+  sparks: sparks.Spark[];
+  setSparkEnabled: (id: string, enabled: boolean) => Promise<void>;
+  deleteSpark: (id: string) => Promise<void>;
+
   /** The trigger, however it was pressed — ring, screen or keyboard. */
   press: () => void;
   /** Skip the microphone entirely. Used by the typed fallback. */
@@ -92,7 +103,7 @@ export function useAgent(): AgentValue {
 }
 
 export function AgentProvider({ children }: { children: React.ReactNode }) {
-  const { status, uid, tools } = useSession();
+  const { status, uid } = useSession();
 
   const [state, setState] = useState<AgentState>('asleep');
   const [caption, setCaption] = useState('');
@@ -103,6 +114,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [persona, setPersona] = useState<Persona>(DEFAULT_PERSONA);
   const [activity, setActivity] = useState<transcript.Entry[]>([]);
+  const [facts, setFacts] = useState<memory.Fact[]>([]);
+  const [sparkList, setSparkList] = useState<sparks.Spark[]>([]);
 
   /**
    * Refs, not state, for everything the trigger callback reads.
@@ -113,8 +126,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    * forever. These are the live values.
    */
   const history = useRef<Turn[]>([]);
-  const live = useRef({ state, persona, tools, uid });
-  live.current = { state, persona, tools, uid };
+  const live = useRef({ state, persona, facts, uid });
+  live.current = { state, persona, facts, uid };
   const mounted = useRef(true);
 
   /**
@@ -159,15 +172,39 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (status !== 'signed-in') {
       setActivity([]);
+      setFacts([]);
+      setSparkList([]);
       return;
     }
     void transcript.loadActivity(uid).then((entries) => {
       if (mounted.current) setActivity(entries);
     });
+    void memory.loadFacts(uid).then((f) => {
+      if (mounted.current) setFacts(f);
+    });
+    void sparks.loadSparks(uid).then((s) => {
+      if (mounted.current) setSparkList(s);
+    });
   }, [status, uid]);
 
   const clearActivity = useCallback(async () => {
     setActivity(await transcript.clearActivity(live.current.uid));
+  }, []);
+
+  const forgetFact = useCallback(async (id: string) => {
+    setFacts(await memory.forget(live.current.uid, id));
+  }, []);
+
+  const forgetEverything = useCallback(async () => {
+    setFacts(await memory.forgetAll(live.current.uid));
+  }, []);
+
+  const setSparkEnabled = useCallback(async (id: string, enabled: boolean) => {
+    setSparkList(await sparks.setSparkEnabled(live.current.uid, id, enabled));
+  }, []);
+
+  const deleteSpark = useCallback(async (id: string) => {
+    setSparkList(await sparks.deleteSpark(live.current.uid, id));
   }, []);
 
   /* ------------------------------------------------------------- talking */
@@ -186,7 +223,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const { persona: voice, tools: belt, uid: account } = live.current;
+    const { persona: voice, facts: known, uid: account } = live.current;
 
     setHeard('');
     setCaption(text);
@@ -194,7 +231,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
     let reply;
     try {
-      reply = await askGrove(history.current, text, { tools: belt, persona: voice });
+      reply = await askGrove(history.current, text, { persona: voice, facts: known });
     } catch (error) {
       const message = error instanceof Error ? error.message : fallback.stuck();
       if (!mounted.current) return;
@@ -215,32 +252,58 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     setCaption(reply.text);
     utter(reply.text);
 
+    // Anything worth remembering was pulled locally, by keyword, from what was
+    // said — never inferred by a model and stored where you cannot see it.
+    if (reply.fact) {
+      const next = await memory.remember(account, reply.fact.key, reply.fact.value);
+      if (mounted.current) setFacts(next);
+    }
+
     const entries = await transcript.record(account, {
       said: text,
       replied: reply.text,
-      tool: reply.tool ? { name: reply.tool.name, state: 'running' } : undefined,
+      tool: reply.ability ? { name: reply.ability.name, state: 'running' } : undefined,
     });
     if (!mounted.current) return;
     setActivity(entries);
     const entryId = entries[0]?.id;
 
-    if (!reply.tool) return;
+    if (!reply.ability) return;
+
+    // A recurrence makes this a standing job rather than a one-off. Saved and
+    // not run now: the point of "every morning" is that it happens then.
+    if (reply.schedule) {
+      const spark = await sparks.createSpark(account, {
+        said: text,
+        abilityId: reply.ability.id,
+        args: reply.args,
+      });
+      if (spark && mounted.current) setSparkList(await sparks.loadSparks(account));
+      return;
+    }
 
     // The reply is already being spoken; the run happens behind it. The flag
     // is what stops the end of that speech from reporting the turn as over.
     running.current = true;
     setState((current) => (current === 'speaking' ? current : 'working'));
 
-    const outcome = await runTool(reply.tool, shortTask(text));
+    let outcome;
+    try {
+      outcome = await reply.ability.run(reply.args);
+    } catch (error) {
+      outcome = {
+        ok: false,
+        spoken: error instanceof Error ? error.message : `${reply.ability.name} failed.`,
+      };
+    }
     running.current = false;
     if (!mounted.current) return;
 
     const record: TurnTool = {
-      name: reply.tool.name,
-      state: outcome.state === 'done' ? 'done' : outcome.state === 'blocked' ? 'blocked' : 'failed',
-      detail: outcome.detail,
-      steps: outcome.steps,
-      needs: outcome.needs,
+      name: reply.ability.name,
+      state: outcome.ok ? 'done' : 'failed',
+      detail: outcome.spoken,
+      needs: reply.ability.needs,
     };
 
     if (entryId) {
@@ -251,9 +314,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // Read the outcome out — this is the half the user actually waited for.
     // Queued behind whatever is still playing rather than cutting it off.
     if (!mounted.current) return;
-    setCaption(outcome.detail);
+    setCaption(outcome.spoken);
     await whenQuiet();
-    if (mounted.current) utter(outcome.detail);
+    if (mounted.current) utter(outcome.spoken);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -442,6 +505,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       updatePersona,
       activity,
       clearActivity,
+      facts,
+      forgetFact,
+      forgetEverything,
+      sparks: sparkList,
+      setSparkEnabled,
+      deleteSpark,
       press,
       say,
     }),
@@ -457,6 +526,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       updatePersona,
       activity,
       clearActivity,
+      facts,
+      forgetFact,
+      forgetEverything,
+      sparkList,
+      setSparkEnabled,
+      deleteSpark,
       press,
       say,
     ]

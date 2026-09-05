@@ -77,12 +77,33 @@ The one thing worth checking is A2DP versus HFP: a pair connected for playback
 only will play Grove's voice into your ear while the *phone* listens. That is
 surfaced as "playback only" on the Talk screen rather than left to be discovered.
 
+## Noctus is plumbing, not a brain
+
+Grove used to send every turn to Indy and pick from a catalogue of 74 Noctus
+agents. Both are gone. That catalogue was a *business* catalogue — 15 Marketing,
+10 Operations, 8 Finance, 6 Sales — and three of its seventy-four resembled
+anything a person does with their own day.
+
+Noctus now does three things and has no opinion about what Grove can do:
+authenticate the user, broker OAuth, and run scheduled sparks. `noctusApi.ts`
+holds only those; there is no agent endpoint left in `src/`.
+
+What Grove can do lives in `src/lib/abilities.ts`, as functions. Each declares
+`where`: `server` runs at 07:00 with the phone asleep, `device` needs the phone
+awake. **That line decides what can be scheduled**, and the UI must say so
+rather than let a briefing quietly not arrive. See
+`docs/superpowers/specs/2026-09-05-life-os-design.md`.
+
 ## Where the rules live
 
 - `src/lib/grove.ts` — `detectActIntent` decides whether a sentence causes
-  something to happen. It gates every tool run and is deliberately keyword-based
-  and biased toward "no". A false negative costs a sentence; a false positive
-  sends an email. **Never delegate this to a model.**
+  something to happen. It gates every ability run and is deliberately
+  keyword-based and biased toward "no". A false negative costs a sentence; a
+  false positive sends an email. **Never delegate this to a model.**
+- `src/lib/sparks.ts` — `parseSchedule` decides whether something keeps
+  happening. Same rule, same reason: a false positive here wakes you at seven
+  every morning for something you asked once. Its clock parser is written for
+  speech, not for a form — people say "half four", not "16:30".
 - `src/lib/persona.ts` — the manner is user-authored and goes into a system
   prompt, so `mannerDirective` wraps it to quarantine it as style-only. It is a
   guard, not a guarantee; keep the framing when editing.

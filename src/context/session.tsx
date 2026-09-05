@@ -15,8 +15,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 import * as api from '@/lib/noctusApi';
 import * as auth from '@/lib/noctusAuth';
-import * as toolkit from '@/lib/tools';
-import type { Tool } from '@/lib/tools';
 
 type Status = 'loading' | 'signed-out' | 'signed-in';
 
@@ -25,10 +23,6 @@ type SessionValue = {
   user: api.NoctusUser | null;
   /** Namespace for anything stored locally against this account. */
   uid: string;
-  /** The catalogue, annotated with what's installed and what's connected. */
-  tools: Tool[];
-  /** True while the catalogue is being re-read. */
-  loadingTools: boolean;
   /** Noctus binding keys with a live credential, e.g. ['gmail','calendar']. */
   connections: string[];
   /** Non-fatal problem worth showing, e.g. Noctus unreachable. */
@@ -47,9 +41,7 @@ type SessionValue = {
   connect: (bindingKey: string) => Promise<void>;
   disconnect: (bindingKey: string) => Promise<void>;
 
-  addTool: (tool: Tool) => Promise<void>;
-  removeTool: (tool: Tool) => Promise<void>;
-  reloadTools: () => Promise<void>;
+  reloadConnections: () => Promise<void>;
 };
 
 const SessionContext = createContext<SessionValue | null>(null);
@@ -64,28 +56,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<Status>('loading');
   const [user, setUser] = useState<api.NoctusUser | null>(null);
   const [uid, setUid] = useState<string>('anon');
-  const [tools, setTools] = useState<Tool[]>([]);
-  const [loadingTools, setLoadingTools] = useState(false);
   const [connections, setConnections] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
-
-  /**
-   * Reads the catalogue against a known set of connections.
-   *
-   * Takes the connections rather than reading state so it can run inside
-   * `hydrate` before that state has settled — otherwise the first load
-   * computes every tool as blocked and the Tools screen opens looking broken.
-   */
-  const readTools = useCallback(async (connected: string[]) => {
-    setLoadingTools(true);
-    try {
-      setTools(await toolkit.loadTools(connected));
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Could not read your tools.');
-    } finally {
-      setLoadingTools(false);
-    }
-  }, []);
 
   /** Pulls the account, its connections and its tools after a session exists. */
   const hydrate = useCallback(async () => {
@@ -111,8 +83,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       // Integrations are additive — a failure here shouldn't block the app.
     }
     setConnections(connected);
-    await readTools(connected);
-  }, [readTools]);
+  }, []);
 
   const bootstrap = useCallback(async () => {
     if (await api.isDevSession()) {
@@ -165,7 +136,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         if (await api.isDevSession()) return;
         setStatus('signed-out');
         setUser(null);
-        setTools([]);
         setConnections([]);
       })();
     });
@@ -205,7 +175,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // Reset the storage namespace too, so nothing can be written against the
     // previous account between sign-out and the next sign-in.
     setUid('anon');
-    setTools([]);
     setConnections([]);
   }, []);
 
@@ -213,13 +182,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const syncConnections = useCallback(async () => {
     try {
       const { connected } = await api.fetchConnections();
-      const list = connected ?? [];
-      setConnections(list);
-      await readTools(list);
+      setConnections(connected ?? []);
     } catch {
       // Keep whatever we last knew rather than blanking the list on a blip.
     }
-  }, [readTools]);
+  }, []);
 
   /**
    * Connects one integration.
@@ -246,42 +213,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [syncConnections]
   );
 
-  const addTool = useCallback(
-    async (tool: Tool) => {
-      const instanceId = await toolkit.addTool(tool);
-      // Reflected immediately rather than after a refetch: adding a tool is
-      // the one action here with a visible latency, and Noctus needs a moment
-      // before /agents/my reports the new instance.
-      setTools((current) =>
-        current.map((t) =>
-          t.id === tool.id
-            ? {
-                ...t,
-                instanceId,
-                state: t.missing.length > 0 ? 'blocked' : 'ready',
-              }
-            : t
-        )
-      );
-      await readTools(connections);
-    },
-    [connections, readTools]
-  );
-
-  const removeTool = useCallback(
-    async (tool: Tool) => {
-      await toolkit.removeTool(tool);
-      setTools((current) =>
-        current.map((t) =>
-          t.id === tool.id ? { ...t, instanceId: null, state: 'available' } : t
-        )
-      );
-      await readTools(connections);
-    },
-    [connections, readTools]
-  );
-
-  const reloadTools = useCallback(() => syncConnections(), [syncConnections]);
+  const reloadConnections = useCallback(() => syncConnections(), [syncConnections]);
   const dismissNotice = useCallback(() => setNotice(null), []);
 
   const value = useMemo<SessionValue>(
@@ -289,8 +221,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       status,
       user,
       uid,
-      tools,
-      loadingTools,
       connections,
       notice,
       dismissNotice,
@@ -302,16 +232,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       refresh: hydrate,
       connect,
       disconnect,
-      addTool,
-      removeTool,
-      reloadTools,
+      reloadConnections,
     }),
     [
       status,
       user,
       uid,
-      tools,
-      loadingTools,
       connections,
       notice,
       dismissNotice,
@@ -323,9 +249,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       hydrate,
       connect,
       disconnect,
-      addTool,
-      removeTool,
-      reloadTools,
+      reloadConnections,
     ]
   );
 

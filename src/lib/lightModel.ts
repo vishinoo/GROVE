@@ -43,20 +43,14 @@ export type LightMessage = { role: 'user' | 'assistant'; content: string };
 
 export type LightReply = {
   text: string;
-  /** Set when the request needs Indy's account context or an actual action. */
-  escalate?: string;
-  /**
-   * The model's read on whether the user wants the work done now rather than
-   * discussed. Advisory only — the caller pairs it with its own local rule,
-   * because a small model saying "no" is not a reason to ignore "do it".
-   */
-  act?: boolean;
-  /** Which tool it thinks should take this, by name. */
-  toolName?: string;
+  /** Which ability it thinks should take this, by id. */
+  abilityId?: string;
+  /** Arguments it pulled out of the sentence for that ability. */
+  args: Record<string, string>;
 };
 
-/** The tools Grove can currently reach, as the model needs to see them. */
-export type ToolSummary = { name: string; what: string }[];
+/** The abilities Grove can currently reach, as the model needs to see them. */
+export type AbilitySummary = { id: string; what: string }[];
 
 export function isLightModelConfigured(): boolean {
   return Boolean(GEMINI_KEY || OLLAMA_URL);
@@ -209,7 +203,7 @@ const HOUSE_RULES = `Rules:
 - Never invent facts about the user's calendar, email, files, money, health or accounts. If you would have to guess, say what you'd need instead.
 - Never repeat your previous reply. If you have already said it, say the next thing or ask one short question.`;
 
-/** Parses the JSON envelope both prompts ask for. Small models are sloppy. */
+/** Parses the JSON envelope the prompt asks for. Small models are sloppy. */
 function parseReply(raw: string): LightReply {
   // They wrap JSON in prose or a code fence often enough that digging the
   // object out beats discarding an otherwise good answer.
@@ -219,18 +213,24 @@ function parseReply(raw: string): LightReply {
     try {
       const parsed = JSON.parse(raw.slice(start, end + 1)) as {
         reply?: unknown;
-        needsAccount?: unknown;
-        act?: unknown;
-        tool?: unknown;
+        ability?: unknown;
+        args?: unknown;
       };
       const text = typeof parsed.reply === 'string' ? parsed.reply.trim() : '';
       if (text) {
+        const args: Record<string, string> = {};
+        if (parsed.args && typeof parsed.args === 'object') {
+          for (const [k, v] of Object.entries(parsed.args as Record<string, unknown>)) {
+            if (typeof v === 'string' && v.trim()) args[k] = v.trim().slice(0, 300);
+          }
+        }
         return {
           text,
-          escalate: parsed.needsAccount === true ? 'needs account context' : undefined,
-          act: parsed.act === true,
-          toolName:
-            typeof parsed.tool === 'string' && parsed.tool.trim() ? parsed.tool.trim() : undefined,
+          abilityId:
+            typeof parsed.ability === 'string' && parsed.ability.trim()
+              ? parsed.ability.trim()
+              : undefined,
+          args,
         };
       }
     } catch {
@@ -238,53 +238,54 @@ function parseReply(raw: string): LightReply {
     }
   }
 
-  // No parsable JSON. The text is still usable, but we can't tell whether it
-  // needed the account — so escalate and let Indy have the last word.
-  return { text: raw, escalate: 'unstructured reply' };
+  // No parsable JSON. The text is still usable; the caller's own keyword rule
+  // decides whether anything runs, so losing the pick costs accuracy, not
+  // safety.
+  return { text: raw, args: {} };
 }
 
 /**
  * One conversational turn with Grove, on the cheap tier.
  *
- * Takes the tool list because a Grove that doesn't know what it can reach can
- * only produce enthusiasm — it was the single biggest difference in reply
- * quality when this was a crew, and it is the same now that the crew has
- * become a toolbelt. The list is local data, not account data, so handing it
- * over costs nothing.
+ * This is now the only model tier. Indy — capped at two messages an hour — is
+ * gone along with the rest of Noctus's agent side, so there is nothing above
+ * this to escalate to and nothing to ration.
  *
- * `manner` arrives already wrapped by persona.ts, which is what keeps a
- * user-authored voice from turning into a second set of instructions.
+ * It gets three things: the abilities Grove can actually reach, the manner
+ * (already wrapped by persona.ts so a user-authored voice cannot become a
+ * second set of instructions), and the small block of durable facts from
+ * memory.ts. All three are local data, so handing them over costs nothing.
  *
- * Returns null when no light provider is configured or reachable, which the
- * caller treats as "fall through to Indy" — so an unconfigured build behaves
- * exactly as it did before this tier existed.
+ * Returns null when no provider is configured or reachable, which the caller
+ * treats as "answer from local rules alone".
  */
 export async function lightTurn(
   history: LightMessage[],
   userText: string,
-  context: { tools: ToolSummary; manner: string }
+  context: { abilities: AbilitySummary; manner: string; memory: string }
 ): Promise<LightReply | null> {
   if (!isLightModelConfigured()) return null;
 
   const belt =
-    context.tools.length === 0
-      ? 'You have no tools connected yet. If the user wants something done that needs one, say so plainly and tell them it is in the Tools tab — do not pretend to have done it.'
-      : `Tools you can actually use right now:\n${context.tools
-          .map((t) => `- ${t.name} — ${t.what}`)
+    context.abilities.length === 0
+      ? 'You cannot do anything for the user yet. If they ask for something done, say so plainly rather than pretending.'
+      : `Things you can actually do right now. Use the id exactly:\n${context.abilities
+          .map((a) => `- ${a.id} — ${a.what}`)
           .join('\n')}`;
 
-  const system = `You are Grove. You are the single assistant this person talks to, usually through a pair of glasses while doing something else. You do the work yourself, reaching for a tool when one fits.
+  const system = `You are Grove. You are the single assistant this person talks to, usually through a pair of glasses while they are doing something else.
 
 ${belt}
+
+${context.memory}
 
 ${context.manner}
 
 ${HOUSE_RULES}
-- When one of the tools above covers the request, say you are doing it and put that tool's exact name in "tool". Do not narrate the steps — the tool runs and reports back.
-- Set "act" to true when the user wants something done now ("send…", "book…", "do it", "go on"), and false when they are asking, musing or chatting.
-- You cannot see the user's account. If answering properly needs their real integrations, usage, billing or history, set "needsAccount" to true and put a short holding sentence in "reply".
+- When one of the abilities above covers the request, put its exact id in "ability" and pull its arguments out of the sentence into "args". Say you are doing it. Do not narrate the steps.
+- When nothing above covers it, leave "ability" empty and just answer. Never imply you did something you have no ability for.
 
-Respond with JSON only: {"reply": "<what to say>", "tool": "<tool name or empty>", "act": <true|false>, "needsAccount": <true|false>}`;
+Respond with JSON only: {"reply": "<what to say>", "ability": "<id or empty>", "args": {}}`;
 
   const raw = await complete(
     system,
@@ -296,11 +297,7 @@ Respond with JSON only: {"reply": "<what to say>", "tool": "<tool name or empty>
 }
 
 /**
- * Turns a raw Noctus run result into a sentence that can be read aloud.
- *
- * Needs no account context — everything it describes is in the payload in
- * front of it — which is exactly why this belongs on the cheap tier rather
- * than spending one of the hour's Indy messages on a summary.
+ * Turns a raw ability result into a sentence that can be read aloud.
  *
  * The "no JSON, no quotes" instruction is load-bearing rather than tidy: this
  * output goes straight to the speech synthesiser, which will happily read a
