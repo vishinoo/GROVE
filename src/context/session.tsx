@@ -68,10 +68,26 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       setStatus('signed-in');
       setNotice(null);
     } catch (error) {
-      // A session we can't verify is not a session. Keep the user out rather
-      // than showing an app that silently fails every action.
+      // "Rejected" and "unreachable" are not the same thing, and treating them
+      // the same is why a restart could look like being signed out.
+      //
+      // Noctus runs on a LAN address in development. The machine sleeps, the
+      // DHCP lease renews, the backend gets restarted — and every one of those
+      // used to sign you out and send you back through Google, despite the
+      // session in the Keychain being perfectly valid.
+      //
+      // A 401 means the token really is no good, so sign out. Anything else —
+      // especially status 0, which is how noctusApi reports a failed
+      // connection — means we do not know, so keep the session and say so.
+      const rejected = error instanceof api.NoctusError && error.status === 401;
       setNotice(error instanceof Error ? error.message : 'Could not reach Noctus.');
-      setStatus('signed-out');
+      if (rejected) {
+        setStatus('signed-out');
+        return;
+      }
+      // Signed in, but nothing loaded. The notice explains why; the next
+      // foreground retries.
+      setStatus('signed-in');
       return;
     }
 
