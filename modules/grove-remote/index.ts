@@ -53,8 +53,20 @@ export type AudioRoute = {
   inputPort: string;
 };
 
+export type MusicResult = {
+  ok: boolean;
+  title?: string;
+  artist?: string;
+  count?: number;
+  /** 'denied' when the library was refused, 'notFound' when nothing matched. */
+  reason?: string;
+};
+
 type Native = {
   activate(playSilence: boolean): Promise<void>;
+  playMusic(query: string): Promise<MusicResult>;
+  controlMusic(action: string): Promise<{ ok: boolean; title?: string }>;
+  nowPlaying(): { title: string; artist: string; playing: boolean };
   deactivate(): Promise<void>;
   isHolding(): boolean;
   getRoute(): AudioRoute;
@@ -110,6 +122,27 @@ export function isHolding(): boolean {
 
 export function getRoute(): AudioRoute {
   return native?.getRoute() ?? OFFLINE_ROUTE;
+}
+
+/**
+ * Play from the user's own library.
+ *
+ * Resolves `{ ok: false }` rather than throwing when the native half is absent,
+ * so the ability above it reports "not on this build" instead of crashing a
+ * turn — the same contract every other function here keeps.
+ */
+export async function playMusic(query: string): Promise<MusicResult> {
+  return (await native?.playMusic(query)) ?? { ok: false, reason: 'unavailable' };
+}
+
+export async function controlMusic(
+  action: 'play' | 'pause' | 'next' | 'previous'
+): Promise<boolean> {
+  return Boolean((await native?.controlMusic(action))?.ok);
+}
+
+export function nowPlaying(): { title: string; artist: string; playing: boolean } {
+  return native?.nowPlaying() ?? { title: '', artist: '', playing: false };
 }
 
 export async function requestMicrophone(): Promise<boolean> {

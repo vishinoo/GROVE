@@ -32,6 +32,7 @@ import {
   readWhen,
   sayWhen,
 } from './deviceCalendar';
+import { capabilities } from './capabilities';
 import { fetchJson } from './net';
 
 /**
@@ -88,16 +89,6 @@ export type Ability = {
 
 /* ------------------------------------------------------------ not wired */
 
-/**
- * The stand-in for an ability whose implementation needs native code that is
- * not in this build. It never claims anything happened.
- */
-function unwired(name: string, why: string) {
-  return async (): Promise<AbilityResult> => ({
-    ok: false,
-    spoken: `I can't do ${name.toLowerCase()} yet — ${why}`,
-  });
-}
 
 /* -------------------------------------------------------------- the set */
 
@@ -138,32 +129,86 @@ const BRIEF: Ability = {
   },
 };
 
-/**
- * Mail is send-only, and that is a property of the grant rather than a choice.
- *
- * Noctus asks Google for `gmail.send`, `calendar`, `spreadsheets` and
- * `userinfo.email` — there is no read scope anywhere in that list. So a
- * connected account can send mail and cannot search it, and an ability called
- * "find mail from Priya" would have been a promise the token could never keep.
- *
- * Reading the inbox is one line on the Noctus side — adding
- * `gmail.readonly` to the scopes and reconnecting — and until someone does
- * that, this says what it can actually do.
- */
-const MAIL: Ability = {
-  id: 'mail.send',
+type MailMessage = { from?: string; subject?: string; snippet?: string; body?: string };
+
+/** "Priya Sharma <p@x.com>" is not how you say a name out loud. */
+function saySender(from: string): string {
+  const named = /^\s*"?([^"<]+?)"?\s*</.exec(from);
+  return (named?.[1] ?? from.replace(/[<>]/g, '')).split('@')[0].trim();
+}
+
+const MAIL_READ: Ability = {
+  id: 'mail.search',
   name: 'Mail',
+  what: 'Finds mail from someone and tells you what it says.',
+  where: 'server',
+  wired: true,
+  needs: ['email'],
+  args: {
+    from: { type: 'string', what: 'who it is from, if they named someone' },
+    about: { type: 'string', what: 'what it is about' },
+  },
+  examples: ['anything from Priya', 'what did Sam say about the invoice', 'read me my mail'],
+  run: async (args) => {
+    const params = new URLSearchParams();
+    if (args.from) params.set('from', args.from);
+    if (args.about) params.set('q', args.about);
+    params.set('limit', '3');
+
+    const data = await fetchJson<{ messages?: MailMessage[] }>(
+      `/api/grove/mail?${params.toString()}`
+    );
+    if (!data) {
+      return { ok: false, spoken: 'Could not reach your mail. Is Google connected?' };
+    }
+
+    const messages = data.messages ?? [];
+    const who = args.from ? ` from ${args.from}` : '';
+    if (messages.length === 0) return { ok: true, spoken: `Nothing${who}.` };
+
+    // Spoken, so the newest one in full and the rest as a count. A list of
+    // subject lines recited into your ear is not something anyone can follow.
+    const [first] = messages;
+    const sender = saySender(first.from ?? '');
+    const gist = (first.body || first.snippet || '').replace(/\s+/g, ' ').trim().slice(0, 320);
+
+    let line = `${sender} says: ${gist}`;
+    if (messages.length > 1) line += ` And ${messages.length - 1} more.`;
+    return { ok: true, spoken: line, detail: first.subject };
+  },
+};
+
+const MAIL_SEND: Ability = {
+  id: 'mail.send',
+  name: 'Send mail',
   what: 'Sends a message you dictate.',
   where: 'server',
-  wired: false,
-  needs: ['email', 'a send endpoint on Noctus'],
+  wired: true,
+  needs: ['email'],
   args: {
-    to: { type: 'string', what: 'who it goes to', required: true },
+    to: { type: 'string', what: 'who it goes to — an address, or a name you have mentioned', required: true },
     subject: { type: 'string', what: 'the subject line' },
     body: { type: 'string', what: 'what it says', required: true },
   },
   examples: ['email Priya to say I am running late', 'send Sam the address'],
-  run: unwired('mail', 'Noctus has no send endpoint yet, so nothing would leave.'),
+  run: async (args) => {
+    const to = (args.to || '').trim();
+    const body = (args.body || '').trim();
+    if (!to || !body) return { ok: false, spoken: 'Who to, and saying what?' };
+    // Mail is the one thing here that cannot be taken back, so an address that
+    // is not an address is refused rather than guessed at.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+      return { ok: false, spoken: `I need ${to}'s email address.` };
+    }
+
+    const data = await fetchJson<{ sent?: boolean }>('/api/grove/mail', {
+      method: 'POST',
+      body: { to, subject: args.subject || '', body },
+    });
+    return data?.sent
+      ? { ok: true, spoken: 'Sent.' }
+      : { ok: false, spoken: 'That did not send.' };
+  },
 };
 
 const CALENDAR_READ: Ability = {
@@ -254,16 +299,42 @@ const REMIND: Ability = {
   },
 };
 
+/**
+ * Music, through the system player.
+ *
+ * Needs the native module, so it is wired only on a development build — the
+ * probe in capabilities.ts is what makes that honest rather than a crash. In
+ * Expo Go it says so and does not pretend.
+ */
 const MUSIC: Ability = {
   id: 'music.play',
   name: 'Music',
-  what: 'Plays something, into whatever you are wearing.',
+  what: 'Plays something from your library, into whatever you are wearing.',
   where: 'device',
-  wired: false,
+  wired: capabilities().remote,
   needs: ['music-permission'],
   args: { what: { type: 'string', what: 'song, artist, album or playlist', required: true } },
   examples: ['play my favourite song', 'put on something mellow', 'play the Sunday playlist'],
-  run: unwired('music', 'this build has no music access yet.'),
+  run: async (args) => {
+    const wanted = (args.what || '').trim();
+    if (!wanted) return { ok: false, spoken: 'Play what?' };
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const remote = require('grove-remote') as typeof import('grove-remote');
+    const result = await remote.playMusic(wanted);
+
+    if (result.ok) {
+      const artist = result.artist ? ` by ${result.artist}` : '';
+      return { ok: true, spoken: `Playing ${result.title}${artist}.` };
+    }
+    if (result.reason === 'denied') {
+      return { ok: false, spoken: 'I need permission for your music library. It is in iOS Settings.' };
+    }
+    if (result.reason === 'unavailable') {
+      return { ok: false, spoken: 'Music needs a development build. This one cannot reach it.' };
+    }
+    return { ok: false, spoken: `I could not find ${wanted} in your library.` };
+  },
 };
 
 /**
@@ -331,8 +402,9 @@ const WEATHER: Ability = {
 
 export const ABILITIES: Ability[] = [
   WEATHER,
+  MAIL_READ,
+  MAIL_SEND,
   BRIEF,
-  MAIL,
   CALENDAR_READ,
   CALENDAR_MOVE,
   REMIND,

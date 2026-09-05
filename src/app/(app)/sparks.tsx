@@ -31,7 +31,8 @@ import { abilityById, type Ability } from '@/lib/abilities';
 import { describeTrigger, parseSchedule, phraseTrigger, type Spark } from '@/lib/sparks';
 
 export default function Sparks() {
-  const { sparks, setSparkEnabled, editSpark, deleteSpark } = useAgent();
+  const palette = usePalette();
+  const { sparks, setSparkEnabled, editSpark, deleteSpark, facts, forgetFact } = useAgent();
 
   return (
     <Screen
@@ -58,7 +59,92 @@ export default function Sparks() {
           ))}
         </Section>
       )}
+
+      {/*
+        Memory sits under the sparks rather than only in Settings, because the
+        two are the same idea seen from different ends: a spark is a standing
+        instruction, a fact is a standing piece of context, and both are things
+        Grove keeps and acts on without being asked again. Finding out what it
+        remembers should not require going looking for it.
+      */}
+      <Section label="Memory">
+        {facts.length === 0 ? (
+          <Card>
+            <Text style={[Type.bodySm, { color: palette.muted }]}>
+              Nothing yet. Tell Grove something about yourself — where you live, when you leave
+              for work — and it turns up here, where you can delete it.
+            </Text>
+          </Card>
+        ) : (
+          facts.map((fact) => (
+            <FactCard key={fact.id} fact={fact} onForget={() => void forgetFact(fact.id)} />
+          ))
+        )}
+      </Section>
     </Screen>
+  );
+}
+
+/**
+ * One thing Grove knows about you.
+ *
+ * Same card as a spark, deliberately. A fact is stored, acted on, and yours to
+ * delete, exactly as a standing instruction is — and showing them in two
+ * different shapes would suggest a difference that is not there.
+ */
+function FactCard({
+  fact,
+  onForget,
+}: {
+  fact: ReturnType<typeof useAgent>['facts'][number];
+  onForget: () => void;
+}) {
+  const palette = usePalette();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Card style={{ marginBottom: 8, paddingHorizontal: 0, paddingVertical: 0 }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${fact.value}. Tap for detail.`}
+        onPress={() => setOpen((was) => !was)}
+        style={({ pressed }) => ({ padding: 13, opacity: pressed ? 0.7 : 1 })}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <Text style={[Type.body, { color: palette.ink, flex: 1 }]} numberOfLines={open ? undefined : 2}>
+            {fact.value}
+          </Text>
+          <Icon name={open ? 'down' : 'chevron'} size={13} color={palette.muted} />
+        </View>
+      </Pressable>
+
+      {open ? (
+        <View
+          style={{
+            paddingHorizontal: 13,
+            paddingBottom: 13,
+            borderTopWidth: 1,
+            borderTopColor: palette.line,
+          }}
+        >
+          <Detail label="Kind">{fact.key}</Detail>
+          <Detail label="How Grove knows">
+            {fact.source === 'told' ? 'You told it.' : 'It worked it out from something you said.'}
+          </Detail>
+          <Detail label="Since">{new Date(fact.at).toLocaleDateString()}</Detail>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Forget: ${fact.value}`}
+            onPress={onForget}
+            hitSlop={6}
+            style={({ pressed }) => ({ paddingVertical: 12, opacity: pressed ? 0.5 : 1 })}
+          >
+            <Text style={[Type.bodySm, { color: palette.alert }]}>Forget this</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </Card>
   );
 }
 

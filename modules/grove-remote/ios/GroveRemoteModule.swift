@@ -151,12 +151,116 @@ public class GroveRemoteModule: Module {
       self.volumeTriggerOn
     }
 
+    /**
+     * Play something from the user's own music library.
+     *
+     * `systemMusicPlayer` rather than `applicationMusicPlayer`, deliberately:
+     * the system player is the one the lock screen, the ring and CarPlay all
+     * control, and it keeps playing when Grove is backgrounded. The application
+     * player stops with the app, which is useless for something you talk to
+     * with the phone in your pocket.
+     *
+     * Searched across song, artist, album and playlist because "play my
+     * favourite song" and "put on the Sunday playlist" arrive the same way and
+     * a person does not distinguish them.
+     */
+    AsyncFunction("playMusic") { (query: String, promise: Promise) in
+      DispatchQueue.main.async {
+        let wanted = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !wanted.isEmpty else {
+          promise.resolve(["ok": false, "reason": "empty"])
+          return
+        }
+
+        MPMediaLibrary.requestAuthorization { status in
+          DispatchQueue.main.async {
+            guard status == .authorized else {
+              promise.resolve(["ok": false, "reason": "denied"])
+              return
+            }
+            promise.resolve(self.startPlayback(matching: wanted))
+          }
+        }
+      }
+    }
+
+    AsyncFunction("controlMusic") { (action: String, promise: Promise) in
+      DispatchQueue.main.async {
+        let player = MPMusicPlayerController.systemMusicPlayer
+        switch action {
+        case "pause": player.pause()
+        case "play": player.play()
+        case "next": player.skipToNextItem()
+        case "previous": player.skipToPreviousItem()
+        default: break
+        }
+        promise.resolve(["ok": true, "title": player.nowPlayingItem?.title ?? ""])
+      }
+    }
+
+    Function("nowPlaying") { () -> [String: Any] in
+      let item = MPMusicPlayerController.systemMusicPlayer.nowPlayingItem
+      return [
+        "title": item?.title ?? "",
+        "artist": item?.artist ?? "",
+        "playing": MPMusicPlayerController.systemMusicPlayer.playbackState == .playing,
+      ]
+    }
+
     OnDestroy {
       self.stopKeepAlive()
       self.unregisterRemote()
       self.stopObserving()
       self.stopVolumeTrigger()
     }
+  }
+
+  // MARK: - Music
+
+  /**
+   * Finds the best match for a spoken phrase and plays it.
+   *
+   * Tried in order of how specific the match is: a playlist named outright, then
+   * a song, then an artist, then an album. Songs before artists because "play
+   * Yesterday" means the track, and artists before albums because people name
+   * the artist far more often than the record.
+   */
+  private func startPlayback(matching wanted: String) -> [String: Any] {
+    let player = MPMusicPlayerController.systemMusicPlayer
+
+    let attempts: [(MPMediaItemProperty: String, grouping: MPMediaGrouping)] = [
+      (MPMediaPlaylistPropertyName, .playlist),
+      (MPMediaItemPropertyTitle, .title),
+      (MPMediaItemPropertyArtist, .artist),
+      (MPMediaItemPropertyAlbumTitle, .album),
+    ]
+
+    for attempt in attempts {
+      let predicate = MPMediaPropertyPredicate(
+        value: wanted,
+        forProperty: attempt.MPMediaItemProperty,
+        comparisonType: .contains
+      )
+      let query = MPMediaQuery(filterPredicates: [predicate])
+      query.groupingType = attempt.grouping
+
+      guard let items = query.items, !items.isEmpty else { continue }
+
+      player.setQueue(with: MPMediaItemCollection(items: items))
+      // Shuffling a named song would play something else; shuffling a playlist
+      // or an artist is what people expect.
+      player.shuffleMode = attempt.grouping == .title ? .off : .songs
+      player.play()
+
+      return [
+        "ok": true,
+        "title": player.nowPlayingItem?.title ?? items[0].title ?? wanted,
+        "artist": player.nowPlayingItem?.artist ?? items[0].artist ?? "",
+        "count": items.count,
+      ]
+    }
+
+    return ["ok": false, "reason": "notFound"]
   }
 
   // MARK: - Session

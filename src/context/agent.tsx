@@ -49,6 +49,17 @@ import * as transcript from '@/lib/transcript';
 import * as trigger from '@/lib/trigger';
 import { useSession } from './session';
 
+/**
+ * How long a listen may hear nothing before it gives up.
+ *
+ * A recogniser left open on silence is worse than one that closes: it holds
+ * the microphone, keeps the UI claiming to listen, and on this hardware the
+ * only way out was another press. Five seconds is long enough to gather
+ * yourself after pressing and short enough that an accidental trigger in a
+ * pocket does not sit there listening.
+ */
+const SILENCE_TIMEOUT_MS = 5000;
+
 export type AgentState =
   | 'asleep'
   | 'idle'
@@ -132,6 +143,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const mounted = useRef(true);
   /** Claims a listening turn, so an interrupted start cannot finish. */
   const listenSeq = useRef(0);
+  /** Cancels a listen that never heard anything. */
+  const silence = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /**
    * Whether a tool is still running on Noctus.
@@ -347,6 +360,13 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const clearSilence = useCallback(() => {
+    if (silence.current) {
+      clearTimeout(silence.current);
+      silence.current = null;
+    }
+  }, []);
+
   const beginListening = useCallback(
     async (continuous: boolean) => {
       // Re-taking the session is asynchronous, and the state says 'listening'
@@ -360,13 +380,11 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       setHeard('');
       setLevel(0);
 
-      // The session may have lapsed while backgrounded. Re-taking it costs a
-      // few milliseconds and is the difference between recording and a
-      // CoreAudio failure that looks like the ring not working.
-      // Always, foreground included. Re-taking the session is what made
-      // recognition start reliably in the first place; the loop it caused came
-      // from nothing suppressing the volume movement it produces, and that is
-      // handled inside `reactivate` now rather than by skipping it here.
+      // The session lapses while backgrounded, and starting a recogniser
+      // against a lapsed one fails with a CoreAudio error that reads exactly
+      // like the ring not working. Done in the foreground too: the retrigger
+      // loop this used to cause is handled inside `reactivate` now, rather
+      // than by skipping the thing that makes recognition start at all.
       try {
         await trigger.reactivate();
       } catch (error) {
@@ -385,9 +403,13 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       const started = startListening(
         {
           onPartial: (text) => {
+            // Anything heard at all means this is a real conversation, so the
+            // give-up timer stops applying.
+            if (text.trim()) clearSilence();
             if (mounted.current) setHeard(text);
           },
           onFinal: (text) => {
+            clearSilence();
             console.log('[grove:listen] final', JSON.stringify(text));
             void exchange(text);
           },
@@ -401,6 +423,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
             setCaption(message);
           },
           onEnd: () => {
+            clearSilence();
             console.log('[grove:listen] end');
             if (!mounted.current) return;
             setLevel(0);
@@ -418,9 +441,20 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       console.log('[grove:listen] startListening returned', started);
       if (!started) {
         setState(restingState());
+        return;
       }
+
+      // Nothing said at all: close the recogniser rather than leave it holding
+      // the microphone with the UI insisting it is listening.
+      clearSilence();
+      silence.current = setTimeout(() => {
+        if (!mounted.current || turn !== listenSeq.current) return;
+        console.log('[grove:listen] nothing heard in', SILENCE_TIMEOUT_MS, 'ms — cancelling');
+        abortListening();
+        setState(restingState());
+      }, SILENCE_TIMEOUT_MS);
     },
-    [exchange]
+    [exchange, clearSilence]
   );
 
   /**

@@ -23,7 +23,8 @@
         "NSCalendarsUsageDescription": "Grove reads your day out and moves things when you ask it to.",
         "NSCalendarsFullAccessUsageDescription": "Grove reads your day out and moves things when you ask it to.",
         "NSRemindersUsageDescription": "Grove saves the things you ask it to remember.",
-        "NSRemindersFullAccessUsageDescription": "Grove saves the things you ask it to remember."
+        "NSRemindersFullAccessUsageDescription": "Grove saves the things you ask it to remember.",
+        "NSAppleMusicUsageDescription": "Grove plays music from your library when you ask it to."
       }
     },
     "android": {

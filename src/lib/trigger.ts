@@ -163,7 +163,10 @@ export async function reactivate(): Promise<void> {
   // triggers another listen, which re-takes the session, which moves the
   // volume again — a loop that presents as "stuck on Listening" while the
   // volume visibly bounces. So the fallback is blinded across the re-take.
-  suppressVolumeUntil = Date.now() + 800;
+  // Measured, not guessed: the recogniser's own engine start moves the volume
+  // about 700ms after the press. 1.4s clears that with margin while keeping
+  // the window in which a press cannot cancel a listen as short as possible.
+  suppressVolumeUntil = Date.now() + 1400;
   await activate(true);
 }
 
@@ -252,7 +255,14 @@ function emit(trigger: Trigger): void {
 function record(event: RemoteEvent, coalesced: boolean): void {
   // Printed as well as recorded: the diagnostics panel needs the app open on
   // that screen, and the interesting presses happen with the phone locked.
-  console.log('[grove:trigger]', event.command, event.phase ?? '', coalesced ? 'merged' : 'used');
+  const sincePrevious = signals.length > 0 ? Math.round(event.at * 1000 - signals[signals.length - 1].at) : 0;
+  console.log(
+    '[grove:trigger]',
+    event.command,
+    event.phase ?? '',
+    coalesced ? 'merged' : 'used',
+    `+${sincePrevious}ms`
+  );
 
   const at = event.at * 1000;
   const previous = signals[signals.length - 1];
