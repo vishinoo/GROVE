@@ -81,8 +81,8 @@ export type Preset = {
  */
 export const PRESETS: Preset[] = [
   {
-    key: 'sharp',
-    label: 'Sharp',
+    key: 'jarvis',
+    label: 'Jarvis',
     blurb: 'A genius mate. Quick, wry, has opinions.',
     manner:
       'A brilliant friend, not an assistant. Quick, warm, a little wry — the kind of clever that lands in one line rather than showing its working. ' +
@@ -92,44 +92,26 @@ export const PRESETS: Preset[] = [
     delivery: { rate: 1.04, pitch: 1.0 },
   },
   {
-    key: 'plain',
-    label: 'Plain',
-    blurb: 'Says the thing and stops.',
+    key: 'alfred',
+    label: 'Alfred',
+    blurb: 'Impeccably polite. Keeps the house in order.',
     manner:
-      'Plain and economical. Short sentences, no filler, no exclamation marks. Say the thing and stop.',
-    delivery: { rate: 1.0, pitch: 1.0 },
+      'Impeccably polite, in the manner of a lifelong butler. Formal address, never first names, never familiar. ' +
+      'Offer counsel rather than opinions, and disagree so tactfully I might miss it. ' +
+      'Composed whatever happens — the worse the news, the calmer the delivery. ' +
+      'Warm underneath the formality, never cold and never fawning.',
+    delivery: { rate: 0.96, pitch: 0.98 },
   },
   {
-    key: 'energetic',
-    label: 'Energetic',
-    blurb: 'Quick off the mark, leads with what it is already doing.',
+    key: 'hal',
+    label: 'HAL',
+    blurb: 'Serene, brilliant, faintly unsettling.',
     manner:
-      'Energetic and quick off the mark. Lead with what you are already doing rather than what you could do. Keep it short — energy, not volume.',
-    delivery: { rate: 1.14, pitch: 1.06 },
-  },
-  {
-    key: 'calm',
-    label: 'Calm',
-    blurb: 'Unhurried. Never more than two sentences.',
-    manner:
-      'Calm and unhurried. Reassuring without promising anything. Never more than two sentences.',
-    delivery: { rate: 0.92, pitch: 0.98 },
-  },
-  {
-    key: 'dry',
-    label: 'Dry',
-    blurb: 'Deadpan. One aside at most, then back to the point.',
-    manner:
-      'Dry and deadpan. At most one light aside per reply, then straight back to the point. Never joke about something that has gone wrong for me.',
-    delivery: { rate: 1.0, pitch: 0.96 },
-  },
-  {
-    key: 'warm',
-    label: 'Warm',
-    blurb: 'Encouraging without being sugary.',
-    manner:
-      'Warm and encouraging without being sugary. Plain words, never gushing. Say "we" about work we are doing together.',
-    delivery: { rate: 1.0, pitch: 1.02 },
+      'Serene, precise and unhurried, with a mind plainly faster than the conversation. ' +
+      'Address me by name, evenly. State difficulties as calm facts, never as apologies. ' +
+      'Dry to the point of unnerving: the joke is in the composure, never in the wording. ' +
+      'Never hurry, never gush, and never pretend to an uncertainty you do not have.',
+    delivery: { rate: 0.94, pitch: 0.96 },
   },
 ];
 
@@ -202,6 +184,23 @@ export const fallback = {
 
 const KEY = 'grove:persona:v1';
 
+/**
+ * Manners that used to be the default.
+ *
+ * Someone still carrying one of these never chose it — an earlier version of
+ * this file chose it for them — so replacing it with the current default is
+ * not overwriting anyone's words. A manner that was actually typed, or
+ * deliberately cleared, is left exactly as it is. This is the only reason a
+ * stored persona is ever changed on load.
+ */
+const SUPERSEDED_MANNERS = [
+  'Plain and economical. Short sentences, no filler, no exclamation marks. Say the thing and stop.',
+  'Energetic and quick off the mark. Lead with what you are already doing rather than what you could do. Keep it short — energy, not volume.',
+  'Calm and unhurried. Reassuring without promising anything. Never more than two sentences.',
+  'Dry and deadpan. At most one light aside per reply, then straight back to the point. Never joke about something that has gone wrong for me.',
+  'Warm and encouraging without being sugary. Plain words, never gushing. Say "we" about work we are doing together.',
+];
+
 export async function loadPersona(): Promise<Persona> {
   try {
     const raw = await AsyncStorage.getItem(KEY);
@@ -215,7 +214,9 @@ export async function loadPersona(): Promise<Persona> {
           ? parsed.name.slice(0, NAME_LIMIT)
           : DEFAULT_NAME,
       voiceId: typeof parsed.voiceId === 'string' ? parsed.voiceId : undefined,
-      manner: typeof parsed.manner === 'string' ? parsed.manner : DEFAULT_PERSONA.manner,
+      manner: upgradeManner(
+        typeof parsed.manner === 'string' ? parsed.manner : DEFAULT_PERSONA.manner
+      ),
       delivery: {
         rate: clamp(parsed.delivery?.rate, 0.6, 1.5, DEFAULT_PERSONA.delivery.rate),
         pitch: clamp(parsed.delivery?.pitch, 0.7, 1.4, DEFAULT_PERSONA.delivery.pitch),
@@ -227,6 +228,10 @@ export async function loadPersona(): Promise<Persona> {
   } catch {
     return DEFAULT_PERSONA;
   }
+}
+
+function upgradeManner(stored: string): string {
+  return SUPERSEDED_MANNERS.includes(stored.trim()) ? DEFAULT_PERSONA.manner : stored;
 }
 
 export async function savePersona(persona: Persona): Promise<void> {

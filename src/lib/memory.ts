@@ -40,7 +40,7 @@ export type Fact = {
  * long you use Grove.
  */
 const LIMIT = 40;
-const VALUE_MAX = 160;
+export const VALUE_MAX = 160;
 
 const KEY = 'grove:memory:v1';
 
@@ -98,6 +98,32 @@ export async function remember(
     ...withoutKey,
   ].slice(0, LIMIT);
 
+  await write(uid, next);
+  return next;
+}
+
+/**
+ * Correct a fact in place.
+ *
+ * Deliberately not `remember`: that one is keyed and would mint a new entry
+ * with a new id, which is right for being told something new and wrong for
+ * fixing something Grove misheard. A name transcribed as "Fisher" when it was
+ * "Vishnu" is the same fact badly written down, so the id, the key and how
+ * Grove came to know it all survive — only the words change.
+ *
+ * The timestamp is bumped, because a fact you just took the trouble to correct
+ * is the last one that should be dropped when the cap bites.
+ */
+export async function reword(uid: string, id: string, value: string): Promise<Fact[]> {
+  const clean = value.trim().slice(0, VALUE_MAX);
+  const facts = await loadFacts(uid);
+  // An empty correction is a deletion, and deleting is asked for explicitly —
+  // never inferred from someone clearing a box to retype it.
+  if (!clean) return facts;
+
+  const next = facts.map((fact) =>
+    fact.id === id ? { ...fact, value: clean, at: new Date().toISOString() } : fact
+  );
   await write(uid, next);
   return next;
 }

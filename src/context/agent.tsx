@@ -91,6 +91,8 @@ type AgentValue = {
 
   /** The small set of durable facts Grove keeps. Readable and deletable. */
   facts: memory.Fact[];
+  /** Correct a fact Grove wrote down wrong. */
+  editFact: (id: string, value: string) => Promise<void>;
   forgetFact: (id: string) => Promise<void>;
   forgetEverything: () => Promise<void>;
 
@@ -205,6 +207,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
   const clearActivity = useCallback(async () => {
     setActivity(await transcript.clearActivity(live.current.uid));
+  }, []);
+
+  const editFact = useCallback(async (id: string, value: string) => {
+    setFacts(await memory.reword(live.current.uid, id, value));
   }, []);
 
   const forgetFact = useCallback(async (id: string) => {
@@ -624,6 +630,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       activity,
       clearActivity,
       facts,
+      editFact,
       forgetFact,
       forgetEverything,
       sparks: sparkList,
@@ -646,6 +653,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       activity,
       clearActivity,
       facts,
+      editFact,
       forgetFact,
       forgetEverything,
       sparkList,

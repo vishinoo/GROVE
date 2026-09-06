@@ -27,7 +27,8 @@ import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
-import { MANNER_LIMIT, NAME_LIMIT, type Persona } from '@/lib/persona';
+import { VALUE_MAX, type Fact } from '@/lib/memory';
+import { MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona, type Preset } from '@/lib/persona';
 import { availableVoices, bestVoiceId, hasEnhancedVoice, speak } from '@/lib/speak';
 import * as trigger from '@/lib/trigger';
 import type * as SpeechTypes from 'expo-speech';
@@ -35,7 +36,8 @@ import type * as SpeechTypes from 'expo-speech';
 export default function Settings() {
   const palette = usePalette();
   const { user, signOut } = useSession();
-  const { persona, updatePersona, armed, route, facts, forgetFact, forgetEverything } = useAgent();
+  const { persona, updatePersona, armed, route, facts, editFact, forgetFact, forgetEverything } =
+    useAgent();
 
   const reduced = reducedModeReason();
   const report = capabilities();
@@ -74,6 +76,10 @@ export default function Settings() {
       {/* ------------------------------------------------------------ voice */}
 
       <Section label="How it talks">
+        <MannerPicker
+          manner={persona.manner}
+          onSelect={(preset) => set({ manner: preset.manner, delivery: preset.delivery })}
+        />
         <Card>
           <TextInput
             value={persona.manner}
@@ -187,30 +193,28 @@ export default function Settings() {
           <Card>
             <Text style={[Type.bodySm, { color: palette.muted }]}>
               Nothing yet. Anything you tell Grove about yourself is kept here, and nowhere
-              else — you can read every line of it and delete any of them.
+              else — you can read every line, correct anything it wrote down wrong, and delete
+              any of them.
             </Text>
           </Card>
         ) : (
           <Card style={{ paddingVertical: 2 }}>
-            {facts.map((fact) => (
-              <Row
+            {facts.map((fact, index) => (
+              <FactRow
                 key={fact.id}
-                label={fact.value}
-                right={
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`Forget: ${fact.value}`}
-                    onPress={() => void forgetFact(fact.id)}
-                    hitSlop={8}
-                    style={({ pressed }) => ({ padding: 8, opacity: pressed ? 0.5 : 1 })}
-                  >
-                    <Icon name="trash" size={16} color={palette.muted} />
-                  </Pressable>
-                }
+                fact={fact}
+                first={index === 0}
+                onSave={(id, value) => void editFact(id, value)}
+                onForget={(id) => void forgetFact(id)}
               />
             ))}
           </Card>
         )}
+        {facts.length > 0 ? (
+          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 9 }]}>
+            Tap a line to correct it. Speech gets names wrong; this is where you fix that.
+          </Text>
+        ) : null}
         {facts.length > 0 ? (
           <Button
             label="Forget everything"
@@ -250,6 +254,169 @@ export default function Settings() {
  * tuning stops it sounding like a satnav. That download is free and is a bigger
  * improvement than anything this app can do in code.
  */
+/**
+ * One remembered fact, correctable in place.
+ *
+ * Editable rather than delete-and-say-it-again, because the common case is not
+ * a fact that has changed — it is a fact that was written down wrong. A name
+ * heard as "Fisher" that was always "Vishnu" is still the right fact; making
+ * someone delete it and repeat themselves to the same recogniser that already
+ * misheard them once is the wrong shape of fix.
+ */
+function FactRow({
+  fact,
+  first,
+  onSave,
+  onForget,
+}: {
+  fact: Fact;
+  first: boolean;
+  onSave: (id: string, value: string) => void;
+  onForget: (id: string) => void;
+}) {
+  const palette = usePalette();
+  const [text, setText] = useState(fact.value);
+
+  // Follows the stored value: a later turn can rewrite a fact while this
+  // screen is open, and the box should not sit there showing the old one.
+  useEffect(() => setText(fact.value), [fact.value]);
+
+  const commit = () => {
+    const next = text.trim();
+    if (!next) {
+      // Clearing the box is not a delete. The bin is, and it is right there.
+      setText(fact.value);
+      return;
+    }
+    if (next !== fact.value) onSave(fact.id, next);
+  };
+
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 8,
+        borderTopWidth: first ? 0 : 1,
+        borderTopColor: palette.line,
+      }}
+    >
+      <TextInput
+        value={text}
+        onChangeText={(next) => setText(next.slice(0, VALUE_MAX))}
+        onBlur={commit}
+        onSubmitEditing={commit}
+        returnKeyType="done"
+        multiline
+        accessibilityLabel={`Memory: ${fact.value}. Edit to correct it.`}
+        style={{
+          flex: 1,
+          paddingVertical: 11,
+          fontFamily: Type.body.fontFamily,
+          fontSize: 14.5,
+          lineHeight: 21,
+          color: palette.ink,
+        }}
+      />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Forget: ${fact.value}`}
+        onPress={() => onForget(fact.id)}
+        hitSlop={8}
+        style={({ pressed }) => ({ padding: 8, marginTop: 4, opacity: pressed ? 0.5 : 1 })}
+      >
+        <Icon name="trash" size={16} color={palette.muted} />
+      </Pressable>
+    </View>
+  );
+}
+
+/**
+ * Three characters, collapsed to one row.
+ *
+ * Presets were taken off this screen once, for a good reason: as a row of
+ * buttons beside the manner box they were a second source of truth, and one
+ * that silently overwrote what you had written. This puts them back the way
+ * the voice list works instead — collapsed to the one in use, and writing into
+ * the box rather than living alongside it. The box is still the only thing
+ * saved. A preset is just a way to fill it in, and the moment you edit it the
+ * row says Custom and stops claiming otherwise.
+ */
+function MannerPicker({
+  manner,
+  onSelect,
+}: {
+  manner: string;
+  onSelect: (preset: Preset) => void;
+}) {
+  const palette = usePalette();
+  const [open, setOpen] = useState(false);
+
+  // Matched on the text, not on a stored key, so an edited preset is honestly
+  // reported as Custom rather than still claiming to be the thing it was.
+  const current = PRESETS.find((preset) => preset.manner.trim() === manner.trim());
+
+  return (
+    <Card style={{ paddingVertical: 2, marginBottom: 10 }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`Manner: ${current?.label ?? 'custom'}. Tap to change.`}
+        onPress={() => setOpen((was) => !was)}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          paddingVertical: 13,
+          opacity: pressed ? 0.6 : 1,
+        })}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={[Type.body, { color: palette.ink }]}>{current?.label ?? 'Custom'}</Text>
+          <Text style={[Type.bodySm, { color: palette.muted }]}>
+            {current?.blurb ?? 'Your own words, in the box below.'}
+          </Text>
+        </View>
+        <Mono>{PRESETS.length}</Mono>
+        <Icon name={open ? 'down' : 'chevron'} size={14} color={palette.muted} />
+      </Pressable>
+
+      {open
+        ? PRESETS.map((preset) => {
+            const on = preset.key === current?.key;
+            return (
+              <Pressable
+                key={preset.key}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: on }}
+                accessibilityLabel={`${preset.label}. ${preset.blurb}`}
+                onPress={() => {
+                  onSelect(preset);
+                  setOpen(false);
+                }}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 10,
+                  paddingVertical: 11,
+                  borderTopWidth: 1,
+                  borderTopColor: palette.line,
+                  opacity: pressed ? 0.6 : 1,
+                })}
+              >
+                <Dot tone={on ? 'live' : 'off'} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[Type.body, { color: palette.ink }]}>{preset.label}</Text>
+                  <Text style={[Type.bodySm, { color: palette.muted }]}>{preset.blurb}</Text>
+                </View>
+              </Pressable>
+            );
+          })
+        : null}
+    </Card>
+  );
+}
+
 function VoicePicker({
   selected,
   onSelect,
