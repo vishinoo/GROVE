@@ -122,14 +122,7 @@ export const CONNECTIONS: Connection[] = [
   },
 ];
 
-export function connectionByKey(key: string): Connection | undefined {
-  return CONNECTIONS.find((c) => c.key === key);
-}
 
-/** The account-backed ones, which are the only keys Noctus knows about. */
-export function accountKeys(): string[] {
-  return CONNECTIONS.filter((c) => c.kind === 'account').map((c) => c.key);
-}
 
 /** What to start the consent flow with, which is not always the stored key. */
 export function providerFor(connection: Connection): string {

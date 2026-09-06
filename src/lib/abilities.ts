@@ -494,10 +494,6 @@ export function usableAbilities(): Ability[] {
   return ABILITIES.filter((a) => a.wired);
 }
 
-/** Declared but not yet built — the UI shows these greyed rather than hiding them. */
-export function unwiredAbilities(): Ability[] {
-  return ABILITIES.filter((a) => !a.wired);
-}
 
 /**
  * Whether a set of abilities can run without the phone being awake.
@@ -511,14 +507,3 @@ export function isSchedulable(ids: string[]): boolean {
   return ids.every((id) => abilityById(id)?.where === 'server');
 }
 
-/** The ability list as the router needs to see it: id, purpose, arguments. */
-export function routerCatalogue(): string {
-  return usableAbilities()
-    .map((a) => {
-      const args = Object.entries(a.args)
-        .map(([k, v]) => `${k}${v.required ? '' : '?'} (${v.what})`)
-        .join(', ');
-      return `- ${a.id}: ${a.what} args: ${args || 'none'}`;
-    })
-    .join('\n');
-}

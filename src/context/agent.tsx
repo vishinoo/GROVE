@@ -33,6 +33,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { capabilities } from '@/lib/capabilities';
+import { abilityById } from '@/lib/abilities';
 import { askGrove, newTurn, type Turn, type TurnTool } from '@/lib/grove';
 import { abortListening, isListening, startListening, stopListening } from '@/lib/listen';
 import {
@@ -202,7 +203,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     });
     void sparks.loadSparks(uid).then((s) => {
       if (mounted.current) setSparkList(s);
+      // Opening the app is the only reliable moment a device-side spark gets.
+      void catchUp();
     });
+    // catchUp is declared below and is stable (useCallback with no deps), so
+    // naming it here would be a forward reference for no benefit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, uid]);
 
   const clearActivity = useCallback(async () => {
@@ -303,11 +309,18 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     setActivity(entries);
     const entryId = entries[0]?.id;
 
-    if (!reply.ability) return;
+    // A standing job is worth saving even when nothing can carry it out yet —
+    // the instruction is re-read on every run, so it starts working the day the
+    // ability behind it exists. Returning here first meant "whenever I say X,
+    // email Y" was thrown away because mail happened to be unwired.
+    if (!reply.ability && !reply.schedule && !reply.phrase) return;
 
     // A recurrence makes this a standing job rather than a one-off. Saved and
     // not run now: the point of "every morning" is that it happens then.
-    if (reply.schedule && !taught) {
+    // Either kind of standing job. Testing `schedule` alone silently dropped
+    // every "whenever I say..." — the spark was never created, and nothing said
+    // so, which is the worst shape a bug can take in something you talk to.
+    if ((reply.schedule || reply.phrase) && !taught) {
       const spark = await sparks.createSpark(account, {
         said: text,
         title: reply.title,
@@ -318,6 +331,11 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // Past the spark branch, so this is a one-off. Nothing to run means nothing
+    // to do — the reply has already been spoken.
+    const ability = reply.ability;
+    if (!ability) return;
+
     // The reply is already being spoken; the run happens behind it. The flag
     // is what stops the end of that speech from reporting the turn as over.
     running.current = true;
@@ -325,21 +343,21 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
     let outcome;
     try {
-      outcome = await reply.ability.run(reply.args);
+      outcome = await ability.run(reply.args);
     } catch (error) {
       outcome = {
         ok: false,
-        spoken: error instanceof Error ? error.message : `${reply.ability.name} failed.`,
+        spoken: error instanceof Error ? error.message : `${ability.name} failed.`,
       };
     }
     running.current = false;
     if (!mounted.current) return;
 
     const record: TurnTool = {
-      name: reply.ability.name,
+      name: ability.name,
       state: outcome.ok ? 'done' : 'failed',
       detail: outcome.spoken,
-      needs: reply.ability.needs,
+      needs: ability.needs,
     };
 
     if (entryId) {
@@ -353,6 +371,52 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     setCaption(outcome.spoken);
     await whenQuiet();
     if (mounted.current) utter(outcome.spoken);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * Runs anything that was due while Grove was closed.
+   *
+   * iOS will not wake the app at a chosen moment, so a device-side spark can
+   * only ever catch up — which is what the Sparks screen promises and what
+   * nothing was actually doing: dueSparks() existed and was never called, so a
+   * scheduled job had no path to running at all.
+   *
+   * One at a time, and only the oldest: coming back after a week away should
+   * produce one briefing, not seven talking over each other.
+   */
+  const catchUp = useCallback(async () => {
+    const account = live.current.uid;
+    if (!account || account === 'anon') return;
+
+    const all = await sparks.loadSparks(account);
+    const due = sparks.dueSparks(all);
+    if (due.length === 0) return;
+
+    const spark = due[due.length - 1];
+    const ability = spark.abilityId ? abilityById(spark.abilityId) : undefined;
+    // Marked before running, so a failing spark cannot retry on a loop every
+    // time the app comes forward.
+    setSparkList(await sparks.markRun(account, spark.id));
+    if (!ability?.wired) return;
+
+    let outcome;
+    try {
+      outcome = await ability.run({});
+    } catch {
+      return;
+    }
+    if (!mounted.current || !outcome.ok) return;
+
+    const entries = await transcript.record(account, {
+      said: spark.title,
+      replied: outcome.spoken,
+      tool: { name: ability.name, state: 'done', detail: outcome.spoken },
+    });
+    if (!mounted.current) return;
+    setActivity(entries);
+    setCaption(outcome.spoken);
+    utter(outcome.spoken);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -572,7 +636,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // so every return to the foreground re-takes it. Without this the ring
     // works until the first interruption and then silently stops.
     const onAppState = (next: AppStateStatus) => {
-      if (next === 'active') void arm();
+      if (next === 'active') {
+        void arm();
+        void catchUp();
+      }
     };
     const appSub = AppState.addEventListener('change', onAppState);
 
@@ -582,7 +649,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       offRoute();
       appSub.remove();
     };
-  }, [status, press, beginListening]);
+  }, [status, press, beginListening, catchUp]);
 
   /**
    * The volume-down fallback follows the preference, but only once the session

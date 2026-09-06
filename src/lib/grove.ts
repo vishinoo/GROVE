@@ -29,7 +29,7 @@ import { abilityById, isSchedulable, usableAbilities, type Ability } from './abi
 import { asPromptBlock, factFrom, type Fact } from './memory';
 import { isLightModelConfigured, lightTurn, type LightMessage } from './lightModel';
 import { fallback, mannerDirective, type Persona } from './persona';
-import { describeSchedule, parseSchedule, type Schedule } from './sparks';
+import { describeSchedule, parseSchedule, phraseTrigger, type Schedule } from './sparks';
 
 export type TurnTool = {
   name: string;
@@ -57,6 +57,12 @@ export type GroveReply = {
    * instead of just running the thing once.
    */
   schedule?: Schedule;
+  /**
+   * Set when the sentence taught a phrase — "whenever I say X". The other kind
+   * of standing job, and the reason a caller must not test `schedule` alone to
+   * decide whether to save one.
+   */
+  phrase?: string;
   /** An ability that fits but is not built or connected yet. */
   blocked?: Ability;
   /** A short name for the standing job, when this is one. */
@@ -201,6 +207,10 @@ export async function askGrove(
   // Tier 0. Whether anything is allowed to run, and whether it recurs.
   const acting = detectActIntent(userText);
   const schedule = acting ? parseSchedule(userText) : null;
+  // The other kind of standing job. Checked here rather than left to the
+  // caller, because a caller that tests `schedule` alone silently drops every
+  // phrase trigger — which is exactly what was happening.
+  const phrase = acting && !schedule ? phraseTrigger(userText) : null;
 
   // Tier 1. Answers, and names the ability that fits.
   const light = await lightTurn(toLightHistory(history), userText, {
@@ -229,15 +239,20 @@ export async function askGrove(
       ability: chosen ?? undefined,
       args: light?.args ?? {},
       schedule: schedule ?? undefined,
+      phrase: phrase ?? undefined,
       blocked: blocked ?? undefined,
-      title: light?.title ?? (schedule ? titleFrom(userText) : undefined),
-      instruction: schedule ? instructionFrom(userText) : undefined,
+      title: light?.title ?? (schedule || phrase ? titleFrom(userText) : undefined),
+      instruction: schedule || phrase ? instructionFrom(userText) : undefined,
       fact,
     };
   };
 
   // A recurrence is worth confirming out loud, because it is the one thing
   // here that keeps happening after the conversation ends.
+  if (phrase) {
+    return settle(`Right — say “${phrase}” and I'll do that.`);
+  }
+
   if (schedule && chosen) {
     const when = describeSchedule(schedule);
     const caveat = isSchedulable([chosen.id])

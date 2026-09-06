@@ -374,6 +374,20 @@ export async function editSpark(
   return next;
 }
 
+/**
+ * Records that a spark just ran.
+ *
+ * Without this `dueSparks` keeps returning the same job every time it is
+ * asked, so a catch-up on foreground would fire the morning brief over and
+ * over for as long as the app stayed open.
+ */
+export async function markRun(uid: string, id: string): Promise<Spark[]> {
+  const now = new Date().toISOString();
+  const next = (await loadSparks(uid)).map((s) => (s.id === id ? { ...s, lastRun: now } : s));
+  await write(uid, next);
+  return next;
+}
+
 export async function setSparkEnabled(
   uid: string,
   id: string,
