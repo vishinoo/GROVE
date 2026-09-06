@@ -56,9 +56,8 @@ public class GroveRemoteModule: Module {
 
   /// Set while a travelTime call is in flight. Only one at a time — a second
   /// question replaces the first rather than queueing behind it.
-  private var locationManager: CLLocationManager?
+  private lazy var locationRunner = LocationRunner()
   private var locationPromise: Promise?
-  private var pendingDestination: String?
   private var pendingDriving = true
 
   private static let anchorFloor: Float = 0.15
@@ -255,22 +254,13 @@ public class GroveRemoteModule: Module {
      */
     AsyncFunction("travelTime") { (destination: String, driving: Bool, promise: Promise) in
       self.locationPromise = promise
-      self.pendingDestination = destination
       self.pendingDriving = driving
 
       DispatchQueue.main.async {
-        let manager = self.locationManager ?? CLLocationManager()
-        self.locationManager = manager
-        manager.delegate = self
-
-        switch manager.authorizationStatus {
-        case .notDetermined:
-          manager.requestWhenInUseAuthorization()
-        case .denied, .restricted:
-          self.settleLocation(["ok": false, "reason": "denied"])
-        default:
-          manager.requestLocation()
-        }
+        self.locationRunner.locate(
+          onFix: { here in self.route(from: here, to: destination) },
+          onFail: { reason in self.settleLocation(["ok": false, "reason": reason]) }
+        )
       }
     }
 
@@ -288,7 +278,6 @@ public class GroveRemoteModule: Module {
   private func settleLocation(_ payload: [String: Any]) {
     locationPromise?.resolve(payload)
     locationPromise = nil
-    pendingDestination = nil
   }
 
   /**
@@ -707,31 +696,65 @@ public class GroveRemoteModule: Module {
 }
 
 /**
- * Location callbacks.
+ * Location callbacks, in a class of their own.
  *
- * A separate extension because CLLocationManagerDelegate is a different
- * protocol with a different lifecycle from everything else in this module —
- * it answers whenever iOS feels like it, not when it is asked.
+ * CLLocationManagerDelegate refines NSObjectProtocol, and ExpoModulesCore's
+ * `Module` is not an NSObject — so the module itself cannot be the delegate, and
+ * the first build failed saying exactly that. A small NSObject that forwards to
+ * closures is the usual way round it, and it keeps the delegate's lifecycle
+ * separate from the module's, which it always wanted to be: location answers
+ * whenever iOS feels like it, not when it is asked.
  */
-extension GroveRemoteModule: CLLocationManagerDelegate {
-  public func locationManager(
-    _ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]
-  ) {
-    guard let here = locations.last, let destination = pendingDestination else { return }
-    route(from: here, to: destination)
+final class LocationRunner: NSObject, CLLocationManagerDelegate {
+  private let manager = CLLocationManager()
+  private var onFix: ((CLLocation) -> Void)?
+  private var onFail: ((String) -> Void)?
+
+  override init() {
+    super.init()
+    manager.delegate = self
   }
 
-  public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-    settleLocation(["ok": false, "reason": "noFix"])
-  }
+  func locate(onFix: @escaping (CLLocation) -> Void, onFail: @escaping (String) -> Void) {
+    self.onFix = onFix
+    self.onFail = onFail
 
-  public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
     switch manager.authorizationStatus {
+    case .notDetermined: manager.requestWhenInUseAuthorization()
+    case .denied, .restricted: finishFail("denied")
+    default: manager.requestLocation()
+    }
+  }
+
+  /// Both callbacks are cleared before firing, so a late second fix from iOS
+  /// cannot resolve the same promise twice.
+  private func finishFix(_ location: CLLocation) {
+    let fix = onFix
+    onFix = nil; onFail = nil
+    fix?(location)
+  }
+
+  private func finishFail(_ reason: String) {
+    let fail = onFail
+    onFix = nil; onFail = nil
+    fail?(reason)
+  }
+
+  func locationManager(_ m: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+    guard let here = locations.last else { return }
+    finishFix(here)
+  }
+
+  func locationManager(_ m: CLLocationManager, didFailWithError error: Error) {
+    finishFail("noFix")
+  }
+
+  func locationManagerDidChangeAuthorization(_ m: CLLocationManager) {
+    switch m.authorizationStatus {
     case .authorizedWhenInUse, .authorizedAlways:
-      // Only if a question is still waiting — this also fires on a cold start.
-      if pendingDestination != nil { manager.requestLocation() }
+      if onFix != nil { m.requestLocation() }
     case .denied, .restricted:
-      settleLocation(["ok": false, "reason": "denied"])
+      finishFail("denied")
     default:
       break
     }
