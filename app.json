@@ -25,7 +25,10 @@
         "NSRemindersUsageDescription": "Grove saves the things you ask it to remember.",
         "NSRemindersFullAccessUsageDescription": "Grove saves the things you ask it to remember.",
         "NSAppleMusicUsageDescription": "Grove plays music from your library when you ask it to.",
-        "NSLocationWhenInUseUsageDescription": "Grove uses where you are to work out how long it takes to get somewhere."
+        "NSLocationWhenInUseUsageDescription": "Grove uses where you are to work out how long it takes to get somewhere.",
+        "NSPhotoLibraryUsageDescription": "Grove can find a photo when you describe one out loud.",
+        "NSPhotoLibraryAddUsageDescription": "Grove saves a photo to your library only when you ask it to.",
+        "NSContactsUsageDescription": "Grove looks up a name when you ask it to message or email someone."
       }
     },
     "android": {
