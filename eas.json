@@ -17,12 +17,14 @@
       "channel": "preview",
       "ios": {
         "simulator": false
-      }
+      },
+      "developmentClient": false
     },
     "production": {
       "autoIncrement": true,
       "channel": "production",
-      "distribution": "store"
+      "distribution": "store",
+      "developmentClient": false
     }
   },
   "submit": {
