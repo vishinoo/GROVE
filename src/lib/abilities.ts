@@ -32,6 +32,8 @@ import {
   readWhen,
   sayWhen,
 } from './deviceCalendar';
+import { Linking, Platform } from 'react-native';
+
 import { capabilities } from './capabilities';
 import { loadFacts, recall } from './memory';
 import { fetchJson } from './net';
@@ -587,8 +589,64 @@ const RECALL: Ability = {
   },
 };
 
+/**
+ * A message, as far as iOS will allow.
+ *
+ * There is no API to send an SMS or an iMessage. None. `sms:` opens the
+ * Messages app with the recipient and body already filled in, and the person
+ * taps send — which is one tap more than hands-free, and is the entire
+ * available surface. Anyone claiming otherwise is describing a jailbreak.
+ *
+ * So this is honest about what it does: it composes the message and hands it
+ * over ready to send, and says so. Mail is the path that genuinely completes
+ * without touching the phone, and Grove offers that instead when it can.
+ */
+const MESSAGE: Ability = {
+  id: 'message.compose',
+  name: 'Message',
+  what: 'Writes a text and opens it ready to send.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {
+    to: { type: 'string', what: 'who — a name, or a number if they gave one' },
+    body: { type: 'string', what: 'what the message says', required: true },
+  },
+  examples: [
+    'text Sam that we are going at seven',
+    'message the group the address',
+    'let Priya know I am running late',
+  ],
+  run: async (args) => {
+    const body = (args.body || '').trim();
+    if (!body) return { ok: false, spoken: 'Saying what?' };
+
+    const to = (args.to || '').trim();
+    // A number can be dialled straight into the sheet; a name cannot, and iOS
+    // gives no way to resolve one, so the sheet opens with the body ready and
+    // the person picks the recipient.
+    const digits = to.replace(/[^\d+]/g, '');
+    const target = digits.length >= 7 ? digits : '';
+    const url = `sms:${target}${Platform.OS === 'ios' ? '&' : '?'}body=${encodeURIComponent(body)}`;
+
+    const opened = await Linking.canOpenURL(url)
+      .then((can) => (can ? Linking.openURL(url).then(() => true) : false))
+      .catch(() => false);
+
+    if (!opened) return { ok: false, spoken: 'I could not open Messages.' };
+    // Said plainly, because the one thing worse than a tap is thinking it sent.
+    return {
+      ok: true,
+      spoken: to
+        ? `Written to ${to}. Tap send — iOS won't let me send it for you.`
+        : "It's ready in Messages. Pick who, and tap send.",
+    };
+  },
+};
+
 export const ABILITIES: Ability[] = [
   RECALL,
+  MESSAGE,
   DAY,
   WEATHER,
   DIRECTIONS,

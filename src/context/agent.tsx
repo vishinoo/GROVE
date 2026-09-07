@@ -166,6 +166,20 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    * stops being used, which is the failure this guards against.
    */
   const lastVolunteered = useRef<string | null>(null);
+  /**
+   * Which turn is current. Bumped by every press.
+   *
+   * A turn has several points where it waits — for the model, and for the
+   * synthesiser to go quiet before speaking a result. Interrupting resolves
+   * those waits rather than cancelling them: stopSpeaking() makes whenQuiet()
+   * return *immediately*, so the code after it carried on and started talking
+   * over the listening session that had just opened. That is the "I interrupt
+   * it and it keeps going" bug, and no amount of stopping speech fixes it,
+   * because the problem is a turn that no longer has permission to speak.
+   *
+   * Every await inside a turn is followed by a check that this still matches.
+   */
+  const turnSeq = useRef(0);
 
   /** Where the machine settles when nothing is in flight. */
   const restingState = (): AgentState =>
@@ -278,6 +292,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    const turn = ++turnSeq.current;
+    /** Whether this turn is still the one the user is waiting on. */
+    const mine = () => mounted.current && turn === turnSeq.current;
+
     const { persona: voice, facts: known, uid: account } = live.current;
 
     // A phrase trigger turns your own words into a button, so it is checked
@@ -300,7 +318,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
      */
     let held = false;
     const holdTimer = setTimeout(() => {
-      if (!mounted.current) return;
+      if (!mine()) return;
       held = true;
       utter(holdingLine(modeById(voice.mode ?? 'normal')));
     }, 2200);
@@ -317,7 +335,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     clearTimeout(holdTimer);
-    if (!mounted.current) return;
+    if (!mine()) return;
 
     history.current = [
       ...history.current,
@@ -331,7 +349,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // Queued behind the holding line rather than cutting it off — being
     // interrupted by the thing you were waiting for is worse than the wait.
     if (held) await whenQuiet();
-    if (!mounted.current) return;
+    if (!mine()) return;
     utter(reply.text);
 
     // Anything worth remembering was pulled locally, by keyword, from what was
@@ -353,7 +371,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       replied: reply.text,
       tool: reply.ability ? { name: reply.ability.name, state: 'running' } : undefined,
     });
-    if (!mounted.current) return;
+    if (!mine()) return;
     setActivity(entries);
     const entryId = entries[0]?.id;
 
@@ -392,7 +410,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // Bounded, so a hung ability can never leave a promise unanswered.
     const outcome = await runAbility(ability, reply.args);
     running.current = false;
-    if (!mounted.current) return;
+    if (!mine()) return;
 
     const record: TurnTool = {
       name: ability.name,
@@ -411,7 +429,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     if (!mounted.current) return;
     setCaption(outcome.spoken);
     await whenQuiet();
-    if (mounted.current) utter(outcome.spoken);
+    // The result of work you interrupted is not something you still want read
+    // out — you have already moved on and asked something else.
+    if (mine()) utter(outcome.spoken);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -599,6 +619,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // and whose ring has no feedback of its own. Without it there is a silent
     // gap between pressing and Grove being ready, and people press again.
     buzz();
+
+    // Any press ends the turn that was running, whatever it was doing. Without
+    // this, work already in flight comes back and speaks over the new one.
+    turnSeq.current += 1;
 
     // Barge-in. Stop talking and start listening, in that order.
     if (current === 'speaking' || isSpeaking()) {

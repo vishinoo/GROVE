@@ -111,14 +111,12 @@ export const CONNECTIONS: Connection[] = [
     what: 'Read out, and answered',
     icon: 'messages',
     kind: 'device',
-    unlocks: [],
-    // Worth stating plainly rather than shipping a button that cannot work.
-    // There is no public API for reading iMessage or SMS on iOS, and no
-    // entitlement that grants one. Same category as waking the app from
-    // terminated with a ring press.
-    impossible:
-      'iOS gives no app any way to read Messages, and no way to send one without ' +
-      'you tapping Send. No entitlement exists. A Shortcut is the only workaround.',
+    unlocks: ['message.compose'],
+    // Reading is impossible and always will be. Writing is possible as far as
+    // the compose sheet, which is one tap short of hands-free — so the row says
+    // exactly that rather than either promising or refusing outright.
+    note: 'Grove writes the message and opens it. iOS makes you tap send.',
+    // Not `impossible` any more: composing works. Reading never will.
   },
 ];
 
