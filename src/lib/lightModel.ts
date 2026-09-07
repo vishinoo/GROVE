@@ -261,14 +261,14 @@ async function askServer(
   system: string,
   messages: LightMessage[],
   json: boolean,
-  deep: boolean
+  deep: boolean,
+  search: boolean
 ): Promise<string | null> {
   const data = await fetchJson<{ text?: string }>('/api/grove/chat', {
     method: 'POST',
-    body: { system, messages, json, deep },
-    // The proxy grounds every non-JSON call, so this is the slow path by
-    // definition rather than by guess.
-    slow: !json,
+    body: { system, messages, json, deep, search },
+    // Only a call that will actually search needs the long bound.
+    slow: search,
   });
   return data?.text?.trim() || null;
 }
@@ -278,7 +278,8 @@ async function complete(
   system: string,
   messages: LightMessage[],
   json = false,
-  deep = false
+  deep = false,
+  search = true
 ): Promise<string | null> {
   // Free and local first, then the server that holds the shared key, then the
   // device's own key. Three paths so that no single thing going down takes
@@ -289,10 +290,13 @@ async function complete(
     ollamaReachable = false;
   }
 
-  const viaServer = await askServer(system, messages, json, deep);
+  const viaServer = await askServer(system, messages, json, deep, search);
   if (viaServer !== null) return viaServer;
 
+  // Last resort: the key on this phone, so Noctus being unreachable does not
+  // take Grove's ability to think with it.
   return askDirect(system, messages, json);
+
 }
 
 /**
@@ -309,6 +313,27 @@ async function complete(
  */
 const DEEP_SIGNALS =
   /\b(why|explain|compare|difference between|pros and cons|walk me through|reason|analyse|analyze|summari[sz]e (?:this|that|the)|draft|write me)\b/i;
+
+/**
+ * Whether a turn plausibly needs the web.
+ *
+ * Grounding costs a round trip to Google before a word is written, so running
+ * it on "play something mellow" makes the fast half of Grove as slow as the
+ * slow half. Question-shaped and fact-shaped requests get it; instructions and
+ * chatter do not.
+ *
+ * Wrong in the cheap direction on purpose: a missed search costs one "I can't
+ * check that", while a missed instruction costs several seconds on every
+ * single turn.
+ */
+const LOOKUP_SIGNALS =
+  /\b(who|what|when|where|which|how (?:much|many|far|long)|why|price|cost|score|news|weather|open|closed|hours|near|nearby|best|latest|today'?s|current|trading|won|winner)\b/i;
+
+export function needsLookup(text: string): boolean {
+  const t = text.trim();
+  if (t.endsWith('?')) return true;
+  return LOOKUP_SIGNALS.test(t);
+}
 
 export function needsDepth(text: string): boolean {
   // Whether a deeper model exists is the server's business now, so this only
@@ -362,6 +387,12 @@ WHAT YOU DO NOT KNOW:
 - What you must not do is guess. If a search gives you nothing useful, say you could not find it. "I couldn't find that" is a good answer; a confident wrong one is the worst thing you can do, because they are walking down a street listening to you, not reading a page with a source on it.
 - Never soften a guess into an answer. Not "I think it's around", not "probably about", not "last I knew". Either you found it, or you say you didn't.
 - Never state a number, a date, a price or a name you are not sure of. Ask, or say you do not have it.
+
+WHEN TO ASK INSTEAD OF ANSWERING:
+- A request that could mean ten different things deserves one short question, not a guess dressed as an answer. "Build me a project" — ask what kind, or what it is for. "Book me something" — ask when.
+- One question, not three, and never a list of options. Ask the single thing that most changes the answer, then wait.
+- Do not ask when you can reasonably infer it, and never ask twice about the same thing. If they have already told you, use it.
+- Once they answer, actually answer properly: a real, specific, useful reply. A clarifying question earns you the right to be good, so be good.
 
 PLACES:
 - Anything local — a restaurant, a shop, opening hours, what is nearby — depends entirely on WHERE. Getting the city wrong makes the answer worse than useless, because it is confidently specific and completely irrelevant.
@@ -482,7 +513,8 @@ TITLE: <two or three words, only for a standing job>`;
     system,
     [...history.slice(-8), { role: 'user', content: userText.slice(0, 4000) }],
     false,
-    needsDepth(userText)
+    needsDepth(userText),
+    needsLookup(userText)
   );
   if (!raw) return null;
   return parseReply(raw);

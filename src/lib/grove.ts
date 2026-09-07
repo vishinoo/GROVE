@@ -249,6 +249,26 @@ export async function askGrove(
 
   const fact = factFrom(userText) ?? undefined;
 
+  /**
+   * Remembering something needs no model at all.
+   *
+   * "Remember that Sam owes me twelve quid for lunch" was going through the
+   * full turn — including a web search, since grounding is on — and taking the
+   * better part of a minute to do something the local extractor had already
+   * finished before the request left the phone. The answer was always going to
+   * be "noted"; there was nothing to think about.
+   *
+   * Only when nothing else is going on: a sentence that also asks for something
+   * still gets a proper turn.
+   */
+  if (fact && !acting && !schedule && !phrase) {
+    return {
+      text: `Noted — ${fact.value.replace(/^i /i, 'you ')}.`,
+      args: {},
+      fact,
+    };
+  }
+
   const settle = (text: string): GroveReply => {
     const usable = text.trim();
     return {

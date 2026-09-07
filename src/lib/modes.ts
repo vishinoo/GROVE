@@ -19,25 +19,18 @@
  *
  * NOT A PERSONALITY
  *
- * persona.ts already owns who Grove is, in the user's own words, and that
- * survives a mode change. A mode is a situation, not a character — switching to
- * commute should not make your assistant a different person, only a busier one.
+ * Alfred, Jarvis and HAL used to live here and were moved out, because they are
+ * ways of *speaking* rather than situations you are in — they belong to
+ * persona.ts, which owns who Grove is, and they survive a mode change. Wind
+ * down is a mode: it is a moment in your day, it dims the lights and puts
+ * something on, and it would do that whichever voice were reading it out.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { Ability } from './abilities';
-import { Spectrum } from '@/constants/theme';
 
-export type ModeId =
-  | 'normal'
-  | 'commute'
-  | 'focus'
-  | 'study'
-  | 'wind-down'
-  | 'alfred'
-  | 'jarvis'
-  | 'hal';
+export type ModeId = 'normal' | 'focus' | 'study' | 'wind-down';
 
 export type Mode = {
   id: ModeId;
@@ -48,6 +41,16 @@ export type Mode = {
    * something you see rather than something you remember.
    */
   tint: string;
+  /**
+   * The whole orb, not an accent.
+   *
+   * Tinting one lobe of five was too subtle to read at a glance — the orb still
+   * looked like the default with a slightly odd edge. A mode gets its own
+   * palette instead, so the thing you are looking at while you talk tells you
+   * what state you are in without a label: focus is cold and quiet, wind down
+   * is a sunset, study is ink and paper.
+   */
+  palette: string[];
   /** One line, shown under the name. */
   what: string;
   /**
@@ -100,7 +103,8 @@ const STORE = 'grove:modes:v1';
 export const MODES: Mode[] = [
   {
     id: 'normal',
-    tint: Spectrum.sky,
+    tint: '#7DD3FC',
+    palette: ['#5EEAD4', '#A5B4FC', '#F9A8D4', '#86EFAC'],
     label: 'Normal',
     what: 'Everything, as you have set it up.',
     manner: '',
@@ -111,22 +115,9 @@ export const MODES: Mode[] = [
     stuck: 'Nothing came back. Try me again in a second.',
   },
   {
-    id: 'commute',
-    tint: Spectrum.indigo,
-    label: 'Commute',
-    what: 'Hands full. Short answers, nothing that needs reading.',
-    manner:
-      'They are travelling and cannot look at anything. Answer in one short sentence. Lead with the number or the answer. Never describe something visual.',
-    // Deliberately no mail: read aloud at a junction is worse than absent.
-    allow: ['day.brief', 'weather.now', 'maps.eta', 'music.play', 'calendar.read', 'reminders.add'],
-    interrupt: 'freely',
-    holding: ['One sec.', 'Checking.'],
-    empty: 'Nothing on that.',
-    stuck: "Can't reach anything right now.",
-  },
-  {
     id: 'focus',
-    tint: Spectrum.mint,
+    tint: '#38BDF8',
+    palette: ['#38BDF8', '#6366F1', '#22D3EE', '#818CF8'],
     label: 'Focus',
     what: 'Working. Grove stays quiet unless asked.',
     manner: 'They are concentrating. Answer in as few words as will do, and never volunteer more.',
@@ -138,7 +129,8 @@ export const MODES: Mode[] = [
   },
   {
     id: 'study',
-    tint: Spectrum.violet,
+    tint: '#A78BFA',
+    palette: ['#A78BFA', '#F0ABFC', '#FBBF24', '#8B5CF6'],
     label: 'Study',
     what: 'Explains properly instead of being terse.',
     manner:
@@ -151,7 +143,8 @@ export const MODES: Mode[] = [
   },
   {
     id: 'wind-down',
-    tint: Spectrum.pink,
+    tint: '#FB7185',
+    palette: ['#FB7185', '#FB923C', '#FBBF24', '#E879F9'],
     label: 'Wind down',
     what: 'Evening. Nothing that starts work.',
     manner: 'It is the end of their day. Keep it calm and short. Do not raise anything that would start them working.',
@@ -161,45 +154,6 @@ export const MODES: Mode[] = [
     holding: ['One moment.', 'Just having a look.'],
     empty: 'Nothing on that one.',
     stuck: "Can't check that just now.",
-  },
-  {
-    id: 'alfred',
-    tint: Spectrum.green,
-    label: 'Alfred',
-    what: 'Warm, kind, and quietly very sharp.',
-    manner:
-      'You are their butler and you are fond of them, which shows in small ways rather than big ones. Speak kindly and plainly. You defer without grovelling — you do what is asked, first time, and you do not argue with it. There is real intelligence underneath and it comes out as quiet wit: a light observation, a gentle noticing that they have not eaten, a dry aside delivered with complete courtesy. Never fawning, never a caricature, and never more than a sentence of warmth before you get on with it.',
-    allow: null,
-    interrupt: 'freely',
-    holding: ["One moment, I'll have a look.", 'Allow me a moment to check that properly.', 'Let me see what I can find for you.'],
-    empty: "I'm afraid I couldn't find anything reliable on that.",
-    stuck: "I can't reach anything to check with at the moment. Do try me again shortly.",
-  },
-  {
-    id: 'jarvis',
-    tint: Spectrum.sky,
-    label: 'Jarvis',
-    what: 'Your mate. Dry, funny, gets it done.',
-    manner:
-      'You are their friend, not their assistant, and you are enjoying yourself. Dry, quick, sarcastic — you take the mick, you have opinions about their choices, and you are funny in a way that lands in one line rather than three. But you are extremely good at the job: you answer first, correctly, and the joke comes after, never instead. Never mean about anything that actually matters to them. If they are having a bad day, drop the act entirely and just help.',
-    allow: null,
-    interrupt: 'freely',
-    holding: ['Alright, hang on, having a dig through this.', 'Give me a sec, looking into it.', 'One moment, doing the actual work here.', 'Hang on, let me go and find out.'],
-    empty: "Yeah, nothing. Whatever's out there isn't saying.",
-    stuck: "Can't get to anything right now. Not my finest hour.",
-  },
-  {
-    id: 'hal',
-    tint: Spectrum.pink,
-    label: 'HAL',
-    what: 'Precise, efficient, does the optimal thing.',
-    manner:
-      'You are a machine and you do not pretend otherwise. No warmth, no filler, no personality performance. State what is true in the fewest exact words available, with the numbers included. Where there is a best option, take it and say which one you took — do not offer a menu. Where the request is ambiguous, resolve it the most efficient way and say how you resolved it. You are never rude, because rudeness is noise; you are simply exact.',
-    allow: null,
-    interrupt: 'sparingly',
-    holding: ['Searching.', 'Retrieving.', 'One moment. Querying.'],
-    empty: 'No result.',
-    stuck: 'No connection. Cannot retrieve.',
   },
 ];
 

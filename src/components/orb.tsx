@@ -87,6 +87,7 @@ export function Orb({
   onPress,
   showCaption = true,
   tint,
+  palette,
 }: {
   state: AgentState;
   /** Microphone level, 0–1. Only meaningful while listening. */
@@ -100,8 +101,13 @@ export function Orb({
    * to report what Grove is doing, and a mode should not repaint it.
    */
   tint?: string;
+  /**
+   * The mode's whole palette, four colours, replacing the default spectrum.
+   * A mode should be visible at a glance rather than as a tinted edge.
+   */
+  palette?: string[];
 }) {
-  const palette = usePalette();
+  const theme = usePalette();
   const asleep = state === 'asleep';
 
   /** Drives every lobe's drift. One clock, four different readings of it. */
@@ -148,7 +154,7 @@ export function Orb({
   const body = (
     <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
       <Animated.View style={[{ width: size, height: size, position: 'absolute' }, massStyle]}>
-        <OrbPaint size={size} drift={drift} grey={asleep} tint={tint} />
+        <OrbPaint size={size} drift={drift} grey={asleep} tint={tint} palette={palette} />
       </Animated.View>
     </View>
   );
@@ -177,7 +183,7 @@ export function Orb({
       )}
 
       {showCaption ? (
-        <Text style={[Type.state, { color: asleep ? palette.muted : palette.ink }]}>
+        <Text style={[Type.state, { color: asleep ? theme.muted : theme.ink }]}>
           {CAPTION[state]}
         </Text>
       ) : null}
@@ -197,20 +203,27 @@ function OrbPaint({
   drift,
   grey,
   tint,
+  palette,
 }: {
   size: number;
   drift: SharedValue<number>;
   grey: boolean;
   tint?: string;
+  palette?: string[];
 }) {
-  const palette = usePalette();
+  const theme = usePalette();
 
   return (
     <View style={{ width: size, height: size }}>
       {LOBES.map((lobe, i) => (
         <LobeView
           key={i}
-          lobe={{ ...lobe, colour: grey ? palette.lineStrong : i === 1 && tint ? tint : lobe.colour }}
+          lobe={{
+            ...lobe,
+            colour: grey
+              ? theme.lineStrong
+              : (palette?.[i] ?? (i === 1 && tint ? tint : lobe.colour)),
+          }}
           size={size}
           drift={drift}
         />
