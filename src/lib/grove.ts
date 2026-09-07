@@ -25,7 +25,8 @@
  * for something you asked once.
  */
 
-import { abilityById, isSchedulable, usableAbilities, type Ability } from './abilities';
+import { ABILITIES, abilityById, isSchedulable, usableAbilities, type Ability } from './abilities';
+import { abilitiesFor, modeById } from './modes';
 import { asPromptBlock, factFrom, type Fact } from './memory';
 import { isLightModelConfigured, lightTurn, type LightMessage } from './lightModel';
 import { fallback, mannerDirective, type Persona } from './persona';
@@ -74,7 +75,7 @@ export type GroveReply = {
    */
   instruction?: string;
   /** A fact worth keeping, pulled locally from what was said. */
-  fact?: { key: string; value: string };
+  fact?: { key: string; value: string; subject: string; open: boolean };
 };
 
 export function newTurn(role: Turn['role'], text: string, extra: Partial<Turn> = {}): Turn {
@@ -212,10 +213,16 @@ export async function askGrove(
   // phrase trigger — which is exactly what was happening.
   const phrase = acting && !schedule ? phraseTrigger(userText) : null;
 
+  // The mode narrows what may be reached for. This is a safety feature as much
+  // as a focus one: commute deliberately has no mail, because reading a message
+  // aloud at a junction is worse than not having mail at all.
+  const mode = modeById(persona.mode ?? 'normal');
+  const available = abilitiesFor(mode, ABILITIES);
+
   // Tier 1. Answers, and names the ability that fits.
   const light = await lightTurn(toLightHistory(history), userText, {
-    abilities: usableAbilities().map((a) => ({ id: a.id, what: a.what })),
-    manner: mannerDirective(persona),
+    abilities: available.map((a) => ({ id: a.id, what: a.what })),
+    manner: [mannerDirective(persona), mode.manner].filter(Boolean).join('\n\n'),
     memory: asPromptBlock(facts),
     name: persona.name,
   });
@@ -224,7 +231,17 @@ export async function askGrove(
   // anything phrased indirectly. It also invents ids, so a pick matching no
   // real ability is discarded rather than trusted.
   const named = light?.abilityId ? abilityById(light.abilityId) : undefined;
-  const chosen = acting ? (named?.wired ? named : pickAbility(userText)) : null;
+  const allowed = (a: Ability | undefined) => Boolean(a && available.some((x) => x.id === a.id));
+  // The keyword fallback has to respect the mode as well, or a narrowed mode is
+  // only narrowed when the model happens to be reachable.
+  const chosen = acting
+    ? allowed(named) && named?.wired
+      ? named
+      : (() => {
+          const guess = pickAbility(userText);
+          return allowed(guess ?? undefined) ? guess : null;
+        })()
+    : null;
 
   // Something would fit, but it is not built or connected yet. Saying which is
   // the difference between a dead end and an instruction.

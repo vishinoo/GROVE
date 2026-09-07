@@ -32,13 +32,15 @@ import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
+import { MODES, modeById } from '@/lib/modes';
 import { when } from '@/lib/transcript';
 
 export default function Talk() {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   const { notice, dismissNotice } = useSession();
-  const { state, caption, heard, level, armed, route, problem, activity, press, say } = useAgent();
+  const { state, caption, heard, level, armed, route, problem, activity, press, say, persona, updatePersona } =
+    useAgent();
 
   const [draft, setDraft] = useState('');
   const canListen = capabilities().speech;
@@ -83,6 +85,15 @@ export default function Talk() {
         <View style={{ alignItems: 'center', marginTop: 26 }}>
           <Orb state={state} level={level} size={210} onPress={press} />
         </View>
+
+        {/*
+          Under the orb rather than in Settings, because a mode is something you
+          change on the way out of the door, not something you configure once.
+        */}
+        <ModeStrip
+          current={persona.mode ?? 'normal'}
+          onPick={(mode) => void updatePersona({ ...persona, mode })}
+        />
 
         {shown ? (
           <Text
@@ -169,6 +180,71 @@ export default function Talk() {
         </Pressable>
       </View>
     </KeyboardAvoidingView>
+  );
+}
+
+/**
+ * The mode strip.
+ *
+ * Five words in a row. A mode changes what Grove will reach for and how freely
+ * it speaks first — commute has no mail on purpose, because a message read
+ * aloud at a junction is worse than no mail at all — so it belongs where you
+ * can change it without thinking, not three taps into Settings.
+ */
+function ModeStrip({
+  current,
+  onPick,
+}: {
+  current: string;
+  onPick: (mode: string) => void;
+}) {
+  const palette = usePalette();
+  const active = modeById(current);
+
+  return (
+    <View style={{ marginTop: 18 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+        {MODES.map((mode) => {
+          const on = mode.id === active.id;
+          return (
+            <Pressable
+              key={mode.id}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: on }}
+              accessibilityLabel={`${mode.label}: ${mode.what}`}
+              onPress={() => onPick(mode.id)}
+              hitSlop={4}
+              style={({ pressed }) => ({
+                paddingVertical: 7,
+                paddingHorizontal: 12,
+                borderRadius: Radius.pill,
+                backgroundColor: on ? palette.mark : palette.raised,
+                borderWidth: 1,
+                borderColor: on ? palette.mark : palette.line,
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <Text
+                style={{
+                  fontFamily: Type.cardTitle.fontFamily,
+                  fontSize: 12.5,
+                  color: on ? palette.raised : palette.inkSoft,
+                }}
+              >
+                {mode.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {active.id !== 'normal' ? (
+        <Text
+          style={[Type.bodySm, { color: palette.muted, textAlign: 'center', marginTop: 8 }]}
+        >
+          {active.what}
+        </Text>
+      ) : null}
+    </View>
   );
 }
 

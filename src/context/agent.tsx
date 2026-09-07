@@ -33,7 +33,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { capabilities } from '@/lib/capabilities';
-import { abilityById, runAbility } from '@/lib/abilities';
+import { abilityById, runAbility, setCurrentAccount } from '@/lib/abilities';
+import { maySpeak, modeById } from '@/lib/modes';
 import { askGrove, newTurn, type Turn, type TurnTool } from '@/lib/grove';
 import { abortListening, isListening, startListening, stopListening } from '@/lib/listen';
 import {
@@ -159,6 +160,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    * Grove was doing nothing while it waited on Noctus.
    */
   const running = useRef(false);
+  /**
+   * When Grove last spoke without being asked. Feeds the mode's rate control —
+   * an assistant that volunteers something every time you unlock your phone
+   * stops being used, which is the failure this guards against.
+   */
+  const lastVolunteered = useRef<string | null>(null);
 
   /** Where the machine settles when nothing is in flight. */
   const restingState = (): AgentState =>
@@ -198,6 +205,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     void transcript.loadActivity(uid).then((entries) => {
       if (mounted.current) setActivity(entries);
     });
+    // Abilities read per-account state through this rather than through a
+    // parameter, so it has to be set before any of them can run.
+    setCurrentAccount(uid);
     void memory.loadFacts(uid).then((f) => {
       if (mounted.current) setFacts(f);
     });
@@ -296,7 +306,14 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // Anything worth remembering was pulled locally, by keyword, from what was
     // said — never inferred by a model and stored where you cannot see it.
     if (reply.fact) {
-      const next = await memory.remember(account, reply.fact.key, reply.fact.value);
+      const next = await memory.remember(
+        account,
+        reply.fact.key,
+        reply.fact.value,
+        'told',
+        reply.fact.subject,
+        reply.fact.open
+      );
       if (mounted.current) setFacts(next);
     }
 
@@ -382,6 +399,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     const account = live.current.uid;
     if (!account || account === 'anon') return;
 
+    // The mode decides whether Grove may speak first at all. Without this the
+    // rate control is decorative: focus mode would still be interrupted by a
+    // spark catching up, which is the exact behaviour it exists to prevent.
+    const mode = modeById(live.current.persona.mode ?? 'normal');
+    if (!maySpeak(mode, lastVolunteered.current)) return;
+
     const all = await sparks.loadSparks(account);
     const due = sparks.dueSparks(all);
     if (due.length === 0) return;
@@ -403,6 +426,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     });
     if (!mounted.current) return;
     setActivity(entries);
+    lastVolunteered.current = new Date().toISOString();
     setCaption(outcome.spoken);
     utter(outcome.spoken);
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -40,6 +40,11 @@ export type Persona = {
    */
   name: string;
   /**
+   * The situation Grove is in — see modes.ts. A situation, not a character:
+   * the manner below is who Grove is and survives a mode change.
+   */
+  mode?: string;
+  /**
    * The chosen system voice, or unset to let speak.ts pick the best installed
    * one. Kept beside the manner rather than inside `delivery` because it is a
    * thing the user chooses, not a synthesiser parameter.
@@ -214,6 +219,7 @@ export async function loadPersona(): Promise<Persona> {
           ? parsed.name.slice(0, NAME_LIMIT)
           : DEFAULT_NAME,
       voiceId: typeof parsed.voiceId === 'string' ? parsed.voiceId : undefined,
+      mode: typeof parsed.mode === 'string' ? parsed.mode : 'normal',
       manner: upgradeManner(
         typeof parsed.manner === 'string' ? parsed.manner : DEFAULT_PERSONA.manner
       ),

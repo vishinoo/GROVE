@@ -33,6 +33,7 @@ import {
   sayWhen,
 } from './deviceCalendar';
 import { capabilities } from './capabilities';
+import { loadFacts, recall } from './memory';
 import { fetchJson } from './net';
 
 /**
@@ -50,6 +51,20 @@ const SKY: Record<number, string> = {
   85: 'snow showers', 86: 'snow showers',
   95: 'thundery', 96: 'thundery with hail', 99: 'thundery with hail',
 };
+
+/**
+ * Which account abilities read per-user state for.
+ *
+ * Set by the agent when a session loads. An ability signature takes only its
+ * arguments — deliberately, so abilities stay plain functions that can be
+ * tested without a React tree — so the one piece of ambient context they need
+ * is set here rather than threaded through every call.
+ */
+let CURRENT_UID = 'anon';
+
+export function setCurrentAccount(uid: string): void {
+  CURRENT_UID = uid || 'anon';
+}
 
 export type AbilityWhere = 'device' | 'server';
 
@@ -524,7 +539,56 @@ const DAY: Ability = {
   },
 };
 
+/**
+ * What Grove knows about someone.
+ *
+ * The ability that the flat memory could not support. "Remind me what I was
+ * supposed to ask Sarah about" is not a search for the word Sarah — it is a
+ * request for everything filed under her, which needs facts to have a subject.
+ * They do now.
+ *
+ * Reads memory directly rather than relying on the prompt block. The block is
+ * capped and summarised for cost; this is the one place where being complete
+ * matters more than being brief, because the whole question is "what am I
+ * forgetting".
+ */
+const RECALL: Ability = {
+  id: 'memory.recall',
+  name: 'Memory',
+  what: 'Says what it knows about someone, and what you still owe them.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: { about: { type: 'string', what: 'the person or thing being asked about', required: true } },
+  examples: [
+    'what was I supposed to ask Sarah about',
+    'what do I know about Priya',
+    'what did I say about the flat',
+  ],
+  run: async (args) => {
+    const about = (args.about || '').trim();
+    if (!about) return { ok: false, spoken: 'About who?' };
+
+    // uid is not in scope here; memory is per-account and the agent passes the
+    // account through remember(). Reading the same store keyed the same way.
+    const facts = await loadFacts(CURRENT_UID);
+    const hits = recall(facts, about);
+    if (hits.length === 0) return { ok: true, spoken: `Nothing about ${about}.` };
+
+    // Outstanding things first — the question is almost always "what am I
+    // forgetting", not "recite everything".
+    const open = hits.filter((f) => f.open);
+    const rest = hits.filter((f) => !f.open);
+    const pick = [...open, ...rest].slice(0, 3);
+
+    const said = pick.map((f) => f.value).join('. ');
+    const more = hits.length > pick.length ? ` And ${hits.length - pick.length} more.` : '';
+    return { ok: true, spoken: `${said}.${more}`, detail: `${hits.length} remembered` };
+  },
+};
+
 export const ABILITIES: Ability[] = [
+  RECALL,
   DAY,
   WEATHER,
   DIRECTIONS,
