@@ -34,7 +34,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import { capabilities } from '@/lib/capabilities';
 import { abilityById, runAbility, setCurrentAccount } from '@/lib/abilities';
-import { loadOverrides, maySpeak, modeById, withOverrides } from '@/lib/modes';
+import { holdingLine, loadOverrides, maySpeak, modeById, withOverrides } from '@/lib/modes';
 import { askGrove, newTurn, type Turn, type TurnTool } from '@/lib/grove';
 import { abortListening, isListening, startListening, stopListening } from '@/lib/listen';
 import {
@@ -290,16 +290,33 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     setCaption(text);
     setState('thinking');
 
+    /**
+     * Say something if the turn is taking a while.
+     *
+     * Only fires when the work is genuinely still running, and the answer is
+     * guaranteed to follow — which is what separates this from the empty
+     * promise the prompt forbids. Below this threshold it stays quiet, because
+     * a holding line in front of an instant answer is just noise.
+     */
+    let held = false;
+    const holdTimer = setTimeout(() => {
+      if (!mounted.current) return;
+      held = true;
+      utter(holdingLine(modeById(voice.mode ?? 'normal')));
+    }, 2200);
+
     let reply;
     try {
       reply = await askGrove(history.current, asked, { persona: voice, facts: known });
     } catch (error) {
+      clearTimeout(holdTimer);
       const message = error instanceof Error ? error.message : fallback.stuck();
       if (!mounted.current) return;
       setCaption(message);
       utter(message);
       return;
     }
+    clearTimeout(holdTimer);
     if (!mounted.current) return;
 
     history.current = [
@@ -311,6 +328,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     ].slice(-24);
 
     setCaption(reply.text);
+    // Queued behind the holding line rather than cutting it off — being
+    // interrupted by the thing you were waiting for is worse than the wait.
+    if (held) await whenQuiet();
+    if (!mounted.current) return;
     utter(reply.text);
 
     // Anything worth remembering was pulled locally, by keyword, from what was

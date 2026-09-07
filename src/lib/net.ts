@@ -28,13 +28,23 @@ async function token(): Promise<string> {
  */
 const TIMEOUT_MS = 10_000;
 
+/**
+ * For calls that go on to search the web before answering.
+ *
+ * Ten seconds is right for a lookup that should be instant and wrong for one
+ * that includes a round trip to Google — that mismatch is why anything worth
+ * searching for timed out. Callers opt in, so a slow path cannot become the
+ * default by accident.
+ */
+const SLOW_TIMEOUT_MS = 25_000;
+
 export async function fetchJson<T>(
   path: string,
-  options: { method?: 'GET' | 'POST' | 'DELETE'; body?: unknown } = {}
+  options: { method?: 'GET' | 'POST' | 'DELETE'; body?: unknown; slow?: boolean } = {}
 ): Promise<T | null> {
   const base = await getNoctusUrl();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), options.slow ? SLOW_TIMEOUT_MS : TIMEOUT_MS);
 
   try {
     const response = await fetch(`${base}${path}`, {

@@ -48,6 +48,16 @@ const OLLAMA_MODEL = process.env.EXPO_PUBLIC_OLLAMA_MODEL || 'llama3.2';
  * which looks like it ignored them. Better to fail fast and say so.
  */
 const TIMEOUT_MS = 8_000;
+
+/**
+ * The ceiling for a turn that is going to search.
+ *
+ * Grounding adds a round trip to Google before the model writes a word, and
+ * eight seconds does not fit that — which is why anything worth looking up was
+ * timing out. The cost of the longer wait is covered by saying something while
+ * it happens, rather than by sitting silent for twice as long.
+ */
+const SEARCH_TIMEOUT_MS = 22_000;
 const PROBE_TIMEOUT_MS = 1_500;
 
 export type LightMessage = { role: 'user' | 'assistant'; content: string };
@@ -210,7 +220,7 @@ async function askDirect(
   if (!key) return null;
 
   try {
-    const response = await withTimeout(TIMEOUT_MS, (signal) =>
+    const response = await withTimeout(json ? TIMEOUT_MS : SEARCH_TIMEOUT_MS, (signal) =>
       fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
           DIRECT_MODEL
@@ -256,6 +266,9 @@ async function askServer(
   const data = await fetchJson<{ text?: string }>('/api/grove/chat', {
     method: 'POST',
     body: { system, messages, json, deep },
+    // The proxy grounds every non-JSON call, so this is the slow path by
+    // definition rather than by guess.
+    slow: !json,
   });
   return data?.text?.trim() || null;
 }

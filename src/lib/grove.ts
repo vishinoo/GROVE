@@ -26,7 +26,7 @@
  */
 
 import { ABILITIES, abilityById, isSchedulable, usableAbilities, type Ability } from './abilities';
-import { abilitiesFor, modeById } from './modes';
+import { abilitiesFor, modeById, type Mode } from './modes';
 import { asPromptBlock, factFrom, type Fact } from './memory';
 import { isLightModelConfigured, lightTurn, type LightMessage } from './lightModel';
 import { fallback, mannerDirective, type Persona } from './persona';
@@ -252,7 +252,7 @@ export async function askGrove(
   const settle = (text: string): GroveReply => {
     const usable = text.trim();
     return {
-      text: usable || offlineLine(userText, { acting, ability: chosen, blocked, schedule }),
+      text: usable || offlineLine(userText, { acting, ability: chosen, blocked, schedule, mode }),
       ability: chosen ?? undefined,
       args: light?.args ?? {},
       schedule: schedule ?? undefined,
@@ -314,6 +314,7 @@ function offlineLine(
     ability?: Ability | null;
     blocked?: Ability | null;
     schedule?: Schedule | null;
+    mode?: Mode;
   }
 ): string {
   if (context.blocked) {
@@ -325,6 +326,10 @@ function offlineLine(
     return `${describeSchedule(context.schedule)}. I'll tell you what comes back.`;
   }
   if (context.ability || context.acting) return fallback.onIt(userText);
+  // In the mode's own voice. A stock line after a personality has been talking
+  // to you for ten minutes is the moment the character drops, and that is
+  // exactly when someone stops believing any of it.
+  if (context.mode?.stuck) return context.mode.stuck;
   // "Try again" is a lie when there is no model to try. An unconfigured build
   // fails this way on every single turn, and telling someone to wait a moment
   // sends them round that loop for as long as their patience lasts.
