@@ -154,6 +154,33 @@ export function promisesAction(text: string): boolean {
  * sanity check on what it returns. Scores an ability's own example sentences
  * against the words in the request, which is crude and entirely predictable.
  */
+/**
+ * The title out of "play the Sunday playlist", without a model.
+ *
+ * pickAbility chooses an ability and never fills its arguments, so on the
+ * keyword fallback music.play arrives with nothing in `what`. That was
+ * harmless while an empty title was refused; now that an empty title means
+ * "shuffle", it would quietly play the wrong thing — someone naming a song and
+ * getting a shuffled library is a worse failure than being asked to repeat
+ * themselves. So the fallback reads the title itself.
+ *
+ * Returns '' for the genuinely unnamed requests — "play a song", "put some
+ * music on" — which is exactly the shuffle case.
+ */
+export function musicQueryFrom(text: string): string {
+  const m = /\b(?:play|put on|listen to)\b\s*(.*)$/i.exec(text.trim());
+  if (!m) return '';
+  const rest = (m[1] || '')
+    .replace(/[.?!]+$/, '')
+    .replace(/^(?:some|a|an|the)\s+/i, '')
+    .replace(/\b(?:for me|please|on (?:spotify|apple music))\b/gi, '')
+    .trim();
+  // The words people use when they mean "anything". Left as an empty query so
+  // it shuffles rather than hunting for a song called "something".
+  if (/^(?:music|a song|song|songs|something|anything|some music|tunes)?$/i.test(rest)) return '';
+  return rest.slice(0, 120);
+}
+
 export function pickAbility(text: string): Ability | null {
   const haystack = text.toLowerCase();
   const words = new Set(
@@ -283,7 +310,10 @@ export async function askGrove(
           voice: activePreset(persona),
         }),
       ability: chosen ?? undefined,
-      args: light?.args ?? {},
+      // The model fills these normally. When it did not run, music is the one
+      // ability whose argument can be read locally, and reading it is what stops
+      // a named song turning into a shuffle.
+      args: light?.args ?? (chosen?.id === 'music.play' ? { what: musicQueryFrom(userText) } : {}),
       schedule: schedule ?? undefined,
       phrase: phrase ?? undefined,
       blocked: blocked ?? undefined,

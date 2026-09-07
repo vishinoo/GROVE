@@ -82,7 +82,16 @@ export default function Talk() {
         {reduced && !notice && !problem ? <Notice text={reduced} tone="info" /> : null}
 
         <View style={{ alignItems: 'center', marginTop: 26 }}>
-          <Orb state={state} level={level} size={210} onPress={press} tint={modeById(persona.mode ?? 'normal').tint} />
+          <Orb
+            state={state}
+            level={level}
+            size={210}
+            onPress={press}
+            // The whole palette, not just the tint. Passing the tint alone
+            // recoloured exactly one lobe of four, which read as a glitch
+            // rather than a mode.
+            palette={modeById(persona.mode ?? 'normal').palette}
+          />
         </View>
 
 

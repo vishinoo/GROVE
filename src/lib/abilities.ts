@@ -27,6 +27,7 @@ import {
   addReminder,
   ensureCalendarAccess,
   ensureRemindersAccess,
+  calendarCount,
   eventsAhead,
   moveEvent,
   readWhen,
@@ -280,7 +281,28 @@ const CALENDAR_READ: Ability = {
 
     const events = await eventsAhead(hours);
     if (events === null) return { ok: false, spoken: 'Could not read your calendar.' };
+
     if (events.length === 0) {
+      // Empty has three quite different meanings and they used to share one
+      // sentence. Saying "Nothing on" to someone looking at a full Google
+      // calendar is the worst of them: it is confidently wrong, and it sends
+      // them looking for the bug in the wrong place.
+      const sources = await calendarCount();
+      if (sources === 0) {
+        return {
+          ok: false,
+          spoken:
+            'There are no calendars on this phone yet. Add your Google account in iOS Settings, under Calendar, and I will read it from there.',
+        };
+      }
+
+      // Nothing in the window asked for is not nothing at all. Looking further
+      // out turns "Nothing on" into the answer the question was really after.
+      const later = (await eventsAhead(24 * 14)) ?? [];
+      const next = later[0];
+      if (next) {
+        return { ok: true, spoken: `Nothing ${hours > 24 ? 'this week' : 'left today'}. Next is ${next.title}, ${sayWhen(next.start)}.` };
+      }
       return { ok: true, spoken: hours > 24 ? 'Nothing this week.' : 'Nothing on.' };
     }
 
@@ -362,11 +384,14 @@ const MUSIC: Ability = {
   where: 'device',
   wired: capabilities().remote,
   needs: ['music-permission'],
-  args: { what: { type: 'string', what: 'song, artist, album or playlist', required: true } },
-  examples: ['play my favourite song', 'put on something mellow', 'play the Sunday playlist'],
+  args: { what: { type: 'string', what: 'song, artist, album or playlist — leave empty to shuffle' } },
+  examples: ['play my favourite song', 'put on something mellow', 'play the Sunday playlist', 'play a song'],
   run: async (args) => {
+    // No title is not a missing argument. "Play a song", "put some music on"
+    // and "play something" are whole instructions that hand Grove the choice —
+    // and answering them with "Play what?" after saying "playing something" is
+    // the contradiction that made this feel broken.
     const wanted = (args.what || '').trim();
-    if (!wanted) return { ok: false, spoken: 'Play what?' };
 
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const remote = require('grove-remote') as typeof import('grove-remote');
@@ -382,7 +407,19 @@ const MUSIC: Ability = {
     if (result.reason === 'unavailable') {
       return { ok: false, spoken: 'Music needs a development build. This one cannot reach it.' };
     }
-    return { ok: false, spoken: `I could not find ${wanted} in your library.` };
+    if (result.reason === 'emptyLibrary') {
+      return {
+        ok: false,
+        spoken:
+          'There is nothing in your music library on this phone. Apple Music streams do not count unless they are downloaded.',
+      };
+    }
+    return {
+      ok: false,
+      spoken: wanted
+        ? `I could not find ${wanted} in your library.`
+        : 'I could not get your library to play.',
+    };
   },
 };
 

@@ -104,7 +104,7 @@ export const MODES: Mode[] = [
   {
     id: 'normal',
     tint: '#7DD3FC',
-    palette: ['#5EEAD4', '#A5B4FC', '#F9A8D4', '#86EFAC'],
+    palette: ['#5EEAD4', '#7DD3FC', '#A5B4FC', '#86EFAC'],
     label: 'Normal',
     what: 'Everything, as you have set it up.',
     manner: '',
@@ -117,7 +117,7 @@ export const MODES: Mode[] = [
   {
     id: 'focus',
     tint: '#38BDF8',
-    palette: ['#38BDF8', '#6366F1', '#22D3EE', '#818CF8'],
+    palette: ['#0EA5E9', '#38BDF8', '#6366F1', '#22D3EE'],
     label: 'Focus',
     what: 'Working. Grove stays quiet unless asked.',
     manner: 'They are concentrating. Answer in as few words as will do, and never volunteer more.',
@@ -130,7 +130,7 @@ export const MODES: Mode[] = [
   {
     id: 'study',
     tint: '#A78BFA',
-    palette: ['#A78BFA', '#F0ABFC', '#FBBF24', '#8B5CF6'],
+    palette: ['#8B5CF6', '#A78BFA', '#C4B5FD', '#D946EF'],
     label: 'Study',
     what: 'Explains properly instead of being terse.',
     manner:
@@ -144,7 +144,7 @@ export const MODES: Mode[] = [
   {
     id: 'wind-down',
     tint: '#FB7185',
-    palette: ['#FB7185', '#FB923C', '#FBBF24', '#E879F9'],
+    palette: ['#F43F5E', '#FB923C', '#FBBF24', '#E879F9'],
     label: 'Wind down',
     what: 'Evening. Nothing that starts work.',
     manner: 'It is the end of their day. Keep it calm and short. Do not raise anything that would start them working.',

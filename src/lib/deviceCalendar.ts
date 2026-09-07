@@ -153,6 +153,28 @@ export function sayWhen(date: Date): string {
 export type SimpleEvent = { id: string; title: string; start: Date; allDay: boolean };
 
 /** Everything in the next `hours`, soonest first. */
+/**
+ * How many calendars this phone can actually see.
+ *
+ * The number matters because zero and "an empty day" are indistinguishable in
+ * a list of events, and Grove used to report both as "Nothing on" — which is a
+ * lie in the first case, and the more damaging kind, because the person can see
+ * their own calendar is full.
+ *
+ * EventKit only sees accounts added to iOS itself. A Google account connected
+ * through Noctus grants Grove's *server* access and puts nothing on the phone,
+ * so this is very often zero on an otherwise well-configured install.
+ */
+export async function calendarCount(): Promise<number | null> {
+  const m = mod();
+  if (!m || !(await ensureCalendarAccess())) return null;
+  try {
+    return (await m.getCalendarsAsync(m.EntityTypes.EVENT)).length;
+  } catch {
+    return null;
+  }
+}
+
 export async function eventsAhead(hours = 24): Promise<SimpleEvent[] | null> {
   const m = mod();
   if (!m || !(await ensureCalendarAccess())) return null;

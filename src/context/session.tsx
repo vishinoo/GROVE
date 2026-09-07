@@ -14,6 +14,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import * as api from '@/lib/noctusApi';
+import { grantDevice, isDevicePermission } from '@/lib/devicePermissions';
 import * as auth from '@/lib/noctusAuth';
 
 type Status = 'loading' | 'signed-out' | 'signed-in';
@@ -57,6 +58,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<api.NoctusUser | null>(null);
   const [uid, setUid] = useState<string>('anon');
   const [connections, setConnections] = useState<string[]>([]);
+  /**
+   * Device permissions Grove has been granted on this phone.
+   *
+   * Kept apart from `connections` because they come from somewhere else
+   * entirely: /api/credentials knows about OAuth bindings and has never heard
+   * of the calendar. Merged for display, so the screen shows one list.
+   */
+  const [granted, setGranted] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
 
   /** Pulls the account, its connections and its tools after a session exists. */
@@ -214,6 +223,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
    */
   const connect = useCallback(
     async (bindingKey: string) => {
+      // A device permission is granted here, on the phone, with no account and
+      // no browser. Sending one down the OAuth path is what produced "OAuth not
+      // configured" on Calendar — a row that never needed an account at all.
+      if (isDevicePermission(bindingKey)) {
+        const ok = await grantDevice(bindingKey);
+        setGranted((held) => (ok ? [...new Set([...held, bindingKey])] : held.filter((k) => k !== bindingKey)));
+        if (!ok) throw new Error('Not granted. You can change it in iOS Settings.');
+        return;
+      }
       const { url } = await api.oauthUrl(bindingKey);
       await WebBrowser.openAuthSessionAsync(url, auth.redirectTo);
       await syncConnections();
@@ -223,6 +241,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   const disconnect = useCallback(
     async (bindingKey: string) => {
+      // iOS has no API to hand a permission back, so the honest thing is to
+      // forget it here and say where it is actually revoked.
+      if (isDevicePermission(bindingKey)) {
+        setGranted((held) => held.filter((k) => k !== bindingKey));
+        setNotice('Removed here. To revoke it fully, use iOS Settings › Grove.');
+        return;
+      }
       await api.disconnectIntegration(bindingKey);
       await syncConnections();
     },
@@ -232,12 +257,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const reloadConnections = useCallback(() => syncConnections(), [syncConnections]);
   const dismissNotice = useCallback(() => setNotice(null), []);
 
+  // One list to the screens: an OAuth binding and a granted permission are
+  // both "Grove may reach this", however differently they were obtained.
+  const merged = useMemo(() => [...new Set([...connections, ...granted])], [connections, granted]);
+
   const value = useMemo<SessionValue>(
     () => ({
       status,
       user,
       uid,
-      connections,
+      connections: merged,
       notice,
       dismissNotice,
       signIn,
@@ -254,7 +283,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       status,
       user,
       uid,
-      connections,
+      merged,
       notice,
       dismissNotice,
       signIn,

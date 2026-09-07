@@ -201,11 +201,10 @@ public class GroveRemoteModule: Module {
      */
     AsyncFunction("playMusic") { (query: String, promise: Promise) in
       DispatchQueue.main.async {
+        // "Play a song" names nothing, and refusing it was wrong: it is a
+        // complete instruction, it just leaves the choice to Grove. An empty
+        // query shuffles the library instead of asking a question back.
         let wanted = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !wanted.isEmpty else {
-          promise.resolve(["ok": false, "reason": "empty"])
-          return
-        }
 
         MPMediaLibrary.requestAuthorization { status in
           DispatchQueue.main.async {
@@ -213,8 +212,43 @@ public class GroveRemoteModule: Module {
               promise.resolve(["ok": false, "reason": "denied"])
               return
             }
-            promise.resolve(self.startPlayback(matching: wanted))
+            promise.resolve(
+              wanted.isEmpty ? self.shuffleEverything() : self.startPlayback(matching: wanted)
+            )
           }
+        }
+      }
+    }
+
+    /**
+     * Ask for the music library, and nothing else.
+     *
+     * `playMusic` already requests this, but only on the way to playing
+     * something — which makes the Connections screen's "Connect" button
+     * unbuildable, because the only way to find out whether Grove may reach
+     * your library is to start a song you did not ask for. Asking is its own
+     * operation.
+     *
+     * Never re-prompts: iOS shows the dialogue once per install, and after a
+     * denial this resolves false rather than appearing to hang.
+     */
+    AsyncFunction("requestMusicAccess") { (promise: Promise) in
+      DispatchQueue.main.async {
+        if MPMediaLibrary.authorizationStatus() != .notDetermined {
+          promise.resolve(MPMediaLibrary.authorizationStatus() == .authorized)
+          return
+        }
+        MPMediaLibrary.requestAuthorization { status in
+          DispatchQueue.main.async { promise.resolve(status == .authorized) }
+        }
+      }
+    }
+
+    /** The same, for location. Asks; does not go on to compute a route. */
+    AsyncFunction("requestLocationAccess") { (promise: Promise) in
+      DispatchQueue.main.async {
+        self.locationRunner.authorize { granted in
+          DispatchQueue.main.async { promise.resolve(granted) }
         }
       }
     }
@@ -328,6 +362,30 @@ public class GroveRemoteModule: Module {
    * Yesterday" means the track, and artists before albums because people name
    * the artist far more often than the record.
    */
+  /**
+   * Anything at all, shuffled.
+   *
+   * What "play something" means. Kept separate from startPlayback because that
+   * one filters by a predicate and an empty predicate matches nothing, which is
+   * how a request with no title became a refusal.
+   */
+  private func shuffleEverything() -> [String: Any] {
+    let player = MPMusicPlayerController.systemMusicPlayer
+    let query = MPMediaQuery.songs()
+    guard let items = query.items, !items.isEmpty else {
+      return ["ok": false, "reason": "emptyLibrary"]
+    }
+    player.setQueue(with: MPMediaItemCollection(items: items))
+    player.shuffleMode = .songs
+    player.play()
+    return [
+      "ok": true,
+      "title": player.nowPlayingItem?.title ?? items[0].title ?? "something",
+      "artist": player.nowPlayingItem?.artist ?? items[0].artist ?? "",
+      "count": items.count,
+    ]
+  }
+
   private func startPlayback(matching wanted: String) -> [String: Any] {
     let player = MPMusicPlayerController.systemMusicPlayer
 
@@ -709,10 +767,28 @@ final class LocationRunner: NSObject, CLLocationManagerDelegate {
   private let manager = CLLocationManager()
   private var onFix: ((CLLocation) -> Void)?
   private var onFail: ((String) -> Void)?
+  private var onAuth: ((Bool) -> Void)?
 
   override init() {
     super.init()
     manager.delegate = self
+  }
+
+  /**
+   * Ask for location without asking for a fix.
+   *
+   * `locate` requests authorisation as a step on the way to a coordinate, so
+   * there was no way to answer "may Grove use your location" without also
+   * taking one. The Connections screen needs exactly that question.
+   */
+  func authorize(_ done: @escaping (Bool) -> Void) {
+    switch manager.authorizationStatus {
+    case .authorizedWhenInUse, .authorizedAlways: done(true)
+    case .denied, .restricted: done(false)
+    default:
+      onAuth = done
+      manager.requestWhenInUseAuthorization()
+    }
   }
 
   func locate(onFix: @escaping (CLLocation) -> Void, onFail: @escaping (String) -> Void) {
@@ -750,6 +826,13 @@ final class LocationRunner: NSObject, CLLocationManagerDelegate {
   }
 
   func locationManagerDidChangeAuthorization(_ m: CLLocationManager) {
+    // A pending authorize() is answered here and cleared, so it resolves once
+    // whichever way the person taps.
+    if m.authorizationStatus != .notDetermined, let waiting = onAuth {
+      onAuth = nil
+      let ok = m.authorizationStatus == .authorizedWhenInUse || m.authorizationStatus == .authorizedAlways
+      waiting(ok)
+    }
     switch m.authorizationStatus {
     case .authorizedWhenInUse, .authorizedAlways:
       if onFix != nil { m.requestLocation() }

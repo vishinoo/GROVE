@@ -39,7 +39,10 @@ export default function Connections() {
     setError(null);
     try {
       if (live.has(item.key)) await disconnect(item.key);
-      else await connect(providerFor(item));
+      // A device permission is asked for by key; an account is started by
+      // provider, which is not always the same string. Branching on `kind`
+      // rather than letting one path serve both is the whole fix here.
+      else await connect(item.kind === 'device' ? item.key : providerFor(item));
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : 'That didn’t work.');
     } finally {
@@ -84,11 +87,23 @@ export default function Connections() {
           { color: palette.muted, paddingHorizontal: 2, marginTop: 4 },
         ]}
       >
-        Calendar, Reminders, Music and Maps are permissions on this phone. Mail
-        is an account, so it opens a browser.
+        Calendar, Reminders, Music and Maps are permissions on this phone —
+        allowing one asks iOS, not a website. Mail is an account, so it opens a
+        browser. Anything you turn down here is changed again in iOS Settings ›
+        Grove.
       </Text>
     </Screen>
   );
+}
+
+/**
+ * What the button actually does, said on the button.
+ *
+ * "Connect" is right for an account and wrong for a permission: nothing is
+ * being connected to, iOS is being asked a question you answer in a dialogue.
+ */
+function verb(item: Connection): string {
+  return item.kind === 'device' ? 'Allow' : 'Connect';
 }
 
 function Row({
@@ -134,7 +149,7 @@ function Row({
         ) : (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`${connected ? 'Disconnect' : 'Connect'} ${item.label}`}
+            accessibilityLabel={`${connected ? 'Disconnect' : verb(item)} ${item.label}`}
             disabled={busy}
             onPress={onPress}
             style={({ pressed }) => ({
@@ -160,7 +175,7 @@ function Row({
                   color: connected ? palette.inkSoft : palette.raised,
                 }}
               >
-                {connected ? 'Disconnect' : 'Connect'}
+                {connected ? 'Disconnect' : verb(item)}
               </Text>
             )}
           </Pressable>

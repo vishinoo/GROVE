@@ -22,12 +22,22 @@ The key now lives in `Backend/.env` and the app calls `POST /api/grove/chat`,
 which holds the secret and forwards. Verified:
 
 ```
-grep -r 'AIzaSy' dist/                      -> no match
-grep -r 'generativelanguage' dist/          -> no match
+grep -rE 'AIzaSy[A-Za-z0-9_-]{20,}' dist/   -> no match   (re-verified 2026-09-07)
+grep -r  'generativelanguage' dist/         -> 1 match     (see below)
 ```
 
-Nothing about the model reaches the client any more. `isLightModelConfigured()`
-now returns true unconditionally, because the app genuinely cannot tell — and
+**No key ships.** The one match is the Google endpoint URL, not a credential,
+and it is there on purpose: `askDirect` in `lightModel.ts` is the last of three
+fallbacks and reads its key from the Keychain via `expo-secure-store` at
+runtime, put there by `npm run set-key` on the device. A URL in the bundle
+reveals nothing — the secret is the key, and the key is not there.
+
+This line previously claimed both greps returned nothing, which stopped being
+true when `askDirect` was reinstated. A security note that is quietly wrong is
+worse than one that admits a match and explains it, because the next person to
+run the check assumes the tool is broken rather than the document.
+
+`isLightModelConfigured()` now returns true unconditionally, because the app genuinely cannot tell — and
 reporting "no model" on a working install would be worse than the alternative.
 
 ---
