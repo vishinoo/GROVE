@@ -30,38 +30,10 @@
  * have to be on the same network — so it can never be the only path.
  */
 
-const GEMINI_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '';
-const GEMINI_MODEL = process.env.EXPO_PUBLIC_GEMINI_MODEL || 'gemini-3.1-flash-lite';
-/**
- * The rung above, used only when the cheap one genuinely cannot serve a turn.
- *
- * Unset by default, and that is the right default. Grove's per-turn job is
- * small — read one sentence, answer in one sentence, name one of six abilities
- * — and a model twenty times the price is twenty times the price for the same
- * answer. This exists so the escalation path is written down and measurable,
- * not because most turns need it.
- */
-const GEMINI_MODEL_DEEP = process.env.EXPO_PUBLIC_GEMINI_MODEL_DEEP || '';
 
-/**
- * The model we fall back to when a configured one turns out not to exist.
- *
- * Google retires model ids, and a retired id returns 404 — which from inside
- * the app is indistinguishable from having no key at all: the call fails, the
- * turn falls through to local rules, and Grove says it has nothing to think
- * with. Someone then spends an afternoon re-checking a key that was fine.
- *
- * So a 404 is treated as "that model is gone" rather than "the request failed",
- * and the turn is retried once against an id known to be current. Being wrong
- * about the model in .env should cost a slightly different model, not silence.
- */
-// Verified working on 2026-09-05. Note it is NOT the cheapest on the price
-// list — gemini-2.5-flash-lite is, but Google has closed that one to new API
-// keys, so it is not a safe fallback however cheap it looks.
-const SAFE_MODEL = 'gemini-3.1-flash-lite';
 
-/** Model ids that answered 404 this run. Not retried; not asked about twice. */
-const retired = new Set<string>();
+import { fetchJson } from './net';
+
 const OLLAMA_URL = (process.env.EXPO_PUBLIC_OLLAMA_URL ?? '').replace(/\/$/, '');
 const OLLAMA_MODEL = process.env.EXPO_PUBLIC_OLLAMA_MODEL || 'llama3.2';
 
@@ -87,8 +59,15 @@ export type LightReply = {
 /** The abilities Grove can currently reach, as the model needs to see them. */
 export type AbilitySummary = { id: string; what: string }[];
 
+/**
+ * Whether Grove has a model at all.
+ *
+ * True whenever Noctus is reachable, because the key lives there now — the app
+ * can no longer tell from its own configuration, and pretending otherwise would
+ * report "no model" on a perfectly working install.
+ */
 export function isLightModelConfigured(): boolean {
-  return Boolean(GEMINI_KEY || OLLAMA_URL);
+  return true;
 }
 
 /* ------------------------------------------------------------- providers */
@@ -153,55 +132,29 @@ async function askOllama(
   }
 }
 
-async function askGemini(
+/**
+ * The model, through Noctus.
+ *
+ * This used to call Gemini directly with a key from EXPO_PUBLIC_*, which is
+ * compiled into the bundle and extractable from any build. That was documented
+ * as testing-only from the start and stopped being acceptable the moment a
+ * build went to TestFlight, so the key moved to the server and this became a
+ * call to /api/grove/chat.
+ *
+ * The prompt, the house rules and the ability list still live here. Noctus
+ * holds the secret and forwards; it has no opinion about what Grove says.
+ */
+async function askServer(
   system: string,
   messages: LightMessage[],
   json: boolean,
-  model: string = GEMINI_MODEL
+  deep: boolean
 ): Promise<string | null> {
-  if (!GEMINI_KEY) return null;
-  try {
-    const response = await withTimeout(TIMEOUT_MS, (signal) =>
-      fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-          model
-        )}:generateContent`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': GEMINI_KEY,
-          },
-          signal,
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: system }] },
-            contents: messages.map((m) => ({
-              // Gemini calls the assistant turn "model".
-              role: m.role === 'assistant' ? 'model' : 'user',
-              parts: [{ text: m.content }],
-            })),
-            generationConfig: {
-              maxOutputTokens: 600,
-              temperature: 0.7,
-              ...(json ? { responseMimeType: 'application/json' } : {}),
-            },
-          }),
-        }
-      )
-    );
-    if (!response.ok) {
-      // 404 means the id is gone, not that the request went wrong.
-      if (response.status === 404) retired.add(model);
-      return null;
-    }
-    const data = (await response.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
-    };
-    const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('');
-    return text?.trim() || null;
-  } catch {
-    return null;
-  }
+  const data = await fetchJson<{ text?: string }>('/api/grove/chat', {
+    method: 'POST',
+    body: { system, messages, json, deep },
+  });
+  return data?.text?.trim() || null;
 }
 
 /** Free first, then cheap. Returns null when neither is configured or up. */
@@ -211,29 +164,16 @@ async function complete(
   json = false,
   deep = false
 ): Promise<string | null> {
-  // Ollama is free, so it takes everything it can — including the deep turns,
-  // where "free and adequate" beats "paid and slightly better".
+  // Ollama first when it answers, because it is free and local. It is also the
+  // only path that never leaves the network, which is worth something for
+  // something listening in your pocket.
   if (await probeOllama()) {
     const local = await askOllama(system, messages, json);
     if (local !== null) return local;
     // A reachable-but-failing Ollama shouldn't strand the turn.
     ollamaReachable = false;
   }
-  const wanted = deep && GEMINI_MODEL_DEEP ? GEMINI_MODEL_DEEP : GEMINI_MODEL;
-  // Skip anything already known to be gone rather than spending a round trip
-  // rediscovering it on every turn.
-  const model = retired.has(wanted) ? SAFE_MODEL : wanted;
-
-  const answer = await askGemini(system, messages, json, model);
-  if (answer !== null) return answer;
-
-  // Either the deep tier is misconfigured, or the id in .env has been retired.
-  // One retry against something current, rather than reporting no model at all.
-  if (model !== SAFE_MODEL && retired.has(model)) {
-    return askGemini(system, messages, json, SAFE_MODEL);
-  }
-  if (model !== GEMINI_MODEL) return askGemini(system, messages, json, GEMINI_MODEL);
-  return null;
+  return askServer(system, messages, json, deep);
 }
 
 /**
@@ -252,7 +192,9 @@ const DEEP_SIGNALS =
   /\b(why|explain|compare|difference between|pros and cons|walk me through|reason|analyse|analyze|summari[sz]e (?:this|that|the)|draft|write me)\b/i;
 
 export function needsDepth(text: string): boolean {
-  if (!GEMINI_MODEL_DEEP) return false;
+  // Whether a deeper model exists is the server's business now, so this only
+  // says whether the turn wants one. Noctus falls back to the cheap model when
+  // none is configured, which is the right place for that decision.
   const t = text.trim();
   // Long enough that it is a paragraph rather than an instruction.
   if (t.length > 240) return true;

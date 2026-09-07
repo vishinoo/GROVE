@@ -107,9 +107,17 @@ rather than let a briefing quietly not arrive. See
 - `src/lib/persona.ts` — the manner is user-authored and goes into a system
   prompt, so `mannerDirective` wraps it to quarantine it as style-only. It is a
   guard, not a guarantee; keep the framing when editing.
-- `src/lib/lightModel.ts` — ships a provider key in the bundle. Testing only;
-  the fix is a `/api/chat/light` endpoint on Noctus. Everything outside that file
-  is provider-agnostic, so the swap is one file.
+- `src/lib/lightModel.ts` — no longer holds a key. The model call goes through
+  `POST /api/grove/chat` on Noctus, which holds the secret and forwards. It was
+  a bundled `EXPO_PUBLIC_*` key until 2026-09-07; that was documented as testing
+  only and stopped being acceptable when a build reached TestFlight. Everything
+  outside this file is provider-agnostic, so swapping provider is still one file.
+- `src/lib/modes.ts` — a mode is a manner, a set of allowed abilities, and how
+  freely Grove may speak first. Commute has no mail on purpose: a message read
+  aloud at a junction is worse than no mail at all.
+- `src/lib/memory.ts` — facts carry a subject, so "what was I supposed to ask
+  Sarah about" is answerable. Capped at 40 and sent whole; there is no retrieval
+  step because at this size sending everything is cheaper than fetching some.
 
 ## Checks
 
