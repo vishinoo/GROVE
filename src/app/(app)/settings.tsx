@@ -236,6 +236,7 @@ export default function Settings() {
         <Card style={{ paddingVertical: 2 }}>
           <Row label="Signed in" value={user?.email ?? user?.name ?? '—'} />
         </Card>
+        <StartAgain />
         <Button
           label="Sign out"
           tone="danger"
@@ -615,6 +616,42 @@ function OwnKey() {
         </Text>
       </View>
     </Card>
+  );
+}
+
+/**
+ * Wipe everything and start over.
+ *
+ * Two taps rather than a dialog. This deletes conversations, memory and every
+ * standing job at once and none of it can be recovered, so a single tap is too
+ * cheap — but a modal for something you will use twice is heavier than the
+ * action deserves. The second tap goes back to sleep after a few seconds, so a
+ * stray press cannot sit there waiting to be completed by accident.
+ */
+function StartAgain() {
+  const { startAgain } = useAgent();
+  const [armed, setArmed] = useState(false);
+
+  useEffect(() => {
+    if (!armed) return;
+    const timer = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(timer);
+  }, [armed]);
+
+  return (
+    <Button
+      label={armed ? 'Tap again to wipe everything' : 'Start again'}
+      tone={armed ? 'danger' : 'quiet'}
+      onPress={() => {
+        if (!armed) {
+          setArmed(true);
+          return;
+        }
+        setArmed(false);
+        void startAgain();
+      }}
+      style={{ marginTop: 14 }}
+    />
   );
 }
 

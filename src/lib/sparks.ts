@@ -398,6 +398,16 @@ export async function setSparkEnabled(
   return next;
 }
 
+/** Every standing job, gone. Part of starting over. */
+export async function clearSparks(uid: string): Promise<Spark[]> {
+  try {
+    await AsyncStorage.removeItem(storageKey(uid));
+  } catch {
+    // Nothing stored is the desired end state anyway.
+  }
+  return [];
+}
+
 export async function deleteSpark(uid: string, id: string): Promise<Spark[]> {
   const next = (await loadSparks(uid)).filter((s) => s.id !== id);
   await write(uid, next);

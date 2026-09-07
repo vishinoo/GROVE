@@ -29,7 +29,7 @@ import { ABILITIES, abilityById, isSchedulable, usableAbilities, type Ability } 
 import { abilitiesFor, modeById, type Mode } from './modes';
 import { asPromptBlock, factFrom, type Fact } from './memory';
 import { isLightModelConfigured, lightTurn, type LightMessage } from './lightModel';
-import { fallback, mannerDirective, type Persona } from './persona';
+import { activePreset, fallback, mannerDirective, type Persona } from './persona';
 import { describeSchedule, parseSchedule, phraseTrigger, type Schedule } from './sparks';
 
 export type TurnTool = {
@@ -272,7 +272,16 @@ export async function askGrove(
   const settle = (text: string): GroveReply => {
     const usable = text.trim();
     return {
-      text: usable || offlineLine(userText, { acting, ability: chosen, blocked, schedule, mode }),
+      text:
+        usable ||
+        offlineLine(userText, {
+          acting,
+          ability: chosen,
+          blocked,
+          schedule,
+          mode,
+          voice: activePreset(persona),
+        }),
       ability: chosen ?? undefined,
       args: light?.args ?? {},
       schedule: schedule ?? undefined,
@@ -335,6 +344,7 @@ function offlineLine(
     blocked?: Ability | null;
     schedule?: Schedule | null;
     mode?: Mode;
+    voice?: { stuck: string; empty: string };
   }
 ): string {
   if (context.blocked) {
@@ -346,9 +356,10 @@ function offlineLine(
     return `${describeSchedule(context.schedule)}. I'll tell you what comes back.`;
   }
   if (context.ability || context.acting) return fallback.onIt(userText);
-  // In the mode's own voice. A stock line after a personality has been talking
-  // to you for ten minutes is the moment the character drops, and that is
-  // exactly when someone stops believing any of it.
+  // In the voice's own words, falling back to the mode's. A stock line after a
+  // personality has been talking to you for ten minutes is the moment the
+  // character drops, and that is exactly when someone stops believing any of it.
+  if (context.voice?.stuck) return context.voice.stuck;
   if (context.mode?.stuck) return context.mode.stuck;
   // "Try again" is a lie when there is no model to try. An unconfigured build
   // fails this way on every single turn, and telling someone to wait a moment

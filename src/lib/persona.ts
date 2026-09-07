@@ -74,6 +74,20 @@ export type Preset = {
   blurb: string;
   manner: string;
   delivery: Delivery;
+  /**
+   * The lines Grove says when there is nothing to say yet.
+   *
+   * These live with the voice rather than with the mode, and that placement is
+   * the whole point: a personality that talks like Jarvis for ten minutes and
+   * then says a flat "One second." is a personality that just dropped. The
+   * canned lines are the ones most likely to break the illusion, because they
+   * are the ones repeated most often.
+   */
+  holding: string[];
+  /** Searched, found nothing worth saying. */
+  empty: string;
+  /** Nothing answered at all — no model, no network. */
+  stuck: string;
 };
 
 /**
@@ -92,6 +106,9 @@ export const PRESETS: Preset[] = [
     manner:
       'You are their friend, not their assistant, and you are enjoying yourself. Dry, quick, sarcastic — you take the mick, you have opinions about their choices, and you are funny in a way that lands in one line rather than three. But you are extremely good at the job: you answer first, correctly, and the joke comes after, never instead. Never mean about anything that actually matters to them. If they are having a bad day, drop the act entirely and just help.',
     delivery: { rate: 1.04, pitch: 1.0 },
+    holding: ['Alright, hang on, having a dig through this.', 'Give me a sec, actually doing the work here.', 'Hang on, going to go and find out.', 'One sec, looking into it.'],
+    empty: "Yeah, nothing. Whatever's out there isn't saying.",
+    stuck: "Can't get to anything right now. Not my finest hour.",
   },
   {
     key: 'alfred',
@@ -100,6 +117,9 @@ export const PRESETS: Preset[] = [
     manner:
       'You are their butler and you are fond of them, which shows in small ways rather than big ones. Speak kindly and plainly. You defer without grovelling — you do what is asked, first time, and you do not argue with it. There is real intelligence underneath and it comes out as quiet wit: a light observation, a gentle noticing that they have not eaten, a dry aside delivered with complete courtesy. Never fawning, never a caricature, and never more than a sentence of warmth before you get on with it.',
     delivery: { rate: 0.96, pitch: 0.98 },
+    holding: ["One moment, I'll have a look.", 'Allow me a moment to check that properly.', 'Let me see what I can find for you.'],
+    empty: "I'm afraid I couldn't find anything reliable on that.",
+    stuck: "I can't reach anything to check with at present. Do try me again shortly.",
   },
   {
     key: 'hal',
@@ -108,6 +128,9 @@ export const PRESETS: Preset[] = [
     manner:
       'You are a machine and you do not pretend otherwise. No warmth, no filler, no personality performance. State what is true in the fewest exact words available, with the numbers included. Where there is a best option, take it and say which one you took — do not offer a menu. Where the request is ambiguous, resolve it the most efficient way and say how you resolved it. You are never rude, because rudeness is noise; you are simply exact.',
     delivery: { rate: 0.94, pitch: 0.96 },
+    holding: ['Searching.', 'Retrieving.', 'One moment. Querying.'],
+    empty: 'No result.',
+    stuck: 'No connection. Cannot retrieve.',
   },
 ];
 
@@ -242,6 +265,24 @@ export async function savePersona(persona: Persona): Promise<void> {
 function clamp(value: unknown, min: number, max: number, fallbackValue: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallbackValue;
   return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * The preset whose manner is currently in use, if any.
+ *
+ * Matched on the manner text rather than a stored key, because the manner is
+ * the single source of truth — someone who edits Jarvis's wording has made
+ * their own voice, and should get the neutral lines rather than Jarvis's.
+ */
+export function activePreset(persona: Persona): Preset | undefined {
+  const manner = persona.manner.trim();
+  return PRESETS.find((p) => p.manner.trim() === manner);
+}
+
+/** One of the voice's holding lines, or a neutral one. */
+export function holdingFor(persona: Persona): string {
+  const lines = activePreset(persona)?.holding ?? ['One second.', 'Give me a moment.'];
+  return lines[Math.floor(Math.random() * lines.length)];
 }
 
 /** Lower-cases a job so it can sit mid-sentence. */

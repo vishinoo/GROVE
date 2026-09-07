@@ -34,12 +34,13 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import { capabilities } from '@/lib/capabilities';
 import { abilityById, runAbility, setCurrentAccount } from '@/lib/abilities';
-import { holdingLine, loadOverrides, maySpeak, modeById, withOverrides } from '@/lib/modes';
+import { loadOverrides, maySpeak, modeById, withOverrides } from '@/lib/modes';
 import { askGrove, newTurn, type Turn, type TurnTool } from '@/lib/grove';
 import { abortListening, isListening, startListening, stopListening } from '@/lib/listen';
 import {
   DEFAULT_PERSONA,
   fallback,
+  holdingFor,
   loadPersona,
   savePersona,
   type Persona,
@@ -90,6 +91,8 @@ type AgentValue = {
 
   activity: transcript.Entry[];
   clearActivity: () => Promise<void>;
+  /** Everything Grove holds about you, gone. */
+  startAgain: () => Promise<void>;
 
   /** The small set of durable facts Grove keeps. Readable and deletable. */
   facts: memory.Fact[];
@@ -253,6 +256,31 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     setFacts(await memory.reword(live.current.uid, id, value));
   }, []);
 
+  /**
+   * Wipes everything and starts over.
+   *
+   * The conversation in memory as well as the stored one: without clearing
+   * history.current, Grove carries on referring to things you have just deleted,
+   * which is worse than not offering a reset at all.
+   */
+  const startAgain = useCallback(async () => {
+    const account = live.current.uid;
+    history.current = [];
+    lastVolunteered.current = null;
+    turnSeq.current += 1;
+    setCaption('');
+    setHeard('');
+    const [entries, facts, list] = await Promise.all([
+      transcript.clearActivity(account),
+      memory.forgetAll(account),
+      sparks.clearSparks(account),
+    ]);
+    if (!mounted.current) return;
+    setActivity(entries);
+    setFacts(facts);
+    setSparkList(list);
+  }, []);
+
   const forgetFact = useCallback(async (id: string) => {
     setFacts(await memory.forget(live.current.uid, id));
   }, []);
@@ -320,7 +348,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     const holdTimer = setTimeout(() => {
       if (!mine()) return;
       held = true;
-      utter(holdingLine(modeById(voice.mode ?? 'normal')));
+      // The voice, not the mode: a holding line is the phrase repeated most
+      // often, so it is the one most likely to break the character.
+      utter(holdingFor(voice));
     }, 2200);
 
     let reply;
@@ -763,6 +793,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       updatePersona,
       activity,
       clearActivity,
+      startAgain,
       facts,
       editFact,
       forgetFact,
@@ -786,6 +817,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       updatePersona,
       activity,
       clearActivity,
+      startAgain,
       facts,
       editFact,
       forgetFact,
