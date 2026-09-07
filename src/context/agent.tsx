@@ -33,7 +33,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { capabilities } from '@/lib/capabilities';
-import { abilityById } from '@/lib/abilities';
+import { abilityById, runAbility } from '@/lib/abilities';
 import { askGrove, newTurn, type Turn, type TurnTool } from '@/lib/grove';
 import { abortListening, isListening, startListening, stopListening } from '@/lib/listen';
 import {
@@ -341,15 +341,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     running.current = true;
     setState((current) => (current === 'speaking' ? current : 'working'));
 
-    let outcome;
-    try {
-      outcome = await ability.run(reply.args);
-    } catch (error) {
-      outcome = {
-        ok: false,
-        spoken: error instanceof Error ? error.message : `${ability.name} failed.`,
-      };
-    }
+    // Bounded, so a hung ability can never leave a promise unanswered.
+    const outcome = await runAbility(ability, reply.args);
     running.current = false;
     if (!mounted.current) return;
 
@@ -400,12 +393,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     setSparkList(await sparks.markRun(account, spark.id));
     if (!ability?.wired) return;
 
-    let outcome;
-    try {
-      outcome = await ability.run({});
-    } catch {
-      return;
-    }
+    const outcome = await runAbility(ability, {});
     if (!mounted.current || !outcome.ok) return;
 
     const entries = await transcript.record(account, {

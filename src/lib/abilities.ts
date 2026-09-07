@@ -384,9 +384,12 @@ const WEATHER: Ability = {
     }
 
     try {
+      // Bounded even though runAbility bounds the whole run: failing at 8
+      // seconds with a usable sentence beats failing at 20 with a generic one.
       const geo = await fetch(
         'https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name=' +
-          encodeURIComponent(place)
+          encodeURIComponent(place),
+        { signal: AbortSignal.timeout(8000) }
       );
       const found = (await geo.json())?.results?.[0];
       if (!found) return { ok: false, spoken: `I could not find ${place}.` };
@@ -396,7 +399,7 @@ const WEATHER: Ability = {
         `&longitude=${found.longitude}&current=temperature_2m,weather_code` +
         '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max' +
         '&forecast_days=1&timezone=auto';
-      const data = await (await fetch(url)).json();
+      const data = await (await fetch(url, { signal: AbortSignal.timeout(8000) })).json();
 
       const now = Math.round(data.current.temperature_2m);
       const sky = SKY[data.current.weather_code] ?? 'hard to say';
@@ -471,7 +474,58 @@ const DIRECTIONS: Ability = {
   },
 };
 
+/**
+ * "Handle my morning."
+ *
+ * The first ability that composes others rather than wrapping one API, and the
+ * shape most of the interesting ones will take: a person asking about their day
+ * is not asking about their calendar, and answering with a list of events is a
+ * database query read aloud.
+ *
+ * Runs its parts together rather than in sequence — this is spoken while
+ * someone is putting their shoes on, and two round trips one after the other is
+ * a noticeable pause for no reason. A part that fails is left out rather than
+ * announced: "I couldn't get the weather" is not what you want first thing.
+ */
+const DAY: Ability = {
+  id: 'day.brief',
+  name: 'The day',
+  what: 'Your day in one go — what is on, and what it is doing outside.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {
+    place: { type: 'string', what: 'where they are; use what you know of where they live' },
+  },
+  examples: ['handle my morning', "how's my day looking", 'what have I got on'],
+  run: async (args) => {
+    const [events, sky] = await Promise.all([
+      eventsAhead(24).catch(() => null),
+      args.place ? WEATHER.run({ place: args.place }).catch(() => null) : Promise.resolve(null),
+    ]);
+
+    const parts: string[] = [];
+
+    if (events === null) {
+      // Distinguished from "nothing on", which is a different fact entirely.
+      parts.push("I can't see your calendar.");
+    } else if (events.length === 0) {
+      parts.push('Nothing in the diary.');
+    } else {
+      const [first, second] = events;
+      let line = `${events.length} thing${events.length === 1 ? '' : 's'} on — ${first.title} at ${sayWhen(first.start)}`;
+      if (second) line += `, then ${second.title}`;
+      parts.push(`${line}.`);
+    }
+
+    if (sky?.ok) parts.push(sky.spoken);
+
+    return { ok: true, spoken: parts.join(' ') };
+  },
+};
+
 export const ABILITIES: Ability[] = [
+  DAY,
   WEATHER,
   DIRECTIONS,
   MAIL_READ,
@@ -484,6 +538,54 @@ export const ABILITIES: Ability[] = [
 ];
 
 /* ------------------------------------------------------------- lookups */
+
+/**
+ * How long any ability gets before Grove gives up on it.
+ *
+ * Spoken, so this is generous rather than snappy — a briefing that takes eight
+ * seconds is fine. What is not fine is never coming back at all.
+ */
+const RUN_TIMEOUT_MS = 20_000;
+
+/**
+ * Runs an ability and guarantees an answer.
+ *
+ * This exists because of a specific failure: Grove would say "I'll check that
+ * for you", the ability would hang on a stalled fetch, and nothing ever
+ * followed. There is no second turn and no background retry, so a run that
+ * never resolves is a conversation that simply stops — with the person waiting
+ * on something that is never coming.
+ *
+ * Bounding it here rather than inside each ability is deliberate. Every ability
+ * is a hand-written function, some of them call `fetch` directly, and one that
+ * forgets its own timeout should not be able to take the turn down. This is the
+ * one place that has to be right.
+ */
+export async function runAbility(
+  ability: Ability,
+  args: Record<string, string>
+): Promise<AbilityResult> {
+  try {
+    return await Promise.race([
+      ability.run(args),
+      new Promise<AbilityResult>((resolve) =>
+        setTimeout(
+          () =>
+            resolve({
+              ok: false,
+              spoken: `${ability.name} took too long. Ask me again in a moment.`,
+            }),
+          RUN_TIMEOUT_MS
+        )
+      ),
+    ]);
+  } catch (error) {
+    return {
+      ok: false,
+      spoken: error instanceof Error ? error.message : `${ability.name} failed.`,
+    };
+  }
+}
 
 export function abilityById(id: string): Ability | undefined {
   return ABILITIES.find((a) => a.id === id);

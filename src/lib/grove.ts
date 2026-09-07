@@ -265,8 +265,18 @@ export async function askGrove(
   // ability. There is no later turn to redeem that with, so the promise is
   // caught here and replaced rather than spoken.
   if (light?.text) {
+    // A promise is only allowed to stand when something is actually about to
+    // run and report back. With no ability behind it, "I'll check that for you"
+    // is the last thing the person hears — there is no second turn to redeem
+    // it with — so it is replaced rather than spoken.
     if (!chosen && promisesAction(light.text)) {
       return settle(blocked ? offlineLine(userText, { acting, blocked }) : fallback.cannot());
+    }
+    // With an ability running, a promise is honest but useless on its own: the
+    // outcome is spoken a few seconds later, so leading with "let me check"
+    // just doubles the talking. Say what is being done instead.
+    if (chosen && promisesAction(light.text)) {
+      return settle(fallback.onIt(userText));
     }
     return settle(light.text);
   }
