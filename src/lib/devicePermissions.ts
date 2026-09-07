@@ -8,23 +8,32 @@
  * to do with any account — answered "OAuth not configured", which is true and
  * entirely beside the point.
  *
- * Each entry here asks iOS the question the row is really asking. Nothing is
- * requested at import time; the prompt appears when someone taps the button.
+ * THREE OUTCOMES, NOT TWO
+ *
+ * "Granted" and "not granted" is not enough vocabulary. iOS only ever shows its
+ * dialogue once per install, so a second tap after a refusal returns false
+ * without asking anyone anything — and telling someone "not granted" when no
+ * dialogue appeared reads as a broken button. Worse, a binary built before a
+ * permission existed also returns false, and the fix there is a rebuild rather
+ * than a trip to Settings.
+ *
+ * So: `granted`, `blocked` (refused earlier — Settings is the only way back),
+ * and `unavailable` (this build cannot ask). Each gets its own sentence.
  */
 
 import { ensureCalendarAccess, ensureRemindersAccess } from './deviceCalendar';
 
-/** Thrown so the screen can say what to do rather than showing a dead button. */
-export class PermissionUnavailable extends Error {}
+export type GrantOutcome = 'granted' | 'blocked' | 'unavailable';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 
 /**
- * The native module, or null on a build without it.
+ * The module's JS wrapper, or null on a build without the native half.
  *
  * Lazy for the reason capabilities.ts is lazy: a static import is hoisted and
  * evaluated before the first screen renders, so on Expo Go it would take the
- * whole bundle down rather than degrade.
+ * whole bundle down rather than degrade. The wrapper — not the raw native
+ * object — because the wrapper is where the version-skew guards live.
  */
 function remote(): typeof import('grove-remote') | null {
   try {
@@ -35,21 +44,19 @@ function remote(): typeof import('grove-remote') | null {
 }
 
 /**
- * Music and Maps live in the Swift module, so a build made before those calls
- * existed has the module but not the function. Checked rather than assumed —
- * calling straight through would throw "not a function" at someone who only
- * tapped a button, and the honest answer is that this build is too old.
+ * Music and Maps live in the Swift module, so a binary built before those calls
+ * existed has the module but not the function. The wrapper returns null for
+ * exactly that case, which is why it is distinguishable from a refusal here.
  */
-async function viaRemote(name: 'requestMusicAccess' | 'requestLocationAccess'): Promise<boolean> {
-  const native = remote() as Record<string, unknown> | null;
-  if (!native) {
-    throw new PermissionUnavailable('This needs a development build. Expo Go cannot reach it.');
-  }
-  const fn = native[name];
-  if (typeof fn !== 'function') {
-    throw new PermissionUnavailable('This build predates that permission. Rebuild to enable it.');
-  }
-  return Boolean(await (fn as () => Promise<boolean>)());
+async function viaRemote(
+  name: 'requestMusicAccess' | 'requestLocationAccess'
+): Promise<GrantOutcome> {
+  const native = remote();
+  const ask = native?.[name];
+  if (typeof ask !== 'function') return 'unavailable';
+  const granted = await ask();
+  if (granted === null) return 'unavailable';
+  return granted ? 'granted' : 'blocked';
 }
 
 /**
@@ -57,29 +64,44 @@ async function viaRemote(name: 'requestMusicAccess' | 'requestLocationAccess'): 
  *
  * iOS never lets an app read Messages, and composing one opens a share sheet at
  * the point of use with nothing to authorise beforehand. So the row is marked
- * connected without a prompt — a dialogue that does not exist cannot be shown,
+ * granted without a prompt — a dialogue that does not exist cannot be shown,
  * and pretending otherwise would be the same lie in a new place.
  */
-const GRANTERS: Record<string, () => Promise<boolean>> = {
-  calendar: ensureCalendarAccess,
-  reminders: ensureRemindersAccess,
+const GRANTERS: Record<string, () => Promise<GrantOutcome>> = {
+  calendar: async () => ((await ensureCalendarAccess()) ? 'granted' : 'blocked'),
+  reminders: async () => ((await ensureRemindersAccess()) ? 'granted' : 'blocked'),
   music: () => viaRemote('requestMusicAccess'),
   maps: () => viaRemote('requestLocationAccess'),
-  messages: async () => true,
+  messages: async () => 'granted',
 };
 
 export function isDevicePermission(key: string): boolean {
   return key in GRANTERS;
 }
 
-/**
- * Asks for one, returning whether it was granted.
- *
- * A denial is a false, not a throw: the person tapped "Don't Allow", which is an
- * answer rather than a failure, and the screen says so without an error banner.
- */
-export async function grantDevice(key: string): Promise<boolean> {
+export async function grantDevice(key: string): Promise<GrantOutcome> {
   const granter = GRANTERS[key];
-  if (!granter) throw new PermissionUnavailable('Nothing to grant here.');
-  return granter();
+  if (!granter) return 'unavailable';
+  try {
+    return await granter();
+  } catch {
+    return 'unavailable';
+  }
+}
+
+/** What to say, and whether iOS Settings is where this gets fixed. */
+export function grantMessage(
+  label: string,
+  outcome: Exclude<GrantOutcome, 'granted'>
+): { text: string; settings: boolean } {
+  if (outcome === 'unavailable') {
+    return {
+      text: `This build can't ask for ${label} yet. It needs a rebuild — the JS updated over the air, the native half did not.`,
+      settings: false,
+    };
+  }
+  return {
+    text: `${label} is turned off for Grove. iOS only asks once, so this is changed in Settings.`,
+    settings: true,
+  };
 }

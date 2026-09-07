@@ -74,6 +74,13 @@ export type TravelResult = {
 
 type Native = {
   travelTime(destination: string, driving: boolean): Promise<TravelResult>;
+  /**
+   * Optional because the binary is routinely older than this file. Every
+   * function added after a build shipped is absent on that build, and calling
+   * one throws "not a function" at someone who only pressed a button.
+   */
+  requestMusicAccess?(): Promise<boolean>;
+  requestLocationAccess?(): Promise<boolean>;
   activate(playSilence: boolean): Promise<void>;
   playMusic(query: string): Promise<MusicResult>;
   controlMusic(action: string): Promise<{ ok: boolean; title?: string }>;
@@ -144,22 +151,30 @@ export function getRoute(): AudioRoute {
  * turn — the same contract every other function here keeps.
  */
 export async function playMusic(query: string): Promise<MusicResult> {
-  return (await native?.playMusic(query)) ?? { ok: false, reason: 'unavailable' };
+  // Probed rather than assumed, like setKeepAlive below. An empty query used
+  // to be refused in abilities.ts before it ever got here, which hid the fact
+  // that a pre-music binary has no playMusic at all — so the day empty queries
+  // became legal, every "play a song" threw instead of degrading.
+  if (typeof native?.playMusic !== 'function') return { ok: false, reason: 'unavailable' };
+  return (await native.playMusic(query)) ?? { ok: false, reason: 'unavailable' };
 }
 
 export async function controlMusic(
   action: 'play' | 'pause' | 'next' | 'previous'
 ): Promise<boolean> {
-  return Boolean((await native?.controlMusic(action))?.ok);
+  if (typeof native?.controlMusic !== 'function') return false;
+  return Boolean((await native.controlMusic(action))?.ok);
 }
 
 export function nowPlaying(): { title: string; artist: string; playing: boolean } {
-  return native?.nowPlaying() ?? { title: '', artist: '', playing: false };
+  if (typeof native?.nowPlaying !== 'function') return { title: '', artist: '', playing: false };
+  return native.nowPlaying() ?? { title: '', artist: '', playing: false };
 }
 
 /** How long to somewhere from where you are standing, via MapKit. */
 export async function travelTime(destination: string, driving = true): Promise<TravelResult> {
-  return (await native?.travelTime(destination, driving)) ?? { ok: false, reason: 'unavailable' };
+  if (typeof native?.travelTime !== 'function') return { ok: false, reason: 'unavailable' };
+  return (await native.travelTime(destination, driving)) ?? { ok: false, reason: 'unavailable' };
 }
 
 export async function requestMicrophone(): Promise<boolean> {
@@ -193,6 +208,25 @@ export async function setKeepAlive(playing: boolean): Promise<void> {
   // situation the rest of this file is written to survive.
   if (typeof native?.setKeepAlive !== 'function') return;
   await native.setKeepAlive(playing);
+}
+
+/**
+ * Ask for the music library, or say that this build cannot.
+ *
+ * Three outcomes, not two: granted, refused, and "this binary predates the
+ * question". The third is null rather than false so the Connections screen can
+ * tell someone to rebuild instead of telling them they denied something they
+ * were never asked.
+ */
+export async function requestMusicAccess(): Promise<boolean | null> {
+  if (typeof native?.requestMusicAccess !== 'function') return null;
+  return Boolean(await native.requestMusicAccess());
+}
+
+/** The same, for location. */
+export async function requestLocationAccess(): Promise<boolean | null> {
+  if (typeof native?.requestLocationAccess !== 'function') return null;
+  return Boolean(await native.requestLocationAccess());
 }
 
 /** Whether this binary can pause the silence. False on older builds. */

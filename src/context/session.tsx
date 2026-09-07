@@ -227,9 +227,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       // no browser. Sending one down the OAuth path is what produced "OAuth not
       // configured" on Calendar — a row that never needed an account at all.
       if (isDevicePermission(bindingKey)) {
-        const ok = await grantDevice(bindingKey);
+        const outcome = await grantDevice(bindingKey);
+        const ok = outcome === 'granted';
         setGranted((held) => (ok ? [...new Set([...held, bindingKey])] : held.filter((k) => k !== bindingKey)));
-        if (!ok) throw new Error('Not granted. You can change it in iOS Settings.');
+        // Thrown as the outcome word, not a sentence. The screen knows the
+        // row's label and whether it can offer a way to Settings; this does
+        // not, and a message assembled here would be wrong for two of the
+        // three cases.
+        if (!ok) throw new Error(outcome);
         return;
       }
       const { url } = await api.oauthUrl(bindingKey);

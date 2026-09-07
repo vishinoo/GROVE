@@ -12,7 +12,7 @@
  */
 
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, Text, View } from 'react-native';
 
 import { AppIcon } from '@/components/app-icon';
 import { Card, Mono, Notice, Screen, Section } from '@/components/ui';
@@ -21,6 +21,7 @@ import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { abilityById } from '@/lib/abilities';
 import { CONNECTIONS, providerFor, type Connection } from '@/lib/connections';
+import { grantMessage, type GrantOutcome } from '@/lib/devicePermissions';
 
 export default function Connections() {
   const palette = usePalette();
@@ -28,6 +29,8 @@ export default function Connections() {
 
   const [working, setWorking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Set when the fix is in iOS Settings, so the notice can go straight there. */
+  const [needsSettings, setNeedsSettings] = useState(false);
 
   const live = new Set(connections);
   const connected = CONNECTIONS.filter((c) => live.has(c.key));
@@ -37,6 +40,7 @@ export default function Connections() {
     if (item.impossible) return;
     setWorking(item.key);
     setError(null);
+    setNeedsSettings(false);
     try {
       if (live.has(item.key)) await disconnect(item.key);
       // A device permission is asked for by key; an account is started by
@@ -44,7 +48,17 @@ export default function Connections() {
       // rather than letting one path serve both is the whole fix here.
       else await connect(item.kind === 'device' ? item.key : providerFor(item));
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : 'That didn’t work.');
+      // A device row throws the bare outcome word; anything else is already a
+      // sentence. Turning the word into copy here is what lets the message name
+      // the connection and know whether Settings is even the right advice.
+      const raw = problem instanceof Error ? problem.message : 'That didn’t work.';
+      if (raw === 'blocked' || raw === 'unavailable') {
+        const said = grantMessage(item.label, raw as Exclude<GrantOutcome, 'granted'>);
+        setError(said.text);
+        setNeedsSettings(said.settings);
+      } else {
+        setError(raw);
+      }
     } finally {
       setWorking(null);
     }
@@ -53,7 +67,31 @@ export default function Connections() {
   return (
     <Screen title="Connections" subtitle="What Grove may reach on your behalf.">
       {notice ? <Notice text={notice} onDismiss={dismissNotice} /> : null}
-      {error ? <Notice text={error} onDismiss={() => setError(null)} /> : null}
+      {error ? (
+        <View style={{ gap: 8 }}>
+          <Notice text={error} onDismiss={() => setError(null)} />
+          {needsSettings ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Open iOS Settings for Grove"
+              onPress={() => void Linking.openSettings()}
+              style={({ pressed }) => ({
+                alignSelf: 'flex-start',
+                height: 40,
+                justifyContent: 'center',
+                paddingHorizontal: 16,
+                borderRadius: Radius.well,
+                backgroundColor: palette.mark,
+                opacity: pressed ? 0.75 : 1,
+              })}
+            >
+              <Text style={{ fontFamily: Type.cardTitle.fontFamily, fontSize: 14, color: palette.raised }}>
+                Open iOS Settings
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
 
       {connected.length > 0 ? (
         <Section label="Connected">
