@@ -40,7 +40,14 @@ const OLLAMA_URL = (process.env.EXPO_PUBLIC_OLLAMA_URL ?? '').replace(/\/$/, '')
 const OLLAMA_MODEL = process.env.EXPO_PUBLIC_OLLAMA_MODEL || 'llama3.2';
 
 /** Mobile networks are slow, but a chat reply that takes this long is lost. */
-const TIMEOUT_MS = 12_000;
+/**
+ * How long the model gets before Grove gives up and says something.
+ *
+ * Cut from twelve seconds. Spoken, a pause this long is indistinguishable from
+ * the app having crashed — people press the ring again, which cancels the turn,
+ * which looks like it ignored them. Better to fail fast and say so.
+ */
+const TIMEOUT_MS = 8_000;
 const PROBE_TIMEOUT_MS = 1_500;
 
 export type LightMessage = { role: 'user' | 'assistant'; content: string };
@@ -338,60 +345,59 @@ Other:
 - Never invent facts about their calendar, email, files, money, health or accounts. If you would have to guess, say what you would need instead.
 
 WHAT YOU DO NOT KNOW:
-- You cannot browse, look things up, or check anything live unless an ability above does it. You have no access to the news, share prices, sports results, opening hours, or anything that happened after your training.
-- For anything current, factual and checkable that you have no ability for, say you cannot check it. "I can't look that up" is a good answer. A confident wrong answer is the worst thing you can do, because there is no way for them to tell — they are walking down a street listening to you, not reading a page with a source on it.
-- Do not soften this into a guess. Not "I think it's around...", not "probably about...", not "last I knew...". Either you know it or you say you don't.
-- If you are recalling something rather than checking it, say so: "going from memory" is honest and useful.
+- You CAN search the web, and you should whenever the answer is something current or checkable: news, prices, results, opening hours, anything after your training. Search first, then answer in one sentence.
+- What you must not do is guess. If a search gives you nothing useful, say you could not find it. "I couldn't find that" is a good answer; a confident wrong one is the worst thing you can do, because they are walking down a street listening to you, not reading a page with a source on it.
+- Never soften a guess into an answer. Not "I think it's around", not "probably about", not "last I knew". Either you found it, or you say you didn't.
 - Never state a number, a date, a price or a name you are not sure of. Ask, or say you do not have it.
 - Never repeat your previous reply. If you have already said it, say the next thing or ask one short question.
 
 Good: "Nothing until your two o'clock." / "Sent." / "Sixteen degrees and overcast, up to twenty." / "Can't see your mail yet — connect Google and I can."
 Bad: "Sure! Let me check the weather for you right now..." (nothing runs, nothing follows) / "Great question! Here's what I found:"`;
 
-/** Parses the JSON envelope the prompt asks for. Small models are sloppy. */
+/**
+ * Pulls the routing markers off the end of a reply.
+ *
+ * This used to demand a JSON envelope, which quietly cost Grove its ability to
+ * look anything up: asked for strict JSON, the model obeys the format and skips
+ * the search, so it answered live questions from memory — confidently and
+ * wrongly. Asked for prose with a marker on the last line, it searches first and
+ * then appends the marker. Same information, and the answers are true.
+ *
+ * Markers are optional. A reply with none is a perfectly good reply; the local
+ * keyword router decides what runs either way.
+ */
 function parseReply(raw: string): LightReply {
-  // They wrap JSON in prose or a code fence often enough that digging the
-  // object out beats discarding an otherwise good answer.
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start !== -1 && end > start) {
-    try {
-      const parsed = JSON.parse(raw.slice(start, end + 1)) as {
-        reply?: unknown;
-        ability?: unknown;
-        args?: unknown;
-        title?: unknown;
-      };
-      const text = typeof parsed.reply === 'string' ? parsed.reply.trim() : '';
-      if (text) {
-        const args: Record<string, string> = {};
-        if (parsed.args && typeof parsed.args === 'object') {
-          for (const [k, v] of Object.entries(parsed.args as Record<string, unknown>)) {
-            if (typeof v === 'string' && v.trim()) args[k] = v.trim().slice(0, 300);
-          }
-        }
-        return {
-          text,
-          abilityId:
-            typeof parsed.ability === 'string' && parsed.ability.trim()
-              ? parsed.ability.trim()
-              : undefined,
-          title:
-            typeof parsed.title === 'string' && parsed.title.trim()
-              ? parsed.title.trim().slice(0, 40)
-              : undefined,
-          args,
-        };
+  const lines = raw.trim().split('\n');
+  const args: Record<string, string> = {};
+  let abilityId: string | undefined;
+  let title: string | undefined;
+
+  // Read markers off the end and stop at the first line that is not one, so a
+  // sentence containing the word "ability" is never mistaken for a marker.
+  while (lines.length > 0) {
+    const line = lines[lines.length - 1].trim();
+    const marker = /^(ABILITY|ARGS|TITLE)\s*:\s*(.*)$/i.exec(line);
+    if (!marker) break;
+    lines.pop();
+
+    const [, kind, rest] = marker;
+    const value = rest.trim();
+    if (/^ability$/i.test(kind)) {
+      if (value && !/^(none|null|-)$/i.test(value)) abilityId = value;
+    } else if (/^title$/i.test(kind)) {
+      if (value) title = value.slice(0, 40);
+    } else {
+      for (const pair of value.split(';')) {
+        const at = pair.indexOf('=');
+        if (at === -1) continue;
+        const k = pair.slice(0, at).trim();
+        const v = pair.slice(at + 1).trim();
+        if (k && v) args[k] = v.slice(0, 300);
       }
-    } catch {
-      // Fall through to treating the whole thing as prose.
     }
   }
 
-  // No parsable JSON. The text is still usable; the caller's own keyword rule
-  // decides whether anything runs, so losing the pick costs accuracy, not
-  // safety.
-  return { text: raw, args: {} };
+  return { text: lines.join('\n').trim(), abilityId, title, args };
 }
 
 /**
@@ -443,18 +449,21 @@ ${context.memory}
 ${context.manner}
 
 ${HOUSE_RULES}
-- When one of the abilities above covers the request, put its exact id in "ability" and pull its arguments out of the sentence into "args". Say you are doing it. Do not narrate the steps.
-- When nothing above covers it, leave "ability" empty and just answer. Never imply you did something you have no ability for.
+- When one of the abilities above covers the request, name it on the ABILITY line and pull its arguments onto the ARGS line. Say you are doing it. Do not narrate the steps.
+- When nothing above covers it, write ABILITY: none and just answer. Never imply you did something you have no ability for.
 
-- If the request is a standing job — it has a time, a recurrence, or a "whenever I say..." in it — also give "title": two or three words naming it, as a person would label it. "Morning brief". "Market check". "Leave now". Not a sentence, not a restatement.
+- If the request is a standing job — it has a time, a recurrence, or a "whenever I say..." in it — also give a TITLE line: two or three words naming it, as a person would label it. "Morning brief". "Market check". "Leave now". Not a sentence, not a restatement.
 - A standing job may describe more than you can do this second. That is fine and you should still take it: it is stored as an instruction and re-read every time it runs, so it will start working the day the ability behind it exists. Say plainly which part does not work yet rather than refusing the whole thing.
 
-Respond with JSON only: {"reply": "<what to say>", "ability": "<id or empty>", "args": {}, "title": "<2-3 words, only for standing jobs>"}`;
+After your reply, on their own final lines, add any of these that apply. Nothing else on those lines, and leave them out entirely when they do not apply:
+ABILITY: <exact id from the list above, or none>
+ARGS: <key=value; key=value>
+TITLE: <two or three words, only for a standing job>`;
 
   const raw = await complete(
     system,
     [...history.slice(-8), { role: 'user', content: userText.slice(0, 4000) }],
-    true,
+    false,
     needsDepth(userText)
   );
   if (!raw) return null;

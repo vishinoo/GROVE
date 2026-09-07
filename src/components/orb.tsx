@@ -230,6 +230,17 @@ function LobeView({
 }) {
   const d = size * lobe.travel;
 
+  // The tint changes when the mode does, and snapping between two colours mid
+  // drift reads as a glitch rather than a change. Reanimated cannot interpolate
+  // a colour on the UI thread here without more machinery than this is worth,
+  // so the lobe cross-fades: the new colour comes up over the old one.
+  const fade = useSharedValue(1);
+  useEffect(() => {
+    fade.value = 0;
+    fade.value = withTiming(1, { duration: 900, easing: Easing.inOut(Easing.quad) });
+  }, [lobe.colour, fade]);
+  const fadeStyle = useAnimatedStyle(() => ({ opacity: fade.value }));
+
   const style = useAnimatedStyle(() => {
     // Each lobe reads the same clock at its own rate and offset, so they never
     // line up. Two sinusoids at different multiples trace a slow lissajous
@@ -249,6 +260,7 @@ function LobeView({
 
   return (
     <Animated.View style={[{ position: 'absolute', inset: 0 }, style]} pointerEvents="none">
+      <Animated.View style={[{ flex: 1 }, fadeStyle]}>
       <Svg width={size} height={size}>
         <Defs>
           <RadialGradient id={id} cx="50%" cy="50%" r="50%">
@@ -259,6 +271,7 @@ function LobeView({
         </Defs>
         <Circle cx={size / 2} cy={size / 2} r={r} fill={`url(#${id})`} />
       </Svg>
+      </Animated.View>
     </Animated.View>
   );
 }

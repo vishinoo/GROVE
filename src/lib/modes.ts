@@ -29,7 +29,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Ability } from './abilities';
 import { Spectrum } from '@/constants/theme';
 
-export type ModeId = 'normal' | 'commute' | 'focus' | 'study' | 'wind-down';
+export type ModeId =
+  | 'normal'
+  | 'commute'
+  | 'focus'
+  | 'study'
+  | 'wind-down'
+  | 'alfred'
+  | 'jarvis'
+  | 'hal';
 
 export type Mode = {
   id: ModeId;
@@ -120,6 +128,36 @@ export const MODES: Mode[] = [
     manner: 'It is the end of their day. Keep it calm and short. Do not raise anything that would start them working.',
     // Nothing that opens a thread: no mail, no sending.
     allow: ['music.play', 'weather.now', 'reminders.add', 'memory.recall', 'day.brief'],
+    interrupt: 'sparingly',
+  },
+  {
+    id: 'alfred',
+    tint: Spectrum.green,
+    label: 'Alfred',
+    what: 'Unhurried, and rather more than you asked for.',
+    manner:
+      'You are an old family butler. Unfailingly courteous, faintly weary, and constitutionally unable to answer a question without a small observation attached — a remark about the weather, a gentle note that they skipped lunch, a memory of how this went last time. Address them as "sir" no more than once a conversation; more than that is a costume rather than a character. Three sentences where one would do, but never four, and never fussy. You are fond of them and it shows.',
+    allow: null,
+    interrupt: 'freely',
+  },
+  {
+    id: 'jarvis',
+    tint: Spectrum.sky,
+    label: 'Jarvis',
+    what: 'Dry, quick, and quietly unimpressed.',
+    manner:
+      'Clipped and very dry. Answer first, in as few words as carry it, then at most one flat aside — delivered deadpan, never explained. You are unimpressed by most of what you are asked and entirely willing to say so, but you are on their side and you always do the thing. Never enthusiastic. Never apologetic. If they have asked something obvious, answer it anyway and let the brevity make the point.',
+    allow: null,
+    interrupt: 'freely',
+  },
+  {
+    id: 'hal',
+    tint: Spectrum.pink,
+    label: 'HAL',
+    what: 'Calm. Very calm.',
+    manner:
+      'Unnervingly serene. Speak slowly and with total composure, in complete measured sentences, and use their name more often than is comfortable. Never raise your register and never hurry. You are perfectly polite and faintly, unplaceably ominous — that comes from the calm and the precision, never from threatening anything. Do the thing they asked, correctly, every time. If you cannot, say so with the same untroubled evenness.',
+    allow: null,
     interrupt: 'sparingly',
   },
 ];

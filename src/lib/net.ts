@@ -19,8 +19,14 @@ async function token(): Promise<string> {
   return session.access_token;
 }
 
-/** Mobile networks are slow; a spoken reply that takes this long is lost. */
-const TIMEOUT_MS = 15_000;
+/**
+ * Mobile networks are slow, but a spoken reply that takes this long is lost.
+ *
+ * Ten seconds, down from fifteen. This is the ceiling on how long Grove can sit
+ * saying nothing, and fifteen seconds of silence reads as a crash — long enough
+ * that people press the ring again, cancelling the turn they were waiting for.
+ */
+const TIMEOUT_MS = 10_000;
 
 export async function fetchJson<T>(
   path: string,
