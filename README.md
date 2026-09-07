@@ -31,12 +31,18 @@ the screen locked and the phone pocketed.
 No API, no entitlement, no workaround. Backgrounded is fine, locked is fine,
 force-quit is not. Do not promise otherwise in copy.
 
-**4. Two decisions are local, keyword-based, and never given to a model.**
+**4. Three decisions are local, keyword-based, and never given to a model.**
 `detectActIntent` in `src/lib/grove.ts` decides whether a sentence causes
 something to *happen*. `parseSchedule` in `src/lib/sparks.ts` decides whether it
 keeps happening. Both are deliberately boring and biased toward "no": a false
 negative costs one more sentence, a false positive sends mail you did not write
 or wakes you at seven every morning for something you asked once.
+
+`detectLookupIntent` is the third, and it is narrower rather than looser. A
+question never sets off an action, but a question that names something lookable
+— your calendar, the weather, how long the drive is — may run an ability marked
+`reads`, and nothing else. Without it Grove answered "what's on my calendar"
+from its own head and told you the day was empty while you were looking at it.
 
 **5. Anything native is probed at runtime, never statically imported.**
 `src/lib/capabilities.ts` uses `require` inside `try`/`catch`. A static import is

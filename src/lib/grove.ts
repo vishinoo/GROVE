@@ -117,6 +117,39 @@ const WORK_VERB =
  *
  * This gates every ability run, so it errs toward "no".
  */
+/**
+ * Questions that can only be answered by looking something up.
+ *
+ * detectActIntent refuses every question, which is right for anything with
+ * consequences and wrong for the ones whose whole content is "go and read
+ * something". "What's on my calendar" was answered from the model's own head,
+ * and the answer was "nothing on" to a person looking at a full calendar —
+ * confidently, specifically wrong, which is the worst failure this app has.
+ *
+ * The safety property is kept intact by narrowing what may run rather than by
+ * loosening when: this gate only ever admits abilities marked `reads`, so a
+ * false positive here costs a calendar lookup nobody wanted. It cannot send
+ * mail, move an event or message anyone — those still need detectActIntent.
+ */
+const LOOKUP_QUESTION =
+  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|traffic|how long|how far|eta|my day|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|remind me (?:what|who|about)|did i say|what did i)\b/i;
+
+/**
+ * Whether this is a question Grove should look up rather than answer offhand.
+ *
+ * Deliberately requires the sentence to be a question AND to name something
+ * lookable. Either alone is too broad — "what do you think of jazz" names
+ * nothing to read, and "calendar" on its own is not a question.
+ */
+export function detectLookupIntent(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  // Already handled by the stricter gate; nothing to add.
+  if (detectActIntent(t)) return false;
+  const isQuestion = QUESTION_OPENERS.test(t) || t.endsWith('?');
+  return isQuestion && LOOKUP_QUESTION.test(t);
+}
+
 export function detectActIntent(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
@@ -234,6 +267,9 @@ export async function askGrove(
 
   // Tier 0. Whether anything is allowed to run, and whether it recurs.
   const acting = detectActIntent(userText);
+  // A question that needs a lookup. Kept separate from `acting` so it cannot
+  // reach a schedule, a phrase trigger, or any ability that changes something.
+  const looking = !acting && detectLookupIntent(userText);
   const schedule = acting ? parseSchedule(userText) : null;
   // The other kind of standing job. Checked here rather than left to the
   // caller, because a caller that tests `schedule` alone silently drops every
@@ -261,18 +297,19 @@ export async function askGrove(
   const allowed = (a: Ability | undefined) => Boolean(a && available.some((x) => x.id === a.id));
   // The keyword fallback has to respect the mode as well, or a narrowed mode is
   // only narrowed when the model happens to be reachable.
-  const chosen = acting
-    ? allowed(named) && named?.wired
-      ? named
-      : (() => {
-          const guess = pickAbility(userText);
-          return allowed(guess ?? undefined) ? guess : null;
-        })()
-    : null;
+  const pick = (): Ability | null => {
+    if (allowed(named) && named?.wired) return named ?? null;
+    const guess = pickAbility(userText);
+    return allowed(guess ?? undefined) ? guess : null;
+  };
+
+  // Two gates, and the narrower one can only ever return a read. Whatever the
+  // router suggested, a question cannot come out of here holding mail.send.
+  const chosen = acting ? pick() : looking ? (pick()?.reads ? pick() : null) : null;
 
   // Something would fit, but it is not built or connected yet. Saying which is
   // the difference between a dead end and an instruction.
-  const blocked = !chosen && acting && named && !named.wired ? named : null;
+  const blocked = !chosen && (acting || looking) && named && !named.wired ? named : null;
 
   const fact = factFrom(userText) ?? undefined;
 
@@ -302,7 +339,7 @@ export async function askGrove(
       text:
         usable ||
         offlineLine(userText, {
-          acting,
+          acting: acting || looking,
           ability: chosen,
           blocked,
           schedule,

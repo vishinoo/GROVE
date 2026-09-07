@@ -115,6 +115,21 @@ export type Ability = {
   /** Permissions or integrations this needs before it can run. */
   needs: string[];
   args: Record<string, ArgSpec>;
+  /**
+   * True when running this only reads. Nothing is sent, booked, moved, bought
+   * or written to anyone else.
+   *
+   * This is what lets a question reach a tool at all. detectActIntent refuses
+   * every question by design — "a false positive sends an email" — and the cost
+   * of that was Grove answering "what's on my calendar" out of its own head and
+   * saying the day was empty, which is a lie told confidently to someone
+   * looking at their own calendar. Reads carry none of that risk, so questions
+   * may run these and only these.
+   *
+   * Default is false. A new ability is assumed to have consequences until
+   * someone says otherwise, which is the safe direction to be wrong in.
+   */
+  reads?: boolean;
   /** Sentences that should land here. Used for routing and for onboarding copy. */
   examples: string[];
   run: (args: Record<string, string>) => Promise<AbilityResult>;
@@ -140,6 +155,7 @@ const BRIEF: Ability = {
   // the exact failure this flag is here to prevent.
   wired: false,
   needs: ['a briefing endpoint on Noctus'],
+  reads: true,
   args: {
     topic: { type: 'string', what: 'what to brief on, e.g. "my watchlist" or "the news"', required: true },
   },
@@ -177,6 +193,7 @@ const MAIL_READ: Ability = {
   where: 'server',
   wired: true,
   needs: ['email'],
+  reads: true,
   args: {
     from: { type: 'string', what: 'who it is from, if they named someone' },
     about: { type: 'string', what: 'what it is about' },
@@ -268,6 +285,7 @@ const CALENDAR_READ: Ability = {
   where: 'device',
   wired: true,
   needs: ['calendar-permission'],
+  reads: true,
   args: { when: { type: 'string', what: 'the day, e.g. "today" or "Thursday"' } },
   examples: ["what's on today", 'when is my next thing', 'am I free at four'],
   run: async (args) => {
@@ -442,6 +460,7 @@ const WEATHER: Ability = {
   where: 'server',
   wired: true,
   needs: [],
+  reads: true,
   args: {
     place: { type: 'string', what: 'the town or city; use what you know of where they live' },
   },
@@ -506,6 +525,7 @@ const DIRECTIONS: Ability = {
   where: 'device',
   wired: capabilities().remote,
   needs: ['location-permission'],
+  reads: true,
   args: {
     to: { type: 'string', what: 'where to — use what you know of where they live or work', required: true },
     how: { type: 'string', what: '"walking" if they said so, otherwise driving' },
@@ -563,6 +583,7 @@ const DAY: Ability = {
   where: 'device',
   wired: true,
   needs: [],
+  reads: true,
   args: {
     place: { type: 'string', what: 'where they are; use what you know of where they live' },
   },
@@ -613,6 +634,7 @@ const RECALL: Ability = {
   where: 'device',
   wired: true,
   needs: [],
+  reads: true,
   args: { about: { type: 'string', what: 'the person or thing being asked about', required: true } },
   examples: [
     'what was I supposed to ask Sarah about',

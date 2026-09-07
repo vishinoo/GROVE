@@ -96,10 +96,18 @@ rather than let a briefing quietly not arrive. See
 
 ## Where the rules live
 
-- `src/lib/grove.ts` — `detectActIntent` decides whether a sentence causes
-  something to happen. It gates every ability run and is deliberately
-  keyword-based and biased toward "no". A false negative costs a sentence; a
-  false positive sends an email. **Never delegate this to a model.**
+- `src/lib/grove.ts` — two gates, and the difference between them is the whole
+  safety story. `detectActIntent` decides whether a sentence causes something to
+  happen; it refuses every question, is deliberately keyword-based, and is
+  biased toward "no". A false negative costs a sentence; a false positive sends
+  an email. `detectLookupIntent` is the narrower second gate: it admits
+  questions that name something lookable, and abilities marked `reads` are the
+  only ones it can ever run. It exists because refusing every question meant
+  "what's on my calendar" was answered from the model's own head, which produced
+  "nothing on" for a full calendar — a confident, specific lie, which is worse
+  than any amount of hedging. **Never delegate either of these to a model.**
+  When adding an ability, leave `reads` unset unless running it truly only
+  reads: the default is the safe direction to be wrong in.
 - `src/lib/sparks.ts` — `parseSchedule` decides whether something keeps
   happening. Same rule, same reason: a false positive here wakes you at seven
   every morning for something you asked once. Its clock parser is written for
