@@ -121,7 +121,7 @@ export const MODES: Mode[] = [
     label: 'Focus',
     what: 'Working. Grove stays quiet unless asked.',
     manner: 'They are concentrating. Answer in as few words as will do, and never volunteer more.',
-    allow: ['reminders.add', 'calendar.read', 'weather.now', 'memory.recall', 'music.play'],
+    allow: ['mode.set', 'reminders.add', 'calendar.read', 'weather.now', 'memory.recall', 'music.play'],
     interrupt: 'never',
     holding: ['Moment.', 'Checking.'],
     empty: 'Nothing useful.',
@@ -135,7 +135,7 @@ export const MODES: Mode[] = [
     what: 'Explains properly instead of being terse.',
     manner:
       'They are learning something. Explain it properly — three or four sentences is right here, and being clipped is unhelpful. Use an example. Check they followed before moving on.',
-    allow: ['memory.recall', 'reminders.add', 'calendar.read'],
+    allow: ['mode.set', 'memory.recall', 'reminders.add', 'calendar.read'],
     interrupt: 'never',
     holding: ['Let me look that up properly — one moment.', 'Good question. Give me a second to check rather than guess.'],
     empty: "I couldn't find a good source for that, so I'd rather not guess.",
@@ -149,7 +149,7 @@ export const MODES: Mode[] = [
     what: 'Evening. Nothing that starts work.',
     manner: 'It is the end of their day. Keep it calm and short. Do not raise anything that would start them working.',
     // Nothing that opens a thread: no mail, no sending.
-    allow: ['music.play', 'weather.now', 'reminders.add', 'memory.recall', 'day.brief'],
+    allow: ['mode.set', 'music.play', 'weather.now', 'reminders.add', 'memory.recall', 'day.brief'],
     interrupt: 'sparingly',
     holding: ['One moment.', 'Just having a look.'],
     empty: 'Nothing on that one.',

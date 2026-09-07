@@ -33,7 +33,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { capabilities } from '@/lib/capabilities';
-import { abilityById, runAbility, setCurrentAccount } from '@/lib/abilities';
+import { abilityById, runAbility, setCurrentAccount, setModeHandler } from '@/lib/abilities';
 import { loadOverrides, maySpeak, modeById, withOverrides } from '@/lib/modes';
 import { askGrove, newTurn, type Turn, type TurnTool } from '@/lib/grove';
 import { abortListening, isListening, startListening, stopListening } from '@/lib/listen';
@@ -235,6 +235,11 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // Abilities read per-account state through this rather than through a
     // parameter, so it has to be set before any of them can run.
     setCurrentAccount(uid);
+    // Lets mode.set reach back into persona state without abilities.ts growing
+    // a dependency on React.
+    setModeHandler(async (mode) => {
+      await updatePersona({ ...live.current.persona, mode });
+    });
     void memory.loadFacts(uid).then((f) => {
       if (mounted.current) setFacts(f);
     });

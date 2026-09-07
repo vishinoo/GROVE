@@ -36,6 +36,7 @@ import { Linking, Platform } from 'react-native';
 
 import { capabilities } from './capabilities';
 import { loadFacts, recall } from './memory';
+import { MODES } from './modes';
 import { fetchJson } from './net';
 
 /**
@@ -63,6 +64,20 @@ const SKY: Record<number, string> = {
  * is set here rather than threaded through every call.
  */
 let CURRENT_UID = 'anon';
+
+/**
+ * How an ability changes something React owns.
+ *
+ * Abilities are plain functions on purpose — they take arguments and return a
+ * sentence, so they can be tested without a component tree. The few that need
+ * to reach back into app state do it through a handler the provider registers,
+ * rather than by growing a dependency on React.
+ */
+let onModeChange: ((mode: string) => Promise<void>) | null = null;
+
+export function setModeHandler(fn: (mode: string) => Promise<void>): void {
+  onModeChange = fn;
+}
 
 export function setCurrentAccount(uid: string): void {
   CURRENT_UID = uid || 'anon';
@@ -644,7 +659,50 @@ const MESSAGE: Ability = {
   },
 };
 
+/**
+ * Switching mode by voice.
+ *
+ * This was missing, and its absence was invisible from the outside: asked to go
+ * into focus mode, Grove correctly reported that it could not touch the
+ * device's settings, because nothing here could. A mode you can only reach by
+ * tapping is a mode you cannot use with your phone in your pocket, which is the
+ * only situation Grove exists for.
+ *
+ * Matched loosely on the mode's own name, because "focus", "focus mode" and
+ * "go into focus" are the same request.
+ */
+const SET_MODE: Ability = {
+  id: 'mode.set',
+  name: 'Mode',
+  what: 'Switches which mode you are in, and runs whatever that mode starts.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: { mode: { type: 'string', what: 'which one: focus, study, wind down, or normal', required: true } },
+  examples: ['go into focus mode', 'switch to wind down', 'study mode', 'back to normal'],
+  run: async (args) => {
+    const asked = (args.mode || '').toLowerCase().replace(/\bmode\b/g, '').trim();
+    if (!asked) return { ok: false, spoken: 'Which mode?' };
+
+    const wanted = MODES.find((m) => {
+      const label = m.label.toLowerCase();
+      const id = m.id.replace('-', ' ');
+      return asked.includes(label) || label.includes(asked) || asked.includes(id) || id.includes(asked);
+    });
+    if (!wanted) {
+      return { ok: false, spoken: `There's no ${asked} mode. There's focus, study, wind down, or normal.` };
+    }
+    if (!onModeChange) return { ok: false, spoken: 'I can\'t switch modes right now.' };
+
+    await onModeChange(wanted.id);
+    // The mode's own instruction runs from the provider, and speaks for itself,
+    // so this stays short rather than announcing something twice.
+    return { ok: true, spoken: wanted.id === 'normal' ? 'Back to normal.' : `${wanted.label} mode.` };
+  },
+};
+
 export const ABILITIES: Ability[] = [
+  SET_MODE,
   RECALL,
   MESSAGE,
   DAY,
