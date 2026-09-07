@@ -86,6 +86,7 @@ export function Orb({
   size = 200,
   onPress,
   showCaption = true,
+  tint,
 }: {
   state: AgentState;
   /** Microphone level, 0–1. Only meaningful while listening. */
@@ -93,6 +94,12 @@ export function Orb({
   size?: number;
   onPress?: () => void;
   showCaption?: boolean;
+  /**
+   * The current mode's colour, pulled through one lobe so the orb says which
+   * mode you are in without a label. Subtle on purpose: the orb's job is still
+   * to report what Grove is doing, and a mode should not repaint it.
+   */
+  tint?: string;
 }) {
   const palette = usePalette();
   const asleep = state === 'asleep';
@@ -141,7 +148,7 @@ export function Orb({
   const body = (
     <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
       <Animated.View style={[{ width: size, height: size, position: 'absolute' }, massStyle]}>
-        <OrbPaint size={size} drift={drift} grey={asleep} />
+        <OrbPaint size={size} drift={drift} grey={asleep} tint={tint} />
       </Animated.View>
     </View>
   );
@@ -189,10 +196,12 @@ function OrbPaint({
   size,
   drift,
   grey,
+  tint,
 }: {
   size: number;
   drift: SharedValue<number>;
   grey: boolean;
+  tint?: string;
 }) {
   const palette = usePalette();
 
@@ -201,7 +210,7 @@ function OrbPaint({
       {LOBES.map((lobe, i) => (
         <LobeView
           key={i}
-          lobe={{ ...lobe, colour: grey ? palette.lineStrong : lobe.colour }}
+          lobe={{ ...lobe, colour: grey ? palette.lineStrong : i === 1 && tint ? tint : lobe.colour }}
           size={size}
           drift={drift}
         />

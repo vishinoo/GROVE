@@ -32,6 +32,8 @@
 
 
 
+import * as SecureStore from 'expo-secure-store';
+
 import { fetchJson } from './net';
 
 const OLLAMA_URL = (process.env.EXPO_PUBLIC_OLLAMA_URL ?? '').replace(/\/$/, '');
@@ -68,6 +70,11 @@ export type AbilitySummary = { id: string; what: string }[];
  */
 export function isLightModelConfigured(): boolean {
   return true;
+}
+
+/** Whether Grove can still think with Noctus down. Shown in Settings. */
+export async function hasOwnKey(): Promise<boolean> {
+  return Boolean(await loadOwnKey());
 }
 
 /* ------------------------------------------------------------- providers */
@@ -144,6 +151,95 @@ async function askOllama(
  * The prompt, the house rules and the ability list still live here. Noctus
  * holds the secret and forwards; it has no opinion about what Grove says.
  */
+/**
+ * A key the user typed in, kept on the device only.
+ *
+ * The middle ground between the two bad options. A key compiled into the bundle
+ * ships to everyone who installs the app; a key only on Noctus means Grove
+ * cannot think when Noctus is down, which for something you talk to is the
+ * whole product failing rather than one feature.
+ *
+ * This one is entered in Settings and stored in the Keychain, so it is on one
+ * phone rather than in every build, and Grove keeps working when the server
+ * does not. Unset by default: the proxy is still the primary path.
+ */
+const OWN_KEY = 'grove:own-model-key:v1';
+
+let ownKey: string | null | undefined;
+
+export async function loadOwnKey(): Promise<string | null> {
+  if (ownKey !== undefined) return ownKey;
+  try {
+    ownKey = await SecureStore.getItemAsync(OWN_KEY);
+  } catch {
+    ownKey = null;
+  }
+  return ownKey;
+}
+
+export async function setOwnKey(key: string): Promise<void> {
+  const clean = key.trim();
+  ownKey = clean || null;
+  try {
+    if (clean) await SecureStore.setItemAsync(OWN_KEY, clean);
+    else await SecureStore.deleteItemAsync(OWN_KEY);
+  } catch {
+    // A key that will not persist is a setting that did not save, not a crash.
+  }
+}
+
+/**
+ * Straight to the provider, using the device's own key.
+ *
+ * The fallback for when Noctus is unreachable — on cellular, or because the
+ * machine it runs on went to sleep. Same prompt, same model, no server.
+ */
+async function askDirect(
+  system: string,
+  messages: LightMessage[],
+  json: boolean
+): Promise<string | null> {
+  const key = await loadOwnKey();
+  if (!key) return null;
+
+  try {
+    const response = await withTimeout(TIMEOUT_MS, (signal) =>
+      fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+          DIRECT_MODEL
+        )}:generateContent`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+          signal,
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: system }] },
+            contents: messages.map((m) => ({
+              role: m.role === 'assistant' ? 'model' : 'user',
+              parts: [{ text: m.content }],
+            })),
+            generationConfig: {
+              maxOutputTokens: 600,
+              temperature: 0.7,
+              ...(json ? { responseMimeType: 'application/json' } : {}),
+            },
+            ...(json ? {} : { tools: [{ google_search: {} }] }),
+          }),
+        }
+      )
+    );
+    if (!response.ok) return null;
+    const data = (await response.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+    };
+    return data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+const DIRECT_MODEL = 'gemini-3.1-flash-lite';
+
 async function askServer(
   system: string,
   messages: LightMessage[],
@@ -164,16 +260,19 @@ async function complete(
   json = false,
   deep = false
 ): Promise<string | null> {
-  // Ollama first when it answers, because it is free and local. It is also the
-  // only path that never leaves the network, which is worth something for
-  // something listening in your pocket.
+  // Free and local first, then the server that holds the shared key, then the
+  // device's own key. Three paths so that no single thing going down takes
+  // Grove's ability to think with it.
   if (await probeOllama()) {
     const local = await askOllama(system, messages, json);
     if (local !== null) return local;
-    // A reachable-but-failing Ollama shouldn't strand the turn.
     ollamaReachable = false;
   }
-  return askServer(system, messages, json, deep);
+
+  const viaServer = await askServer(system, messages, json, deep);
+  if (viaServer !== null) return viaServer;
+
+  return askDirect(system, messages, json);
 }
 
 /**
@@ -237,6 +336,13 @@ THE ONE RULE YOU MUST NOT BREAK:
 Other:
 - Never describe, propose, spec or summarise a piece of software, a feature, an "AI agent" or a system to be built. A reply that starts "Create a..." or "This tool would..." is always wrong.
 - Never invent facts about their calendar, email, files, money, health or accounts. If you would have to guess, say what you would need instead.
+
+WHAT YOU DO NOT KNOW:
+- You cannot browse, look things up, or check anything live unless an ability above does it. You have no access to the news, share prices, sports results, opening hours, or anything that happened after your training.
+- For anything current, factual and checkable that you have no ability for, say you cannot check it. "I can't look that up" is a good answer. A confident wrong answer is the worst thing you can do, because there is no way for them to tell — they are walking down a street listening to you, not reading a page with a source on it.
+- Do not soften this into a guess. Not "I think it's around...", not "probably about...", not "last I knew...". Either you know it or you say you don't.
+- If you are recalling something rather than checking it, say so: "going from memory" is honest and useful.
+- Never state a number, a date, a price or a name you are not sure of. Ask, or say you do not have it.
 - Never repeat your previous reply. If you have already said it, say the next thing or ask one short question.
 
 Good: "Nothing until your two o'clock." / "Sent." / "Sixteen degrees and overcast, up to twenty." / "Can't see your mail yet — connect Google and I can."
@@ -317,7 +423,18 @@ export async function lightTurn(
           .map((a) => `- ${a.id} — ${a.what}`)
           .join('\n')}`;
 
+  // Grove had no idea what day it was, and would answer from training data —
+  // confidently, and months out of date. A model cannot know the time unless it
+  // is told, and half of "it just lies" was this.
+  const now = new Date();
+  const today = now.toLocaleDateString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  });
+  const clock = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
   const system = `You are ${context.name || 'Grove'}. You are the single assistant this person talks to, usually through a pair of glasses while they are doing something else.
+
+Right now it is ${clock} on ${today}. That is the current date and time — use it, and never guess at what day it is.
 
 ${belt}
 

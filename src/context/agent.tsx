@@ -34,7 +34,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import { capabilities } from '@/lib/capabilities';
 import { abilityById, runAbility, setCurrentAccount } from '@/lib/abilities';
-import { maySpeak, modeById } from '@/lib/modes';
+import { loadOverrides, maySpeak, modeById, withOverrides } from '@/lib/modes';
 import { askGrove, newTurn, type Turn, type TurnTool } from '@/lib/grove';
 import { abortListening, isListening, startListening, stopListening } from '@/lib/listen';
 import {
@@ -189,8 +189,18 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const updatePersona = useCallback(async (next: Persona) => {
+    const was = live.current.persona.mode ?? 'normal';
     setPersona(next);
     await savePersona(next);
+
+    // Entering a mode can carry an instruction — "every time I'm in commute
+    // mode put on my driving playlist". Run it as though it had been said out
+    // loud, which is what makes a mode conditional rather than a label.
+    const now = next.mode ?? 'normal';
+    if (now === was) return;
+    const rule = withOverrides(modeById(now), await loadOverrides()).onEnter;
+    if (rule?.trim()) void say(rule);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ------------------------------------------------------------ activity */

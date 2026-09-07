@@ -83,7 +83,7 @@ export default function Talk() {
         {reduced && !notice && !problem ? <Notice text={reduced} tone="info" /> : null}
 
         <View style={{ alignItems: 'center', marginTop: 26 }}>
-          <Orb state={state} level={level} size={210} onPress={press} />
+          <Orb state={state} level={level} size={210} onPress={press} tint={modeById(persona.mode ?? 'normal').tint} />
         </View>
 
         {/*
@@ -218,9 +218,9 @@ function ModeStrip({
                 paddingVertical: 7,
                 paddingHorizontal: 12,
                 borderRadius: Radius.pill,
-                backgroundColor: on ? palette.mark : palette.raised,
+                backgroundColor: on ? mode.tint : palette.raised,
                 borderWidth: 1,
-                borderColor: on ? palette.mark : palette.line,
+                borderColor: on ? mode.tint : palette.line,
                 opacity: pressed ? 0.7 : 1,
               })}
             >
@@ -228,7 +228,7 @@ function ModeStrip({
                 style={{
                   fontFamily: Type.cardTitle.fontFamily,
                   fontSize: 12.5,
-                  color: on ? palette.raised : palette.inkSoft,
+                  color: on ? palette.ink : palette.inkSoft,
                 }}
               >
                 {mode.label}

@@ -24,13 +24,22 @@
  * commute should not make your assistant a different person, only a busier one.
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import type { Ability } from './abilities';
+import { Spectrum } from '@/constants/theme';
 
 export type ModeId = 'normal' | 'commute' | 'focus' | 'study' | 'wind-down';
 
 export type Mode = {
   id: ModeId;
   label: string;
+  /**
+   * The mode's colour, drawn from the orb's spectrum so the two read as one
+   * system. Used on the chip and on the orb, so which mode you are in is
+   * something you see rather than something you remember.
+   */
+  tint: string;
   /** One line, shown under the name. */
   what: string;
   /**
@@ -49,11 +58,24 @@ export type Mode = {
    * lecture stops being used at all.
    */
   interrupt: 'freely' | 'sparingly' | 'never';
+  /**
+   * What happens the moment you enter the mode, in your own words.
+   *
+   * This is what makes a mode conditional rather than cosmetic: "every time I'm
+   * in commute mode, put on my driving playlist" is a standing instruction
+   * attached to a situation instead of to a clock. Empty by default and edited
+   * per person — a default that starts playing music unasked would be worse
+   * than no feature.
+   */
+  onEnter?: string;
 };
+
+const STORE = 'grove:modes:v1';
 
 export const MODES: Mode[] = [
   {
     id: 'normal',
+    tint: Spectrum.sky,
     label: 'Normal',
     what: 'Everything, as you have set it up.',
     manner: '',
@@ -62,6 +84,7 @@ export const MODES: Mode[] = [
   },
   {
     id: 'commute',
+    tint: Spectrum.indigo,
     label: 'Commute',
     what: 'Hands full. Short answers, nothing that needs reading.',
     manner:
@@ -72,6 +95,7 @@ export const MODES: Mode[] = [
   },
   {
     id: 'focus',
+    tint: Spectrum.mint,
     label: 'Focus',
     what: 'Working. Grove stays quiet unless asked.',
     manner: 'They are concentrating. Answer in as few words as will do, and never volunteer more.',
@@ -80,6 +104,7 @@ export const MODES: Mode[] = [
   },
   {
     id: 'study',
+    tint: Spectrum.violet,
     label: 'Study',
     what: 'Explains properly instead of being terse.',
     manner:
@@ -89,6 +114,7 @@ export const MODES: Mode[] = [
   },
   {
     id: 'wind-down',
+    tint: Spectrum.pink,
     label: 'Wind down',
     what: 'Evening. Nothing that starts work.',
     manner: 'It is the end of their day. Keep it calm and short. Do not raise anything that would start them working.',
@@ -100,6 +126,42 @@ export const MODES: Mode[] = [
 
 export function modeById(id: string): Mode {
   return MODES.find((m) => m.id === id) ?? MODES[0];
+}
+
+/* ------------------------------------------------- what you have taught it */
+
+type Overrides = Record<string, { onEnter?: string }>;
+
+/**
+ * The parts of a mode the user has written themselves.
+ *
+ * Stored separately from MODES so the built-in definitions stay a constant and
+ * an upgrade cannot silently discard what someone taught it.
+ */
+export async function loadOverrides(): Promise<Overrides> {
+  try {
+    const raw = await AsyncStorage.getItem(STORE);
+    return raw ? (JSON.parse(raw) as Overrides) : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function setOnEnter(id: string, instruction: string): Promise<Overrides> {
+  const all = await loadOverrides();
+  const next: Overrides = { ...all, [id]: { onEnter: instruction.trim().slice(0, 300) } };
+  try {
+    await AsyncStorage.setItem(STORE, JSON.stringify(next));
+  } catch {
+    // A rule that fails to persist is a lost setting, not a broken mode.
+  }
+  return next;
+}
+
+/** A mode with whatever the user has taught it folded in. */
+export function withOverrides(mode: Mode, overrides: Overrides): Mode {
+  const own = overrides[mode.id];
+  return own?.onEnter ? { ...mode, onEnter: own.onEnter } : mode;
 }
 
 /** The abilities a mode permits, out of those that work at all. */

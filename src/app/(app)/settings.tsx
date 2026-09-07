@@ -29,6 +29,8 @@ import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
 import { VALUE_MAX, type Fact } from '@/lib/memory';
 import { MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona, type Preset } from '@/lib/persona';
+import { hasOwnKey, setOwnKey } from '@/lib/lightModel';
+import { MODES, loadOverrides, setOnEnter } from '@/lib/modes';
 import { availableVoices, bestVoiceId, hasEnhancedVoice, speak } from '@/lib/speak';
 import * as trigger from '@/lib/trigger';
 import type * as SpeechTypes from 'expo-speech';
@@ -133,6 +135,14 @@ export default function Settings() {
             }
           />
         </Card>
+      </Section>
+
+      <Section label="When a mode starts">
+        <ModeRules />
+      </Section>
+
+      <Section label="Thinking on its own">
+        <OwnKey />
       </Section>
 
       {/* --------------------------------------------------------- hardware */}
@@ -543,6 +553,128 @@ function VoicePicker({
           : null}
       </Card>
     </>
+  );
+}
+
+/**
+ * What each mode does the moment you switch to it.
+ *
+ * The thing that makes a mode conditional rather than a label: "every time I'm
+ * in commute mode, put on my driving playlist" is a standing instruction
+ * attached to a situation instead of a clock. Blank by default, because a mode
+ * that starts playing music unasked would be worse than no feature at all.
+ */
+function ModeRules() {
+  const palette = usePalette();
+  const [rules, setRules] = useState<Record<string, { onEnter?: string }>>({});
+
+  useEffect(() => {
+    let alive = true;
+    void loadOverrides().then((o) => alive && setRules(o));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return (
+    <Card style={{ paddingVertical: 4 }}>
+      {MODES.filter((m) => m.id !== 'normal').map((mode) => (
+        <View key={mode.id} style={{ paddingVertical: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <View
+              style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: mode.tint }}
+            />
+            <Text style={[Type.cardTitle, { color: palette.ink }]}>{mode.label}</Text>
+          </View>
+          <TextInput
+            defaultValue={rules[mode.id]?.onEnter ?? ''}
+            onEndEditing={(e) => void setOnEnter(mode.id, e.nativeEvent.text)}
+            placeholder={
+              mode.id === 'commute' ? 'put on my driving playlist' : 'nothing, unless you say so'
+            }
+            placeholderTextColor={palette.muted}
+            style={{
+              backgroundColor: palette.sunken,
+              borderWidth: 1,
+              borderColor: palette.line,
+              borderRadius: Radius.well,
+              paddingHorizontal: 11,
+              paddingVertical: 9,
+              fontFamily: Type.body.fontFamily,
+              fontSize: 14,
+              color: palette.ink,
+            }}
+          />
+        </View>
+      ))}
+    </Card>
+  );
+}
+
+/**
+ * A model key kept on this phone.
+ *
+ * Grove's key normally lives on Noctus, which keeps it out of the app bundle
+ * where anyone could extract it. The cost is that Grove cannot think when
+ * Noctus is down — and for something you talk to, that is the whole product
+ * failing rather than one feature.
+ *
+ * A key entered here sits in the Keychain on one phone rather than in every
+ * build, and is used only when the server cannot be reached.
+ */
+function OwnKey() {
+  const palette = usePalette();
+  const [has, setHas] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    void hasOwnKey().then((h) => alive && setHas(h));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return (
+    <Card>
+      <Text style={[Type.bodySm, { color: palette.muted, marginBottom: 9 }]}>
+        {has
+          ? 'Grove can still think when the server is unreachable.'
+          : 'Grove needs the server to think. Add your own key and it keeps working without one.'}
+      </Text>
+      <TextInput
+        value={draft}
+        onChangeText={setDraft}
+        onEndEditing={() => {
+          void setOwnKey(draft).then(() => {
+            setHas(Boolean(draft.trim()));
+            setDraft('');
+          });
+        }}
+        placeholder={has ? 'Stored. Type to replace, or clear to remove.' : 'AIza…'}
+        placeholderTextColor={palette.muted}
+        autoCapitalize="none"
+        autoCorrect={false}
+        secureTextEntry
+        style={{
+          backgroundColor: palette.sunken,
+          borderWidth: 1,
+          borderColor: palette.line,
+          borderRadius: Radius.well,
+          paddingHorizontal: 11,
+          paddingVertical: 10,
+          fontFamily: Type.body.fontFamily,
+          fontSize: 14,
+          color: palette.ink,
+        }}
+      />
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 8 }}>
+        <Dot tone={has ? 'live' : 'off'} />
+        <Text style={[Type.bodySm, { color: palette.muted }]}>
+          {has ? 'Stored on this phone only' : 'Not set'}
+        </Text>
+      </View>
+    </Card>
   );
 }
 
