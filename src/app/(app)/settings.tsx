@@ -30,7 +30,6 @@ import { capabilities, reducedModeReason } from '@/lib/capabilities';
 import { VALUE_MAX, type Fact } from '@/lib/memory';
 import { MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona, type Preset } from '@/lib/persona';
 import { hasOwnKey, setOwnKey } from '@/lib/lightModel';
-import { MODES, loadOverrides, setOnEnter } from '@/lib/modes';
 import { availableVoices, bestVoiceId, hasEnhancedVoice, speak } from '@/lib/speak';
 import * as trigger from '@/lib/trigger';
 import type * as SpeechTypes from 'expo-speech';
@@ -135,10 +134,6 @@ export default function Settings() {
             }
           />
         </Card>
-      </Section>
-
-      <Section label="When a mode starts">
-        <ModeRules />
       </Section>
 
       <Section label="Thinking on its own">
@@ -553,61 +548,6 @@ function VoicePicker({
           : null}
       </Card>
     </>
-  );
-}
-
-/**
- * What each mode does the moment you switch to it.
- *
- * The thing that makes a mode conditional rather than a label: "every time I'm
- * in commute mode, put on my driving playlist" is a standing instruction
- * attached to a situation instead of a clock. Blank by default, because a mode
- * that starts playing music unasked would be worse than no feature at all.
- */
-function ModeRules() {
-  const palette = usePalette();
-  const [rules, setRules] = useState<Record<string, { onEnter?: string }>>({});
-
-  useEffect(() => {
-    let alive = true;
-    void loadOverrides().then((o) => alive && setRules(o));
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  return (
-    <Card style={{ paddingVertical: 4 }}>
-      {MODES.filter((m) => m.id !== 'normal').map((mode) => (
-        <View key={mode.id} style={{ paddingVertical: 10 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-            <View
-              style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: mode.tint }}
-            />
-            <Text style={[Type.cardTitle, { color: palette.ink }]}>{mode.label}</Text>
-          </View>
-          <TextInput
-            defaultValue={rules[mode.id]?.onEnter ?? ''}
-            onEndEditing={(e) => void setOnEnter(mode.id, e.nativeEvent.text)}
-            placeholder={
-              mode.id === 'commute' ? 'put on my driving playlist' : 'nothing, unless you say so'
-            }
-            placeholderTextColor={palette.muted}
-            style={{
-              backgroundColor: palette.sunken,
-              borderWidth: 1,
-              borderColor: palette.line,
-              borderRadius: Radius.well,
-              paddingHorizontal: 11,
-              paddingVertical: 9,
-              fontFamily: Type.body.fontFamily,
-              fontSize: 14,
-              color: palette.ink,
-            }}
-          />
-        </View>
-      ))}
-    </Card>
   );
 }
 

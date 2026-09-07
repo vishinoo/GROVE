@@ -213,6 +213,23 @@ export function asPromptBlock(facts: Fact[]): string {
  * Ordered before the self-patterns because "I need to ask Sarah about the
  * internship" matches both, and the one naming a person carries more.
  */
+/**
+ * Capitalised words that are not people.
+ *
+ * The pattern this guards used to match any capitalised word followed by "is",
+ * so "Monday is going to be busy" and "London is expensive" became permanent
+ * facts about Monday and London — then came back in every prompt for ever.
+ * A memory that fills with misheard conversation is worse than an empty one,
+ * because you cannot see what it is repeating back to itself.
+ */
+const NOT_A_PERSON = new Set([
+  'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+  'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august',
+  'september', 'october', 'november', 'december',
+  'today', 'tomorrow', 'yesterday', 'tonight', 'grove', 'siri', 'google',
+  'apple', 'spotify', 'gmail', 'noctus', 'it', 'this', 'that', 'there',
+]);
+
 const ABOUT_PATTERNS: { key: string; test: RegExp; open: boolean }[] = [
   {
     key: 'ask',
@@ -229,11 +246,6 @@ const ABOUT_PATTERNS: { key: string; test: RegExp; open: boolean }[] = [
     open: true,
     test: /\b([A-Z][a-z]+)\s+(?:owes me|is sending me|is getting back to me about)\s+(.{2,80})/i,
   },
-  {
-    key: 'about',
-    open: false,
-    test: /\b([A-Z][a-z]+)(?:'s| is| works| lives)\s+(.{3,90})/,
-  },
 ];
 
 const FACT_PATTERNS: { key: string; test: RegExp }[] = [
@@ -242,7 +254,10 @@ const FACT_PATTERNS: { key: string; test: RegExp }[] = [
   { key: 'home', test: /\bi live in\s+(.{2,40})/i },
   { key: 'commute', test: /\bi (?:leave|set off)(?: for work)? at\s+(.{2,20})/i },
   { key: 'watchlist', test: /\b(?:my watchlist is|i hold|i own)\s+(.{2,80})/i },
-  { key: 'preference', test: /\bi (?:always|usually|prefer to)\s+(.{3,80})/i },
+  // Anchored to the start of the sentence: "I usually" mid-sentence is an
+  // aside, not a standing preference, and storing asides is how the list fills
+  // with things nobody meant to say.
+  { key: 'preference', test: /^i (?:always|usually|prefer to)\s+(.{3,80})/i },
 ];
 
 export type Extracted = { key: string; value: string; subject: string; open: boolean };
@@ -257,6 +272,8 @@ export function factFrom(text: string): Extracted | null {
   for (const { key, test, open } of ABOUT_PATTERNS) {
     const hit = test.exec(t);
     if (hit?.[1] && hit?.[2]) {
+      // A day, a month or an app name is not somebody to remember things about.
+      if (NOT_A_PERSON.has(hit[1].toLowerCase())) continue;
       return {
         key,
         subject: hit[1].toLowerCase(),
