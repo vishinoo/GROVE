@@ -186,6 +186,93 @@ function saySender(from: string): string {
   return (named?.[1] ?? from.replace(/[<>]/g, '')).split('@')[0].trim();
 }
 
+type GoogleEvent = { title: string; start: string; allDay?: boolean; location?: string };
+
+/**
+ * The Google calendar, as opposed to the phone's.
+ *
+ * These are genuinely two different calendars until someone adds the account in
+ * iOS Settings, and the difference is invisible from inside the app: connecting
+ * Google succeeds, grants this server access, and puts nothing on the phone.
+ * EventKit then honestly reports an empty day. Reading Google directly is the
+ * only way to answer the question that was actually asked.
+ */
+const GCAL_READ: Ability = {
+  id: 'gcal.read',
+  name: 'Google Calendar',
+  what: 'Reads your Google calendar, which is not always the one on your phone.',
+  where: 'server',
+  wired: true,
+  needs: ['email'],
+  reads: true,
+  args: { when: { type: 'string', what: 'the day, e.g. "today", "tomorrow" or "this week"' } },
+  examples: ['what is on my google calendar', "what's on today", 'am I free tomorrow'],
+  run: async (args) => {
+    const asked = (args.when || '').toLowerCase();
+    const days = /\bweek\b/.test(asked) ? 7 : /\btomorrow\b/.test(asked) ? 2 : 1;
+
+    const data = await fetchJson<{ events?: GoogleEvent[] }>(`/api/grove/calendar?days=${days}`);
+    if (!data) return { ok: false, spoken: 'Could not reach your Google calendar. Is Google connected?' };
+
+    const events = data.events ?? [];
+    if (events.length === 0) {
+      return { ok: true, spoken: days > 1 ? 'Nothing on your Google calendar.' : 'Nothing on it today.' };
+    }
+
+    // Two and a count, like the phone calendar: a read-out list is unusable in
+    // your ear past about three items.
+    const [first, second] = events;
+    const rest = events.length - 2;
+    let line = `${first.title} at ${sayWhen(new Date(first.start))}`;
+    if (second) line += `, then ${second.title} at ${sayWhen(new Date(second.start))}`;
+    if (rest > 0) line += `, and ${rest} more`;
+    return { ok: true, spoken: `${line}.`, detail: `${events.length} from Google` };
+  },
+};
+
+/**
+ * A document, found by describing it and then read.
+ *
+ * Answers out of the text rather than handing back a link, because a link is
+ * useless to someone wearing glasses and walking.
+ */
+const DOC_FIND: Ability = {
+  id: 'doc.find',
+  name: 'Docs',
+  what: 'Finds one of your Google Docs and tells you what is in it.',
+  where: 'server',
+  wired: true,
+  needs: ['email'],
+  reads: true,
+  args: { what: { type: 'string', what: 'the document, by name or description', required: true } },
+  examples: ['what does the quarterly plan say', 'find my notes from the offsite', 'open the roadmap doc'],
+  run: async (args) => {
+    const wanted = (args.what || '').trim();
+    if (!wanted) return { ok: false, spoken: 'Which document?' };
+
+    const data = await fetchJson<{
+      files?: { name: string }[];
+      match?: { name: string };
+      text?: string;
+    }>(`/api/grove/doc?q=${encodeURIComponent(wanted)}`, { slow: true });
+
+    if (!data) return { ok: false, spoken: 'Could not reach your Drive. Is Google connected?' };
+    if (!data.files || data.files.length === 0) {
+      return { ok: false, spoken: `I could not find a document called ${wanted}.` };
+    }
+
+    const name = data.match?.name ?? data.files[0].name;
+    const text = (data.text || '').trim();
+    if (!text) {
+      // A spreadsheet or a PDF matched. Saying which is more use than silence.
+      return { ok: true, spoken: `I found ${name}, but it is not a document I can read out.` };
+    }
+    // Handed to the model as detail rather than spoken whole: four thousand
+    // characters read aloud is not an answer.
+    return { ok: true, spoken: `From ${name}: ${text.slice(0, 400)}`, detail: text };
+  },
+};
+
 const MAIL_READ: Ability = {
   id: 'mail.search',
   name: 'Mail',
@@ -307,10 +394,17 @@ const CALENDAR_READ: Ability = {
       // them looking for the bug in the wrong place.
       const sources = await calendarCount();
       if (sources === 0) {
+        // No calendars on the phone does not mean no calendar. If Google is
+        // connected, the answer is one call away — and asking the person to go
+        // and configure iOS before Grove will answer a question it can already
+        // answer is the kind of correct-but-useless reply this app should not
+        // give.
+        const viaGoogle = await GCAL_READ.run({ when: args.when || '' });
+        if (viaGoogle.ok) return viaGoogle;
         return {
           ok: false,
           spoken:
-            'There are no calendars on this phone yet. Add your Google account in iOS Settings, under Calendar, and I will read it from there.',
+            'There are no calendars on this phone, and I could not reach your Google one either. Connect Google, or add the account in iOS Settings under Calendar.',
         };
       }
 
@@ -761,6 +855,8 @@ const SET_MODE: Ability = {
 };
 
 export const ABILITIES: Ability[] = [
+  GCAL_READ,
+  DOC_FIND,
   SET_MODE,
   RECALL,
   MESSAGE,

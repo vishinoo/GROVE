@@ -87,15 +87,19 @@ export const CONNECTIONS: Connection[] = [
   {
     key: 'email',
     provider: 'google',
-    label: 'Mail',
-    what: 'Sends mail you dictate',
+    label: 'Google',
+    what: 'Gmail, Calendar, Docs and contacts',
     icon: 'mail',
     kind: 'account',
-    unlocks: ['mail.send'],
-    // Worth stating on the row, because "connected" and "can read your inbox"
-    // are not the same thing here. Noctus asks Google for gmail.send and not
-    // for any read scope, so a connected account can send and cannot search.
-    note: 'Sending only — reading your inbox needs a wider Google scope on Noctus.',
+    unlocks: ['mail.send', 'mail.search', 'gcal.read', 'doc.find'],
+    // One consent screen covers all of it, which is deliberate: a second
+    // prompt later is a second interruption, and people decline those.
+    //
+    // Worth stating plainly because it is the thing people get wrong: this
+    // grants the *server* access. It puts nothing on the phone, so the iOS
+    // Calendar app still will not show these events, and Grove reads them
+    // through Google rather than through the phone.
+    note: 'Connects the account, not the phone. Grove reads your Google calendar directly.',
   },
   {
     key: 'maps',

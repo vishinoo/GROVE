@@ -132,7 +132,7 @@ const WORK_VERB =
  * mail, move an event or message anyone — those still need detectActIntent.
  */
 const LOOKUP_QUESTION =
-  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|traffic|how long|how far|eta|my day|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|remind me (?:what|who|about)|did i say|what did i)\b/i;
+  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|traffic|how long|how far|eta|my day|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|doc|docs|document|spreadsheet|drive|remind me (?:what|who|about)|did i say|what did i)\b/i;
 
 /**
  * Whether this is a question Grove should look up rather than answer offhand.
