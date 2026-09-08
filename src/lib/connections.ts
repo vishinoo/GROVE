@@ -61,14 +61,6 @@ export type Connection = {
 
 export const CONNECTIONS: Connection[] = [
   {
-    key: 'calendar',
-    label: 'Calendar',
-    what: 'Your day, and what to move',
-    icon: 'calendar',
-    kind: 'device',
-    unlocks: ['calendar.read', 'calendar.move'],
-  },
-  {
     key: 'reminders',
     label: 'Reminders',
     what: 'Thoughts caught mid-walk',
@@ -87,11 +79,11 @@ export const CONNECTIONS: Connection[] = [
   {
     key: 'email',
     provider: 'google',
-    label: 'Google',
+    label: 'Google Workspace',
     what: 'Gmail, Calendar, Docs and contacts',
-    icon: 'mail',
+    icon: 'google',
     kind: 'account',
-    unlocks: ['mail.send', 'mail.search', 'gcal.read', 'doc.find'],
+    unlocks: ['mail.send', 'mail.search', 'gcal.read', 'doc.find', 'calendar.read', 'calendar.move'],
     // One consent screen covers all of it, which is deliberate: a second
     // prompt later is a second interruption, and people decline those.
     //

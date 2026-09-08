@@ -520,10 +520,23 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
   /** Speak, and let the state follow the audio rather than a timer. */
   const utter = useCallback((text: string) => {
+    // Claimed at the moment of speaking, because stopSpeaking() also fires
+    // onDone — an interruption and a natural ending are the same callback.
+    // Unguarded, barging in went: press, stop the speech, start listening, and
+    // then the *stopped* speech's onDone landed and set the state back to
+    // resting, throwing away the listening turn it had just opened. That is why
+    // interrupting took three presses and why the screen said "Ready" with the
+    // old reply still under it.
+    const turn = turnSeq.current;
     setState('speaking');
     speak(text, live.current.persona.delivery, {
       onDone: () => {
-        if (mounted.current) setState(restingState());
+        if (!mounted.current) return;
+        // A newer press owns the app now; this speech is over and irrelevant.
+        if (turn !== turnSeq.current) return;
+        // And even within the same turn, only speaking becomes resting. If
+        // anything downstream has already moved on, it keeps its state.
+        setState((current) => (current === 'speaking' ? restingState() : current));
       },
     });
   }, []);
@@ -658,6 +671,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // Any press ends the turn that was running, whatever it was doing. Without
     // this, work already in flight comes back and speaks over the new one.
     turnSeq.current += 1;
+    // And it is no longer "working", whatever the abandoned ability is still
+    // doing in the background — restingState() reads this flag, so leaving it
+    // set makes the next resting state report work nobody is waiting for.
+    running.current = false;
 
     // Barge-in. Stop talking and start listening, in that order.
     if (current === 'speaking' || isSpeaking()) {
@@ -679,7 +696,17 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       stopListening();
       return;
     }
-    if (current === 'thinking' || current === 'working') return;
+    // Thinking and working used to swallow the press entirely. On a phone in a
+    // pocket that is indistinguishable from a broken button: you press, nothing
+    // happens, the abandoned turn finishes and drops the app to Ready, and only
+    // the press after that reaches the microphone. The turn was already
+    // cancelled at the top of this function, so there is nothing left to
+    // protect — barge in like any other state.
+    if (current === 'thinking' || current === 'working') {
+      stopSpeaking();
+      void beginListening(false);
+      return;
+    }
 
     void beginListening(false);
   }, [beginListening]);

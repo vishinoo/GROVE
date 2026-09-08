@@ -376,8 +376,19 @@ const CALENDAR_READ: Ability = {
   args: { when: { type: 'string', what: 'the day, e.g. "today" or "Thursday"' } },
   examples: ["what's on today", 'when is my next thing', 'am I free at four'],
   run: async (args) => {
-    if (!(await ensureCalendarAccess())) {
-      return { ok: false, spoken: 'I need permission to see your calendar. It is in iOS Settings.' };
+    // No early refusal. The phone's calendar and the Google one are two
+    // different calendars, and being denied the first says nothing about the
+    // second — refusing here meant someone who declined the iOS prompt could
+    // never hear their Google calendar at all, however well connected it was.
+    const onPhone = await ensureCalendarAccess();
+    if (!onPhone) {
+      const viaGoogle = await GCAL_READ.run({ when: args.when || '' });
+      if (viaGoogle.ok) return viaGoogle;
+      return {
+        ok: false,
+        spoken:
+          'I cannot see a calendar. Allow calendar access in iOS Settings, or connect Google Workspace in Connections.',
+      };
     }
     // "tomorrow" and "this week" are the two that need a different window;
     // everything else is the day in front of you.
