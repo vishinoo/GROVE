@@ -65,6 +65,7 @@ export type Reason =
   | 'not-connected'
   | 'auth-expired'
   | 'api-disabled'
+  | 'missing-scope'
   | 'rate-limited'
   | 'timeout'
   | 'offline'
@@ -79,6 +80,8 @@ export function explain(what = 'that'): string {
       return 'My Google sign-in has expired. Reconnect Google in Connections.';
     case 'api-disabled':
       return `Google is refusing ${what} — that API is not switched on for this project yet.`;
+    case 'missing-scope':
+      return `I am signed in to Google but was never given permission for ${what}. Disconnect and reconnect Google in Connections, and allow everything on the consent screen.`;
     case 'rate-limited':
       return 'Google is rate-limiting me. Give it a few seconds.';
     case 'timeout':
@@ -115,17 +118,25 @@ async function call<T>(
       signal: controller.signal,
     });
     if (!response.ok) {
-      // 403 is the one worth separating out: it is what Google returns when the
-      // account is fine and the API simply has not been enabled in the console,
-      // which is a one-click fix nobody can guess from "not connected".
+      // 403 means two quite different things and they have opposite fixes: the
+      // API is switched off in the console, or the token was granted without
+      // the scope this call needs. Reading mail worked while sending returned
+      // 403, which can only be the second — and being told to go and enable an
+      // API that is demonstrably already on wastes real time. Google says which
+      // in the body, so ask it rather than guess.
+      if (response.status === 403) {
+        const body = await response.text().catch(() => '');
+        lastReason = /insufficient|scope|ACCESS_TOKEN_SCOPE/i.test(body)
+          ? 'missing-scope'
+          : 'api-disabled';
+        return null;
+      }
       lastReason =
         response.status === 401
           ? 'auth-expired'
-          : response.status === 403
-            ? 'api-disabled'
-            : response.status === 429
-              ? 'rate-limited'
-              : 'server';
+          : response.status === 429
+            ? 'rate-limited'
+            : 'server';
       return null;
     }
     const text = await response.text();
@@ -180,8 +191,17 @@ function bodyOf(part: GmailPart | undefined): string {
     if (found) return found;
   }
   if (part.mimeType === 'text/html' && part.body?.data) {
+    // Style and script blocks have to go BEFORE the tags do. Stripping tags
+    // first leaves the CSS behind as ordinary text, which is how an AliExpress
+    // receipt came out as "outlook a { padding:0; } body { margin:0;padding:0;
+    // -webkit-text-size-adjust:100%" — read aloud, in full.
     return fromBase64Url(part.body.data)
+      .replace(/<(style|script|head)[\s\S]*?<\/\1>/gi, ' ')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
       .replace(/<[^>]+>/g, ' ')
+      // Anything still shaped like a rule is left-over CSS, not prose.
+      .replace(/[.#@a-z-]*\s*\{[^{}]*\}/gi, ' ')
+      .replace(/&[a-z]+;|&#\d+;/gi, ' ')
       .replace(/\s{2,}/g, ' ');
   }
   return '';

@@ -26,7 +26,7 @@
  */
 
 import { ABILITIES, abilityById, isSchedulable, usableAbilities, type Ability } from './abilities';
-import { abilitiesFor, modeById, type Mode } from './modes';
+import { abilitiesFor, holdingLine, modeById, type Mode } from './modes';
 import { asPromptBlock, factFrom, type Extracted, type Fact } from './memory';
 import {
   isLightModelConfigured,
@@ -302,6 +302,18 @@ export function musicQueryFrom(text: string): string {
   // The words people use when they mean "anything". Left as an empty query so
   // it shuffles rather than hunting for a song called "something".
   if (/^(?:music|a song|song|songs|something|anything|some music|tunes)?$/i.test(rest)) return '';
+
+  // "Play a song by Playboi Carti" leaves "song by Playboi Carti", which
+  // matches no title, artist or album — so the search failed and an empty-ish
+  // query shuffled the library instead. The artist is the part after "by";
+  // everything before it is filler. "over by" is in here because that is what
+  // speech recognition does to "by" often enough to matter.
+  const byArtist =
+    /^(?:a\s+|some\s+|any\s+)?(?:song|songs|track|tracks|tune|tunes|music|something|anything)\s+(?:over\s+)?(?:by|from)\s+(.+)$/i.exec(
+      rest
+    );
+  if (byArtist?.[1]) return byArtist[1].trim().slice(0, 120);
+
   return rest.slice(0, 120);
 }
 
@@ -316,6 +328,24 @@ const NOT_DISTINCTIVE = new Set([
 /** "what's on today" -> "whats on today", so an example can be matched whole. */
 function normalise(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/**
+ * Arguments for the turn, with music's title backfilled from what was said.
+ *
+ * Only ever adds a missing title; anything the model did supply wins, because
+ * it sees the whole conversation and this only sees one sentence.
+ */
+function musicArgs(
+  chosen: Ability | null,
+  fromModel: Record<string, string> | undefined,
+  userText: string
+): Record<string, string> {
+  const args = fromModel ?? {};
+  if (chosen?.id !== 'music.play') return args;
+  if ((args.what ?? '').trim()) return args;
+  const heard = musicQueryFrom(userText);
+  return heard ? { ...args, what: heard } : args;
 }
 
 export function pickAbility(text: string): Ability | null {
@@ -454,7 +484,25 @@ export async function askGrove(
   }
 
   const settle = (text: string): GroveReply => {
-    const usable = text.trim();
+    let usable = text.trim();
+
+    // A read is answered by the tool, so the model must not answer it first.
+    //
+    // The model's reply is spoken immediately and the ability runs behind it,
+    // which is fine when the ability DOES something — "putting that on now" is
+    // true before the song starts. It is not fine when the ability is the only
+    // source of the answer: asked what was next in the calendar, the model said
+    // "next up is your team sync at three thirty" while the calendar was still
+    // running, and there was no team sync. It invented a plausible day.
+    //
+    // Nothing the model writes can be trusted about data it has not seen yet,
+    // so for a read its prose is replaced by a holding line and the tool's
+    // answer is the answer. It also removes a whole utterance from the turn,
+    // which is the other half of why these felt slow.
+    if (chosen?.reads && usable) {
+      usable = holdingLine(mode);
+    }
+
     return {
       text:
         usable ||
@@ -467,10 +515,13 @@ export async function askGrove(
           voice: activePreset(persona),
         }),
       ability: chosen ?? undefined,
-      // The model fills these normally. When it did not run, music is the one
-      // ability whose argument can be read locally, and reading it is what stops
-      // a named song turning into a shuffle.
-      args: light?.args ?? (chosen?.id === 'music.play' ? { what: musicQueryFrom(userText) } : {}),
+      // The model fills these normally, but it drops the title often enough to
+      // matter: asked for Playboi Carti it named music.play with no `what` at
+      // all, an empty title means shuffle, and a random jazz cover started
+      // playing. An empty argument on a sentence that plainly names something
+      // is a gap to fill, not an instruction to pick at random — so the local
+      // reader backfills it whether or not the model ran.
+      args: musicArgs(chosen, light?.args, userText),
       schedule: schedule ?? undefined,
       phrase: phrase ?? undefined,
       blocked: blocked ?? undefined,
