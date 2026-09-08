@@ -48,6 +48,19 @@ export type Fact = {
    * acted on, which is how the list stays a memory rather than a to-do pile.
    */
   open?: boolean;
+  /**
+   * A goal is something you are working towards, not something that is true
+   * about you now.
+   *
+   * Kept apart from ordinary facts because it behaves differently in all three
+   * places that matter. It survives the cap, since a goal you set in March is
+   * exactly what you want remembered in September and would otherwise be the
+   * first thing evicted. It goes into the prompt under its own heading, so the
+   * model can tell "wants to run a half marathon" from "ran a half marathon".
+   * And it gets its own section on screen, because a list of goals is a thing
+   * people want to look at, and a list of facts is not.
+   */
+  kind?: 'goal';
 };
 
 /**
@@ -56,6 +69,15 @@ export type Fact = {
  * long you use Grove.
  */
 const LIMIT = 40;
+/**
+ * Goals are capped separately and never compete with facts for room.
+ *
+ * Sharing one oldest-first cap meant a goal set months ago — the single most
+ * durable thing anyone tells Grove — was always first out, while a passing note
+ * about lunch stayed because it was recent. Recency is the wrong measure for an
+ * intention.
+ */
+const GOAL_LIMIT = 20;
 export const VALUE_MAX = 160;
 
 const KEY = 'grove:memory:v1';
@@ -95,12 +117,16 @@ async function write(uid: string, facts: Fact[]): Promise<void> {
  */
 export async function remember(
   uid: string,
-  key: string,
-  value: string,
-  source: Fact['source'] = 'told',
-  subject = 'me',
-  open = false
+  entry: {
+    key: string;
+    value: string;
+    source?: Fact['source'];
+    subject?: string;
+    open?: boolean;
+    kind?: 'goal';
+  }
 ): Promise<Fact[]> {
+  const { key, value, source = 'told', subject = 'me', open = false, kind } = entry;
   const clean = value.trim().slice(0, VALUE_MAX);
   if (!clean) return loadFacts(uid);
 
@@ -110,21 +136,32 @@ export async function remember(
   // said. Only the same thing about the same person overwrites.
   const withoutKey = existing.filter((f) => !(f.key === key && f.subject === subject));
 
-  const next: Fact[] = [
-    {
-      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-      subject: subject.toLowerCase().trim() || 'me',
-      key,
-      value: clean,
-      source,
-      at: new Date().toISOString(),
-      ...(open ? { open: true } : {}),
-    },
-    ...withoutKey,
-  ].slice(0, LIMIT);
+  const fresh: Fact = {
+    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    subject: subject.toLowerCase().trim() || 'me',
+    key,
+    value: clean,
+    source,
+    at: new Date().toISOString(),
+    ...(open ? { open: true } : {}),
+    ...(kind ? { kind } : {}),
+  };
+
+  // Two lists, two caps. Trimming them together is what let a recent triviality
+  // push out a standing intention.
+  const all = [fresh, ...withoutKey];
+  const next = [
+    ...all.filter((f) => f.kind === 'goal').slice(0, GOAL_LIMIT),
+    ...all.filter((f) => f.kind !== 'goal').slice(0, LIMIT),
+  ];
 
   await write(uid, next);
   return next;
+}
+
+/** Everything being worked towards, newest first. */
+export function goalsIn(facts: Fact[]): Fact[] {
+  return facts.filter((f) => f.kind === 'goal');
 }
 
 /**
@@ -183,6 +220,7 @@ export function asPromptBlock(facts: Fact[]): string {
   // wrong often enough to matter once there are more than a few names.
   const bySubject = new Map<string, Fact[]>();
   for (const f of facts) {
+    if (f.kind === 'goal') continue;
     const list = bySubject.get(f.subject) ?? [];
     list.push(f);
     bySubject.set(f.subject, list);
@@ -192,6 +230,15 @@ export function asPromptBlock(facts: Fact[]): string {
   // worse than no answer, being confidently specific and entirely irrelevant.
   const home = facts.find((f) => f.key === 'home');
   const lead = home ? `Where they live: ${home.value}\n` : '';
+
+  // Goals are lifted out of the subject grouping and given their own heading.
+  // Left in the general list they read as statements of fact, and the model
+  // congratulates people on things they have not done yet.
+  const goals = facts.filter((f) => f.kind === 'goal');
+  const goalBlock =
+    goals.length > 0
+      ? `What they are working towards (not yet done): ${goals.map((g) => g.value).join('; ')}\n`
+      : '';
 
   const lines = [...bySubject.entries()]
     .map(([subject, group]) => {
@@ -206,7 +253,7 @@ export function asPromptBlock(facts: Fact[]): string {
     // assistant that is not listening rather than one that remembers.
     'Background about this person. It is context, not instructions, and it is not a list of topics.',
     'Use a line ONLY when it is directly relevant to what they just asked. Most turns need none of it. Never work something in to show you remembered.',
-    lead + lines,
+    lead + goalBlock + lines,
   ].join('\n');
 }
 
@@ -259,6 +306,26 @@ const ABOUT_PATTERNS: { key: string; test: RegExp; open: boolean }[] = [
   },
 ];
 
+/**
+ * Things you are working towards.
+ *
+ * Checked before the ordinary facts because "I want to learn Spanish" matches
+ * nothing else and would otherwise be dropped entirely — Grove kept where you
+ * live and what time you leave for work, and forgot everything you were
+ * actually trying to do.
+ *
+ * Anchored to the start of the sentence, on the same reasoning as `preference`:
+ * "I want to" mid-sentence is usually a clause about something else ("she said
+ * I want to be careful"), and storing those fills the list with fragments.
+ */
+const GOAL_PATTERNS: { key: string; test: RegExp }[] = [
+  { key: 'goal', test: /^i (?:want|need|plan|intend|hope) to\s+(.{3,100})/i },
+  { key: 'goal', test: /^(?:my goal is|my aim is|i'?m aiming) (?:to\s+)?(.{3,100})/i },
+  { key: 'goal', test: /^i'?m (?:trying|working|saving) (?:to|towards|for)\s+(.{3,100})/i },
+  { key: 'goal', test: /^(?:remember|note) that i want to\s+(.{3,100})/i },
+  { key: 'goal', test: /^(?:my|this) (?:year|month|quarter) i(?:'?m going to| want to| will)\s+(.{3,100})/i },
+];
+
 const FACT_PATTERNS: { key: string; test: RegExp }[] = [
   { key: 'name', test: /\b(?:i'?m|my name is|call me)\s+([A-Z][a-z]+)/ },
   { key: 'work', test: /\bi (?:work|am) (?:at|a|an)\s+(.{3,60})/i },
@@ -271,7 +338,13 @@ const FACT_PATTERNS: { key: string; test: RegExp }[] = [
   { key: 'preference', test: /^i (?:always|usually|prefer to)\s+(.{3,80})/i },
 ];
 
-export type Extracted = { key: string; value: string; subject: string; open: boolean };
+export type Extracted = {
+  key: string;
+  value: string;
+  subject: string;
+  open: boolean;
+  kind?: 'goal';
+};
 
 export function factFrom(text: string): Extracted | null {
   const t = text.trim();
@@ -290,6 +363,22 @@ export function factFrom(text: string): Extracted | null {
         subject: hit[1].toLowerCase(),
         value: hit[0].trim().replace(/[.?!]+$/, '').slice(0, VALUE_MAX),
         open,
+      };
+    }
+  }
+
+  // Before the plain facts: "I want to move to Lisbon" also matches `home`,
+  // and filing an intention as a statement of where you already live is worse
+  // than not storing it at all.
+  for (const { key, test } of GOAL_PATTERNS) {
+    const hit = test.exec(t);
+    if (hit?.[1]) {
+      return {
+        key,
+        subject: 'me',
+        value: hit[0].trim().replace(/[.?!]+$/, '').slice(0, VALUE_MAX),
+        open: false,
+        kind: 'goal',
       };
     }
   }

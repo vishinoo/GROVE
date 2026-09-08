@@ -27,7 +27,6 @@ import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
-import { VALUE_MAX, type Fact } from '@/lib/memory';
 import { MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona, type Preset } from '@/lib/persona';
 import { hasOwnKey, setOwnKey } from '@/lib/lightModel';
 import { availableVoices, bestVoiceId, hasEnhancedVoice, speak } from '@/lib/speak';
@@ -37,8 +36,10 @@ import type * as SpeechTypes from 'expo-speech';
 export default function Settings() {
   const palette = usePalette();
   const { user, signOut } = useSession();
-  const { persona, updatePersona, armed, route, facts, editFact, forgetFact, forgetEverything } =
-    useAgent();
+  // Memory moved to Sparks, where the standing instructions already live: a
+  // spark and a fact are the same idea from different ends, and keeping the
+  // list somewhere you pass anyway beats burying it in Settings.
+  const { persona, updatePersona, armed, route } = useAgent();
 
   const reduced = reducedModeReason();
   const report = capabilities();
@@ -191,45 +192,6 @@ export default function Settings() {
         <Diagnostics />
       </Section>
 
-      {/* ----------------------------------------------------------- memory */}
-
-      <Section label="Memory">
-        {facts.length === 0 ? (
-          <Card>
-            <Text style={[Type.bodySm, { color: palette.muted }]}>
-              Nothing yet. Anything you tell Grove about yourself is kept here, and nowhere
-              else — you can read every line, correct anything it wrote down wrong, and delete
-              any of them.
-            </Text>
-          </Card>
-        ) : (
-          <Card style={{ paddingVertical: 2 }}>
-            {facts.map((fact, index) => (
-              <FactRow
-                key={fact.id}
-                fact={fact}
-                first={index === 0}
-                onSave={(id, value) => void editFact(id, value)}
-                onForget={(id) => void forgetFact(id)}
-              />
-            ))}
-          </Card>
-        )}
-        {facts.length > 0 ? (
-          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 9 }]}>
-            Tap a line to correct it. Speech gets names wrong; this is where you fix that.
-          </Text>
-        ) : null}
-        {facts.length > 0 ? (
-          <Button
-            label="Forget everything"
-            tone="quiet"
-            onPress={() => void forgetEverything()}
-            style={{ marginTop: 10 }}
-          />
-        ) : null}
-      </Section>
-
       {/* ---------------------------------------------------------- account */}
 
       <Section label="Account">
@@ -260,82 +222,6 @@ export default function Settings() {
  * tuning stops it sounding like a satnav. That download is free and is a bigger
  * improvement than anything this app can do in code.
  */
-/**
- * One remembered fact, correctable in place.
- *
- * Editable rather than delete-and-say-it-again, because the common case is not
- * a fact that has changed — it is a fact that was written down wrong. A name
- * heard as "Fisher" that was always "Vishnu" is still the right fact; making
- * someone delete it and repeat themselves to the same recogniser that already
- * misheard them once is the wrong shape of fix.
- */
-function FactRow({
-  fact,
-  first,
-  onSave,
-  onForget,
-}: {
-  fact: Fact;
-  first: boolean;
-  onSave: (id: string, value: string) => void;
-  onForget: (id: string) => void;
-}) {
-  const palette = usePalette();
-  const [text, setText] = useState(fact.value);
-
-  // Follows the stored value: a later turn can rewrite a fact while this
-  // screen is open, and the box should not sit there showing the old one.
-  useEffect(() => setText(fact.value), [fact.value]);
-
-  const commit = () => {
-    const next = text.trim();
-    if (!next) {
-      // Clearing the box is not a delete. The bin is, and it is right there.
-      setText(fact.value);
-      return;
-    }
-    if (next !== fact.value) onSave(fact.id, next);
-  };
-
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: 8,
-        borderTopWidth: first ? 0 : 1,
-        borderTopColor: palette.line,
-      }}
-    >
-      <TextInput
-        value={text}
-        onChangeText={(next) => setText(next.slice(0, VALUE_MAX))}
-        onBlur={commit}
-        onSubmitEditing={commit}
-        returnKeyType="done"
-        multiline
-        accessibilityLabel={`Memory: ${fact.value}. Edit to correct it.`}
-        style={{
-          flex: 1,
-          paddingVertical: 11,
-          fontFamily: Type.body.fontFamily,
-          fontSize: 14.5,
-          lineHeight: 21,
-          color: palette.ink,
-        }}
-      />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Forget: ${fact.value}`}
-        onPress={() => onForget(fact.id)}
-        hitSlop={8}
-        style={({ pressed }) => ({ padding: 8, marginTop: 4, opacity: pressed ? 0.5 : 1 })}
-      >
-        <Icon name="trash" size={16} color={palette.muted} />
-      </Pressable>
-    </View>
-  );
-}
 
 /**
  * Three characters, collapsed to one row.

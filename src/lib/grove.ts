@@ -27,7 +27,7 @@
 
 import { ABILITIES, abilityById, isSchedulable, usableAbilities, type Ability } from './abilities';
 import { abilitiesFor, modeById, type Mode } from './modes';
-import { asPromptBlock, factFrom, type Fact } from './memory';
+import { asPromptBlock, factFrom, type Extracted, type Fact } from './memory';
 import { isLightModelConfigured, lightTurn, type LightMessage } from './lightModel';
 import { activePreset, fallback, mannerDirective, type Persona } from './persona';
 import { describeSchedule, parseSchedule, phraseTrigger, type Schedule } from './sparks';
@@ -75,7 +75,7 @@ export type GroveReply = {
    */
   instruction?: string;
   /** A fact worth keeping, pulled locally from what was said. */
-  fact?: { key: string; value: string; subject: string; open: boolean };
+  fact?: Extracted;
 };
 
 export function newTurn(role: Turn['role'], text: string, extra: Partial<Turn> = {}): Turn {

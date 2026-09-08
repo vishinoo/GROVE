@@ -23,18 +23,24 @@ import { Pressable, Switch, Text, TextInput, View } from 'react-native';
 
 import { AppIcon, iconForKey, type AppIconName } from '@/components/app-icon';
 import { Icon } from '@/components/icon';
-import { Card, Empty, Mono, Screen, Section } from '@/components/ui';
+import { Button, Card, Empty, Mono, Screen, Section } from '@/components/ui';
 import { Radius, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { usePalette } from '@/hooks/use-palette';
 import { abilityById, type Ability } from '@/lib/abilities';
 import { describeTrigger, parseSchedule, phraseTrigger, type Spark } from '@/lib/sparks';
 import { MODES, loadOverrides, setOnEnter, type Mode } from '@/lib/modes';
+import { VALUE_MAX } from '@/lib/memory';
 
 export default function Sparks() {
   const palette = usePalette();
-  const { sparks, setSparkEnabled, editSpark, deleteSpark, facts, forgetFact, persona, updatePersona } =
+  const { sparks, setSparkEnabled, editSpark, deleteSpark, facts, editFact, forgetFact, forgetEverything, persona, updatePersona } =
     useAgent();
+  // Goals and facts are shown apart because they are read differently: a goal
+  // is something you check on, a fact is something you correct.
+  const goals = facts.filter((f) => f.kind === 'goal');
+  const plain = facts.filter((f) => f.kind !== 'goal');
+
 
   return (
     <Screen
@@ -93,19 +99,58 @@ export default function Sparks() {
         Grove keeps and acts on without being asked again. Finding out what it
         remembers should not require going looking for it.
       */}
-      <Section label="Memory">
-        {facts.length === 0 ? (
+      <Section label="Goals">
+        {goals.length === 0 ? (
           <Card>
             <Text style={[Type.bodySm, { color: palette.muted }]}>
-              Nothing yet. Tell Grove something about yourself — where you live, when you leave
-              for work — and it turns up here, where you can delete it.
+              Nothing yet. Say &ldquo;I want to learn Spanish&rdquo; or &ldquo;I&rsquo;m saving for a
+              deposit&rdquo; and it is kept here. Goals are held apart from everything else and are
+              never dropped to make room.
             </Text>
           </Card>
         ) : (
-          facts.map((fact) => (
-            <FactCard key={fact.id} fact={fact} onForget={() => void forgetFact(fact.id)} />
+          goals.map((fact) => (
+            <FactCard
+              key={fact.id}
+              fact={fact}
+              onSave={(value) => void editFact(fact.id, value)}
+              onForget={() => void forgetFact(fact.id)}
+            />
           ))
         )}
+      </Section>
+
+      <Section label="Memory">
+        {plain.length === 0 ? (
+          <Card>
+            <Text style={[Type.bodySm, { color: palette.muted }]}>
+              Nothing yet. Tell Grove something about yourself — where you live, when you leave
+              for work — and it turns up here, where you can read it, correct it and delete it.
+            </Text>
+          </Card>
+        ) : (
+          plain.map((fact) => (
+            <FactCard
+              key={fact.id}
+              fact={fact}
+              onSave={(value) => void editFact(fact.id, value)}
+              onForget={() => void forgetFact(fact.id)}
+            />
+          ))
+        )}
+        {facts.length > 0 ? (
+          <>
+            <Text style={[Type.bodySm, { color: palette.muted, marginTop: 9 }]}>
+              Open a line to correct it. Speech gets names wrong; this is where you fix that.
+            </Text>
+            <Button
+              label="Forget everything"
+              tone="quiet"
+              onPress={() => void forgetEverything()}
+              style={{ marginTop: 10 }}
+            />
+          </>
+        ) : null}
       </Section>
     </Screen>
   );
@@ -268,13 +313,32 @@ function ModeCard({
  */
 function FactCard({
   fact,
+  onSave,
   onForget,
 }: {
   fact: ReturnType<typeof useAgent>['facts'][number];
+  onSave: (value: string) => void;
   onForget: () => void;
 }) {
   const palette = usePalette();
   const [open, setOpen] = useState(false);
+  const [text, setText] = useState(fact.value);
+
+  // Follows the stored value: a later turn can rewrite a fact while this screen
+  // is open, and the box should not sit there showing the old one.
+  useEffect(() => setText(fact.value), [fact.value]);
+
+  const commit = () => {
+    const next = text.trim();
+    if (!next) {
+      // Clearing the box is not a delete. "Forget this" is, and it is right
+      // below — a blank line is far more often a mistyped edit than an
+      // intention to erase something.
+      setText(fact.value);
+      return;
+    }
+    if (next !== fact.value) onSave(next);
+  };
 
   return (
     <Card style={{ marginBottom: 8, paddingHorizontal: 0, paddingVertical: 0 }}>
@@ -302,7 +366,30 @@ function FactCard({
             borderTopColor: palette.line,
           }}
         >
-          <Detail label="Kind">{fact.key}</Detail>
+          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 11, marginBottom: 2 }]}>
+            {fact.kind === 'goal' ? 'The goal' : 'What Grove wrote down'}
+          </Text>
+          <TextInput
+            value={text}
+            onChangeText={(next) => setText(next.slice(0, VALUE_MAX))}
+            onBlur={commit}
+            onSubmitEditing={commit}
+            returnKeyType="done"
+            multiline
+            accessibilityLabel={`${fact.value}. Edit to correct it.`}
+            style={{
+              fontFamily: Type.body.fontFamily,
+              fontSize: 14.5,
+              lineHeight: 21,
+              color: palette.ink,
+              paddingVertical: 8,
+              paddingHorizontal: 10,
+              borderWidth: 1,
+              borderColor: palette.line,
+              borderRadius: Radius.well,
+              marginBottom: 4,
+            }}
+          />
           <Detail label="How Grove knows">
             {fact.source === 'told' ? 'You told it.' : 'It worked it out from something you said.'}
           </Detail>

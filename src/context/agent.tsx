@@ -390,14 +390,14 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // Anything worth remembering was pulled locally, by keyword, from what was
     // said — never inferred by a model and stored where you cannot see it.
     if (reply.fact) {
-      const next = await memory.remember(
-        account,
-        reply.fact.key,
-        reply.fact.value,
-        'told',
-        reply.fact.subject,
-        reply.fact.open
-      );
+      const next = await memory.remember(account, {
+        key: reply.fact.key,
+        value: reply.fact.value,
+        source: 'told',
+        subject: reply.fact.subject,
+        open: reply.fact.open,
+        kind: reply.fact.kind,
+      });
       if (mounted.current) setFacts(next);
     }
 
