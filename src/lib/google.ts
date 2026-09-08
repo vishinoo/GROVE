@@ -208,7 +208,13 @@ function bodyOf(part: GmailPart | undefined): string {
 }
 
 export async function searchMail(
-  opts: { from?: string; about?: string; limit?: number; since?: string } = {}
+  opts: {
+    from?: string;
+    about?: string;
+    limit?: number;
+    since?: string;
+    category?: string;
+  } = {}
 ): Promise<MailMessage[] | null> {
   const terms: string[] = [];
   // "this morning", "today", "this week" — Gmail understands a relative window
@@ -231,6 +237,19 @@ export async function searchMail(
     if (who) terms.push(who.includes(' ') ? `from:"${who}"` : `from:${who}`);
   }
   if (opts.about) terms.push(opts.about.replace(/[^\w@.\-' ]/g, ''));
+  // Categories, because "any unread" and "anything important" are how people
+  // narrow an inbox out loud, and Gmail already understands both. Without this
+  // every question got the same answer — the newest message and a count.
+  if (opts.category) {
+    const c = opts.category.toLowerCase();
+    if (/unread|new|unopened/.test(c)) terms.push('is:unread');
+    else if (/important|urgent|priority/.test(c)) terms.push('is:important');
+    else if (/starred|flagged/.test(c)) terms.push('is:starred');
+    else if (/attach/.test(c)) terms.push('has:attachment');
+    // The inbox proper, not promotions and social — which is what someone
+    // means by "real" or "actual" mail.
+    else if (/real|actual|personal|primary/.test(c)) terms.push('category:primary');
+  }
   // Unread-first is the wrong default: "anything from Priya" means anything.
   const query = terms.join(' ') || 'newer_than:2d';
   const count = Math.min(Math.max(opts.limit ?? 3, 1), 10);

@@ -25,7 +25,6 @@
 
 import {
   addReminder,
-  ensureCalendarAccess,
   ensureRemindersAccess,
   createEvent,
   eventsAhead,
@@ -311,6 +310,11 @@ const MAIL_READ: Ability = {
   args: {
     from: { type: 'string', what: 'who it is from, if they named someone' },
     about: { type: 'string', what: 'what it is about' },
+    when: { type: 'string', what: 'a window if they named one: "today", "this week"' },
+    category: {
+      type: 'string',
+      what: 'a kind if they named one: unread, important, starred, has attachment',
+    },
   },
   // "email" earns its place here twice over: it is the word people actually
   // use, and this list is both the router's corpus and what the model is shown.
@@ -323,6 +327,9 @@ const MAIL_READ: Ability = {
     'check my email',
     'what was my most recent email',
     'any new emails',
+    'any unread emails',
+    'anything important in my inbox',
+    'what emails did I get today',
   ],
   run: async (args) => {
     const params = new URLSearchParams();
@@ -333,7 +340,10 @@ const MAIL_READ: Ability = {
     const messages = await google.searchMail({
       from: args.from,
       about: args.about,
-      limit: 3,
+      since: args.when,
+      category: args.category,
+      // Enough to answer "which of them" rather than only "the newest one".
+      limit: 5,
     });
     if (messages === null) {
       return { ok: false, spoken: google.explain('your mail') };
@@ -341,21 +351,39 @@ const MAIL_READ: Ability = {
     const who = args.from ? ` from ${args.from}` : '';
     if (messages.length === 0) return { ok: true, spoken: `Nothing${who}.` };
 
-    // Spoken, so the newest one and the rest as a count. A list of subject
-    // lines recited into your ear is not something anyone can follow.
     const [first] = messages;
     const sender = saySender(first.from ?? '');
     const subject = readable(first.subject ?? '').slice(0, 90);
-    const gist = gistOf(first.body || first.snippet || '');
 
-    // The subject leads, because it is the one line written to be the summary.
-    // The body follows only if it adds something the subject did not.
-    let line = subject ? `${sender}, ${subject}.` : `${sender} wrote.`;
-    if (gist && !subject.toLowerCase().includes(gist.slice(0, 24).toLowerCase())) {
-      line += ` ${gist}`;
+    // One message gets read; several get named.
+    //
+    // Every question produced the same shape — the newest mail in full, then
+    // "and two more" — which answers "what is my most recent email" and nothing
+    // else. Asked which messages arrived, or for anything from one person, the
+    // useful answer is who and about what, so the person can pick one to hear.
+    if (messages.length === 1) {
+      const gist = gistOf(first.body || first.snippet || '');
+      let line = subject ? `${sender}, ${subject}.` : `${sender} wrote.`;
+      if (gist && !subject.toLowerCase().includes(gist.slice(0, 24).toLowerCase())) {
+        line += ` ${gist}`;
+      }
+      return { ok: true, spoken: line, detail: first.subject };
     }
-    if (messages.length > 1) line += ` And ${messages.length - 1} more.`;
-    return { ok: true, spoken: line, detail: first.subject };
+
+    const named = messages
+      .slice(0, 3)
+      .map((m) => {
+        const who = saySender(m.from ?? '');
+        const what = readable(m.subject ?? '').slice(0, 60);
+        return what ? `${who} about ${what}` : who;
+      })
+      .join('; ');
+    const rest = messages.length > 3 ? `, and ${messages.length - 3} more` : '';
+    return {
+      ok: true,
+      spoken: `${messages.length}${who}. ${named}${rest}. Want me to read one?`,
+      detail: messages.map((m) => `${saySender(m.from ?? '')} — ${m.subject}`).join('\n'),
+    };
   },
 };
 
@@ -458,25 +486,51 @@ async function readGoogleCalendar(days: number): Promise<Dated[] | null> {
  * itself one turn apart is worse than either answer alone.
  */
 async function allEvents(days: number): Promise<Dated[] | null> {
-  const [phone, remote] = await Promise.all([
-    (async () => ((await ensureCalendarAccess()) ? await eventsAhead(24 * days) : null))(),
-    readGoogleCalendar(days),
-  ]);
-  if (phone === null && remote === null) return null;
-  const local: Dated[] = (phone ?? []).map((e) => ({
-    id: e.id,
-    title: e.title,
-    start: e.start,
-    source: 'phone' as const,
-  }));
-  return [...local, ...(remote ?? [])].sort((a, b) => a.start.getTime() - b.start.getTime());
+  // Google only, deliberately.
+  //
+  // Merging EventKit in produced a calendar nobody has: iOS ships Birthdays and
+  // Siri Suggestions, so the phone contributed entries that are not appointments
+  // while the real diary lived in Google. Answers came out padded with things
+  // the person had never put in a calendar, and "my first thing" was often one
+  // of them.
+  return readGoogleCalendar(days);
+}
+
+/**
+ * Which one of them the question is actually about.
+ *
+ * "My first class", "my last meeting", "what's next" all name a position, and
+ * answering them by reading the whole list out and letting the person count is
+ * what made the calendar feel like it could only do one thing. Returns null
+ * when no position was named, which means the list is the answer.
+ */
+function positionIn(text: string): 'first' | 'last' | 'next' | null {
+  const t = text.toLowerCase();
+  if (/\b(last|final|latest|end of (?:the|my) day)\b/.test(t)) return 'last';
+  if (/\b(first|earliest|start of (?:the|my) day|kick ?off)\b/.test(t)) return 'first';
+  if (/\b(next|after (?:this|that)|coming up|upcoming)\b/.test(t)) return 'next';
+  return null;
+}
+
+/** One event, said properly, with the position named so it sounds answered. */
+function sayOne(event: Dated, position: 'first' | 'last' | 'next' | null): string {
+  const lead =
+    position === 'last' ? 'Last is ' : position === 'next' ? 'Next is ' : position === 'first' ? 'First is ' : '';
+  return `${lead}${event.title}, ${sayWhen(event.start)}.`;
 }
 
 /** The same substring match findEvents uses, over both calendars. */
 async function findAcrossCalendars(query: string, days = 60): Promise<Dated[] | null> {
   const upcoming = await allEvents(days);
   if (upcoming === null) return null;
-  const needle = query.toLowerCase().replace(/^(?:my|the|a)\s+/, '').trim();
+  // Position words are how the question is framed, not part of any event's
+  // name — searching titles for "last" matches nothing and loses the real term.
+  const needle = query
+    .toLowerCase()
+    .replace(/\b(?:first|last|next|final|latest|earliest|upcoming)\b/g, ' ')
+    .replace(/^(?:my|the|a)\s+/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!needle) return upcoming;
   const words = needle.split(/\s+/).filter((w) => w.length > 2);
   return upcoming.filter((e) => {
@@ -780,10 +834,27 @@ const CALENDAR_FIND: Ability = {
     if (!which) return { ok: false, spoken: 'What am I looking for?' };
 
     const found = await findAcrossCalendars(which);
-    if (found === null) {
-      return { ok: false, spoken: 'I cannot see a calendar. Allow calendar access in iOS Settings.' };
-    }
+    if (found === null) return { ok: false, spoken: google.explain('your calendar') };
     if (found.length === 0) return { ok: true, spoken: `Nothing matching ${which}.` };
+
+    // "My last class" names both a thing and a position, and answering with a
+    // list leaves the person to work out which one they asked for.
+    const position = positionIn(which);
+    if (position === 'last' || found.length === 1) {
+      return {
+        ok: true,
+        spoken: sayOne(found[found.length - 1], position),
+        detail: `${found.length} matching "${which}"`,
+      };
+    }
+    if (position === 'first') {
+      return { ok: true, spoken: sayOne(found[0], 'first'), detail: `${found.length} matching` };
+    }
+    if (position === 'next') {
+      const now = Date.now();
+      const upcoming = found.find((e) => e.start.getTime() > now) ?? found[0];
+      return { ok: true, spoken: sayOne(upcoming, 'next'), detail: `${found.length} matching` };
+    }
 
     const [first, second] = found;
     let line = `${first.title} ${sayWhen(first.start)}`;
@@ -839,58 +910,57 @@ async function oneEvent(
 const CALENDAR_READ: Ability = {
   id: 'calendar.read',
   name: 'Calendar',
-  what: 'Says what is on, and what is next.',
-  where: 'device',
+  what: 'Reads your Google calendar — what is on, what is next, your first or last thing.',
+  where: 'server',
   wired: true,
-  needs: ['calendar-permission'],
+  needs: ['email'],
   reads: true,
-  args: { when: { type: 'string', what: 'the day, e.g. "today" or "Thursday"' } },
-  examples: ["what's on today", 'when is my next thing', 'am I free at four'],
+  args: {
+    when: { type: 'string', what: 'the day, e.g. "today", "tomorrow" or "this week"' },
+    which: {
+      type: 'string',
+      what: 'a position if they named one: "first", "last" or "next"',
+    },
+  },
+  examples: [
+    "what's on today",
+    'when is my next thing',
+    'what have I got on tomorrow',
+    'what is my last thing today',
+    'am I free at four',
+  ],
   run: async (args) => {
-    const asked = (args.when || '').toLowerCase();
-    const hours = /\bweek\b/.test(asked) ? 24 * 7 : /\btomorrow\b/.test(asked) ? 48 : 24;
+    const asked = `${args.when || ''} ${args.which || ''}`.toLowerCase();
+    const days = /\bweek\b/.test(asked) ? 7 : /\btomorrow\b/.test(asked) ? 2 : 1;
+    const position = positionIn(asked);
 
-    // The phone first, because it is instant and needs no network.
-    const onPhone = await ensureCalendarAccess();
-    const phone = onPhone ? await eventsAhead(hours) : null;
-    if (phone && phone.length > 0) return { ok: true, spoken: sayEvents(phone) };
+    const events = await readGoogleCalendar(days);
+    if (events === null) return { ok: false, spoken: google.explain('your calendar') };
 
-    // Nothing on the phone is NOT nothing.
-    //
-    // This used to consult Google only when the phone had zero calendars, and
-    // a phone never has zero: iOS ships Birthdays and Siri Suggestions, so the
-    // count was always at least one, the Google branch was unreachable, and
-    // somebody looking at a full Google calendar was told "Nothing on" every
-    // single time. The count was never the right question — whether anything
-    // was FOUND is.
-    const days = Math.max(1, Math.ceil(hours / 24));
-    const google = await readGoogleCalendar(days);
-    if (google && google.length > 0) {
-      return { ok: true, spoken: sayEvents(google), detail: `${google.length} from Google` };
+    if (events.length > 0) {
+      // A named position gets one event, not a list. "What is my first class"
+      // was answered with the whole day and a count, which is the question
+      // restated rather than answered.
+      if (position === 'first') return { ok: true, spoken: sayOne(events[0], 'first') };
+      if (position === 'last') {
+        return { ok: true, spoken: sayOne(events[events.length - 1], 'last') };
+      }
+      if (position === 'next') {
+        const now = Date.now();
+        const upcoming = events.find((e) => e.start.getTime() > now) ?? events[0];
+        return { ok: true, spoken: sayOne(upcoming, 'next') };
+      }
+      return { ok: true, spoken: sayEvents(events), detail: `${events.length} events` };
     }
 
-    // Genuinely empty in the window asked about. "When is my next thing" is
-    // usually what was meant anyway, so look further out rather than stop at a
-    // technically-correct nothing.
-    const aheadPhone = onPhone ? ((await eventsAhead(24 * 14)) ?? []) : [];
-    const aheadGoogle = (await readGoogleCalendar(14)) ?? [];
-    const next = [...aheadPhone, ...aheadGoogle].sort(
-      (a, b) => a.start.getTime() - b.start.getTime()
-    )[0];
-    if (next) {
-      const when = hours > 24 ? 'this week' : 'left today';
-      return { ok: true, spoken: `Nothing ${when}. Next is ${next.title}, ${sayWhen(next.start)}.` };
+    // Empty in the window asked about is rarely the answer wanted: look further
+    // out and say when the next thing actually is.
+    const ahead = (await readGoogleCalendar(14)) ?? [];
+    if (ahead.length > 0) {
+      const when = days > 1 ? 'this week' : 'left today';
+      return { ok: true, spoken: `Nothing ${when}. ${sayOne(ahead[0], 'next')}` };
     }
-
-    // Nothing anywhere, and no way to look, are different answers.
-    if (!onPhone && google === null) {
-      return {
-        ok: false,
-        spoken:
-          'I cannot see a calendar. Allow calendar access in iOS Settings, or connect Google Workspace in Connections.',
-      };
-    }
-    return { ok: true, spoken: hours > 24 ? 'Nothing this week.' : 'Nothing on.' };
+    return { ok: true, spoken: days > 1 ? 'Nothing this week.' : 'Nothing on.' };
   },
 };
 
@@ -982,7 +1052,33 @@ const MUSIC: Ability = {
 
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const remote = require('grove-remote') as typeof import('grove-remote');
-    const result = await remote.playMusic(wanted);
+
+    // Narrow the search rather than give up on it.
+    //
+    // The library is matched on a substring, so one wrong word sinks the whole
+    // query: speech hears "a song over by Playboi Carti", the full phrase
+    // matches no title, artist or album, and Grove reports a song missing from
+    // a library that contains it. Trying the individual words after the whole
+    // phrase costs nothing — a failed match plays nothing — and recovers every
+    // case where the extra words were the problem rather than the song.
+    //
+    // Longest first, because the distinctive word is usually the long one:
+    // "Carti" identifies the artist, "song" identifies nothing.
+    const attempts = wanted
+      ? [
+          wanted,
+          ...wanted
+            .split(/\s+/)
+            .filter((w) => w.length > 3)
+            .sort((a, b) => b.length - a.length),
+        ]
+      : [''];
+
+    let result = await remote.playMusic(attempts[0]);
+    for (let i = 1; i < attempts.length && !result.ok && result.reason === 'notFound'; i += 1) {
+      if (attempts[i].toLowerCase() === attempts[0].toLowerCase()) continue;
+      result = await remote.playMusic(attempts[i]);
+    }
 
     if (result.ok) {
       const artist = result.artist ? ` by ${result.artist}` : '';

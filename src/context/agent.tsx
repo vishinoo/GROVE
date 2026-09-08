@@ -464,9 +464,19 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     if (!mounted.current) return;
     setCaption(outcome.spoken);
     await whenQuiet();
+
+    // A failure is said once, briefly, and the detail stays on screen.
+    //
+    // Grove would make a remark and then read out the machinery behind it —
+    // "reconnect Google in Connections, allow everything on the consent
+    // screen" — which is the right thing to be able to read and the wrong
+    // thing to have recited into your ear while walking. The card keeps the
+    // full sentence; out loud it gets a short one.
+    const heard = outcome.ok ? outcome.spoken : shortFailure(outcome.spoken);
+
     // The result of work you interrupted is not something you still want read
     // out — you have already moved on and asked something else.
-    if (mine()) utter(outcome.spoken);
+    if (mine()) utter(heard);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -518,7 +528,20 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** Speak, and let the state follow the audio rather than a timer. */
+  /**
+ * What a failure sounds like, as opposed to what it says on screen.
+ *
+ * The first sentence is nearly always the human half — "I have no address for
+ * Priya", "Google is not connected" — and the rest is the instructions. Reading
+ * the instructions aloud is what made every error feel robotic; they are still
+ * there to be read on the card, where they can actually be followed.
+ */
+function shortFailure(text: string): string {
+  const first = text.split(/(?<=[.!?])\s+/)[0] ?? text;
+  return first.length > 4 && first.length <= 120 ? first : text.slice(0, 120);
+}
+
+/** Speak, and let the state follow the audio rather than a timer. */
   const utter = useCallback((text: string) => {
     // Claimed at the moment of speaking, because stopSpeaking() also fires
     // onDone — an interruption and a natural ending are the same callback.
