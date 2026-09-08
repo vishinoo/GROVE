@@ -20,6 +20,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, Switch, Text, TextInput, View } from 'react-native';
 
+import * as Updates from 'expo-updates';
+
 import { Icon } from '@/components/icon';
 import { Orb } from '@/components/orb';
 import { modeById } from '@/lib/modes';
@@ -64,6 +66,13 @@ export default function Settings() {
   const draftPalette = persona.palette ?? modeById(persona.mode ?? 'normal').palette;
   /** Which lobe is being recoloured, or null when the picker is closed. */
   const [editing, setEditing] = useState<number | null>(null);
+  // An embedded bundle has no update id — that is itself the answer, so it
+  // is shown rather than left blank.
+  const updateLabel = Updates.isEmbeddedLaunch
+    ? 'built in (no OTA yet)'
+    : `${(Updates.updateId ?? '').slice(0, 8) || 'unknown'} · ${
+        Updates.createdAt ? Updates.createdAt.toLocaleString() : 'unknown date'
+      }`;
 
   const reduced = reducedModeReason();
   const report = capabilities();
@@ -291,6 +300,25 @@ export default function Settings() {
       </Section>
 
       {/* ---------------------------------------------------------- account */}
+
+      {/* ------------------------------------------------------- what's running */}
+
+      {/*
+        Which bundle is actually on the phone.
+
+        Over-the-air updates apply on the launch AFTER they download, so "I
+        shipped a fix" and "the fix is on your phone" are different statements,
+        and there was no way to tell them apart from the outside. Two people
+        spent an evening debugging a model that had already been fixed, because
+        the phone was still running the bundle that had the broken one.
+      */}
+      <Section label="Version">
+        <Card>
+          <Row label="Update" value={updateLabel} />
+          <Row label="Channel" value={Updates.channel || 'embedded'} />
+          <Row label="Model" value={process.env.EXPO_PUBLIC_GEMINI_MODEL || 'default'} />
+        </Card>
+      </Section>
 
       <Section label="Account">
         <Card style={{ paddingVertical: 2 }}>

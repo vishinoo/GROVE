@@ -608,6 +608,11 @@ function offlineLine(
   if (trouble === 'no-model')
     return 'The model I am set to use has been retired. That needs changing in my settings.';
   if (trouble === 'no-key') return fallback.unconfigured();
+  // 'refused' is the model answering with nothing usable — a safety block, an
+  // empty candidate, an unparseable reply. It used to fall through to the
+  // persona's stock line, which is the one sentence that tells you nothing at
+  // all, and it was the sentence people saw most.
+  if (trouble === 'refused') return 'The model gave me nothing back on that one. Try wording it differently.';
 
   // In the voice's own words, falling back to the mode's. A stock line after a
   // personality has been talking to you for ten minutes is the moment the
