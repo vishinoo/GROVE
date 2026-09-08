@@ -554,6 +554,8 @@ function offlineLine(
   if (trouble === 'rate-limited') return 'Too many at once — give me about five seconds.';
   if (trouble === 'timeout') return 'That took too long to come back. Ask me again.';
   if (trouble === 'offline') return 'I have no connection right now.';
+  if (trouble === 'no-model')
+    return 'The model I am set to use has been retired. That needs changing in my settings.';
   if (trouble === 'no-key') return fallback.unconfigured();
 
   // In the voice's own words, falling back to the mode's. A stock line after a

@@ -267,7 +267,14 @@ export async function setOwnKey(key: string): Promise<void> {
  * right advice is simply to wait a moment, which nobody can guess from the
  * generic line.
  */
-export type ModelTrouble = 'none' | 'no-key' | 'rate-limited' | 'timeout' | 'offline' | 'refused';
+export type ModelTrouble =
+  | 'none'
+  | 'no-key'
+  | 'no-model'
+  | 'rate-limited'
+  | 'timeout'
+  | 'offline'
+  | 'refused';
 
 let modelTrouble: ModelTrouble = 'none';
 
@@ -327,7 +334,17 @@ async function askDirect(
         await new Promise((done) => setTimeout(done, 1200));
         return askDirect(system, messages, json, search, 1);
       }
-      modelTrouble = response.status === 429 ? 'rate-limited' : 'refused';
+      // A 404 here means the configured model no longer exists, which is its own
+      // failure and not a network one. Google retires pinned versions without
+      // warning — 2.5-flash-lite went 404 and every turn reported "can't get to
+      // anything", which sent everyone hunting a connection problem that was
+      // never there.
+      modelTrouble =
+        response.status === 404
+          ? 'no-model'
+          : response.status === 429
+            ? 'rate-limited'
+            : 'refused';
       return null;
     }
     const data = (await response.json()) as {
@@ -354,7 +371,7 @@ async function askDirect(
  * fail while the app works, and pass while it does not, is worse than no check.
  */
 const DIRECT_MODEL =
-  (process.env.EXPO_PUBLIC_GEMINI_MODEL ?? '').trim() || 'gemini-3.5-flash-lite';
+  (process.env.EXPO_PUBLIC_GEMINI_MODEL ?? '').trim() || 'gemini-flash-lite-latest';
 
 async function askServer(
   system: string,
