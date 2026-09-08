@@ -84,6 +84,14 @@ async function call<T>(
 
 export type MailMessage = {
   id: string;
+  /**
+   * Gmail's thread. Sending a reply without it starts a new conversation that
+   * merely quotes the old one, which is how a reply ends up somewhere nobody is
+   * looking.
+   */
+  threadId: string;
+  /** The RFC822 Message-Id, which is what In-Reply-To has to point at. */
+  messageId: string;
   from: string;
   subject: string;
   date: string;
@@ -133,7 +141,7 @@ export async function searchMail(
   const query = terms.join(' ') || 'newer_than:2d';
   const count = Math.min(Math.max(opts.limit ?? 3, 1), 10);
 
-  const list = await call<{ messages?: { id: string }[] }>(
+  const list = await call<{ messages?: { id: string; threadId?: string }[] }>(
     `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=${count}`
   );
   if (list === null) return null;
@@ -143,12 +151,14 @@ export async function searchMail(
 
   const full = await Promise.all(
     ids.map((id) =>
-      call<{ payload?: GmailPart; snippet?: string }>(
+      call<{ payload?: GmailPart; snippet?: string; threadId?: string }>(
         `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`
       ).then((message) =>
         message
           ? {
               id,
+              threadId: message.threadId ?? '',
+              messageId: header(message.payload, 'Message-Id'),
               from: header(message.payload, 'From'),
               subject: header(message.payload, 'Subject'),
               date: header(message.payload, 'Date'),
@@ -175,6 +185,45 @@ export async function sendMail(to: string, subject: string, body: string): Promi
   const sent = await call<{ id?: string }>(
     'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
     { method: 'POST', body: { raw } }
+  );
+  return sent !== null;
+}
+
+/**
+ * Replies to a message, in its own thread.
+ *
+ * Three things have to line up or Gmail files it as a new conversation: the
+ * threadId on the request, In-Reply-To pointing at the original Message-Id, and
+ * a subject that keeps the original with one "Re:". Getting any of them wrong
+ * produces a reply the recipient sees as an unrelated mail — which is worse
+ * than failing, because it looks like it worked.
+ */
+export async function replyTo(message: MailMessage, body: string): Promise<boolean> {
+  const to = message.from;
+  if (!to) return false;
+
+  const subject = /^re:/i.test(message.subject)
+    ? message.subject
+    : `Re: ${message.subject || '(no subject)'}`;
+
+  const headers = [
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'Content-Type: text/plain; charset=utf-8',
+  ];
+  if (message.messageId) {
+    headers.push(`In-Reply-To: ${message.messageId}`, `References: ${message.messageId}`);
+  }
+
+  const sent = await call<{ id?: string }>(
+    'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
+    {
+      method: 'POST',
+      body: {
+        raw: toBase64Url([...headers, '', body].join('\r\n')),
+        ...(message.threadId ? { threadId: message.threadId } : {}),
+      },
+    }
   );
   return sent !== null;
 }

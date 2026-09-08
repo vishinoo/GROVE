@@ -137,10 +137,19 @@ const BARE_YES =
  * Address forms are allowed in front of it, because people say "please" and
  * "hey Grove" and mean the imperative that follows.
  */
-const VERBS = String.raw`make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up|play|read|brief|tell me about|email|text|message|call|switch to|switch into|go into|turn on|turn off|open|handle|push|reschedule|delay|shift|dim|start|stop|queue|skip|pause|resume|let .{2,20} know|give me`;
+const VERBS = String.raw`make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up|play|read|brief|tell me about|email|text|message|call|switch to|switch into|go into|turn on|turn off|open|handle|push|reschedule|delay|shift|dim|start|stop|queue|skip|pause|resume|let .{2,20} know|give me|reply|respond|answer|forward`;
 
 /** "hey Grove, please …" — anything that can precede an instruction. */
-const ADDRESS = String.raw`(?:(?:hey\s+)?grove[,\s]+)?(?:(?:ok(?:ay)?|now|then|also|and|please|just)\s+)*`;
+/**
+ * Whatever people say before the instruction.
+ *
+ * Grove is renameable, so hardcoding its own name was never going to be
+ * enough — someone who calls theirs "Buddy" said "Buddy, just check my email"
+ * and the gate saw no imperative at the start of the sentence and refused the
+ * whole turn. Any single word followed by a comma is treated as an address,
+ * which is what a vocative looks like and is not something a statement does.
+ */
+const ADDRESS = String.raw`(?:(?:hey|hi|yo|ok(?:ay)?)\s+)?(?:[a-z]{2,14},\s*)?(?:(?:ok(?:ay)?|now|then|also|and|please|just|quickly)\s+)*`;
 
 const IMPERATIVE = new RegExp(`^\\s*${ADDRESS}(?:${VERBS})\\b`, 'i');
 
@@ -372,6 +381,12 @@ export async function askGrove(
     manner: [mannerDirective(persona), mode.manner].filter(Boolean).join('\n\n'),
     memory: asPromptBlock(facts),
     name: persona.name,
+    // If a tool here can answer it, do not search the web on the way. The one
+    // exception is the briefing, which IS the web.
+    grounded: (() => {
+      const local = pickAbility(userText);
+      return !local || local.id === 'brief.web';
+    })(),
   });
 
   // The model sees the whole set and the sentence, so it beats keywords on

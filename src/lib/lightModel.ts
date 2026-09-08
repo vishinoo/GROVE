@@ -535,7 +535,22 @@ function parseReply(raw: string): LightReply {
 export async function lightTurn(
   history: LightMessage[],
   userText: string,
-  context: { abilities: AbilitySummary; manner: string; memory: string; name: string }
+  context: {
+    abilities: AbilitySummary;
+    manner: string;
+    memory: string;
+    name: string;
+    /**
+     * False when a tool on this phone is going to supply the facts.
+     *
+     * Grounding costs a round trip to Google before the model writes a word,
+     * and "what is my first event" is question-shaped, so needsLookup said yes
+     * and every calendar question paid for a web search it could not use. The
+     * answer was coming from EventKit either way; the search only bought the
+     * timeout people were sitting through.
+     */
+    grounded?: boolean;
+  }
 ): Promise<LightReply | null> {
   if (!isLightModelConfigured()) return null;
 
@@ -582,7 +597,7 @@ TITLE: <two or three words, only for a standing job>`;
     [...history.slice(-8), { role: 'user', content: userText.slice(0, 4000) }],
     false,
     needsDepth(userText),
-    needsLookup(userText)
+    context.grounded === false ? false : needsLookup(userText)
   );
   if (!raw) return null;
   return parseReply(raw);

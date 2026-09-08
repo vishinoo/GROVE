@@ -27,7 +27,6 @@ import {
   addReminder,
   ensureCalendarAccess,
   ensureRemindersAccess,
-  calendarCount,
   eventsAhead,
   moveEvent,
   readWhen,
@@ -174,6 +173,40 @@ const BRIEF: Ability = {
   },
 };
 
+/**
+ * An email body, reduced to something a person can listen to.
+ *
+ * Mail is written to be looked at. Read aloud verbatim it arrives as "[image:
+ * Google] You allowed Noctus access to some of your Google Account data" —
+ * alt-text, tracking links, unsubscribe footers and legal boilerplate, spoken
+ * in full, which is why a working mail lookup sounded broken.
+ *
+ * Everything stripped here carries no meaning in speech: it either cannot be
+ * heard (an image), cannot be acted on (a URL), or is the same on every message
+ * ever sent (a footer).
+ */
+function readable(text: string): string {
+  return text
+    .replace(/\[(?:image|cid|inline)[^\]]*\]/gi, ' ')
+    .replace(/<https?:\/\/[^>]*>|https?:\/\/\S+/gi, ' ')
+    .replace(/\S+@\S+\.\S+/g, ' ')
+    // Everything from the unsubscribe line down is machinery, not message.
+    .split(/\b(?:unsubscribe|view (?:this|it) in your browser|manage your preferences|sent from my)\b/i)[0]
+    .replace(/[\u200b-\u200f\u202a-\u202e\ufeff]/g, '')
+    .replace(/[*_#|>]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** The first sentence or two — the part that answers "what does it say". */
+function gistOf(text: string, max = 220): string {
+  const clean = readable(text);
+  if (clean.length <= max) return clean;
+  const cut = clean.slice(0, max);
+  const stop = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! '));
+  return (stop > 60 ? cut.slice(0, stop + 1) : cut).trim();
+}
+
 /** "Priya Sharma <p@x.com>" is not how you say a name out loud. */
 function saySender(from: string): string {
   const named = /^\s*"?([^"<]+?)"?\s*</.exec(from);
@@ -267,7 +300,7 @@ const DOC_FIND: Ability = {
 const MAIL_READ: Ability = {
   id: 'mail.search',
   name: 'Mail',
-  what: 'Finds mail from someone and tells you what it says.',
+  what: 'Reads your email — finds mail from someone and says what it says.',
   where: 'server',
   wired: true,
   needs: ['email'],
@@ -276,7 +309,18 @@ const MAIL_READ: Ability = {
     from: { type: 'string', what: 'who it is from, if they named someone' },
     about: { type: 'string', what: 'what it is about' },
   },
-  examples: ['anything from Priya', 'what did Sam say about the invoice', 'read me my mail'],
+  // "email" earns its place here twice over: it is the word people actually
+  // use, and this list is both the router's corpus and what the model is shown.
+  // Without it, "check my email" matched no ability at all and the model
+  // reached for the calendar instead — which then said "Nothing on".
+  examples: [
+    'anything from Priya',
+    'what did Sam say about the invoice',
+    'read me my mail',
+    'check my email',
+    'what was my most recent email',
+    'any new emails',
+  ],
   run: async (args) => {
     const params = new URLSearchParams();
     if (args.from) params.set('from', args.from);
@@ -294,13 +338,19 @@ const MAIL_READ: Ability = {
     const who = args.from ? ` from ${args.from}` : '';
     if (messages.length === 0) return { ok: true, spoken: `Nothing${who}.` };
 
-    // Spoken, so the newest one in full and the rest as a count. A list of
-    // subject lines recited into your ear is not something anyone can follow.
+    // Spoken, so the newest one and the rest as a count. A list of subject
+    // lines recited into your ear is not something anyone can follow.
     const [first] = messages;
     const sender = saySender(first.from ?? '');
-    const gist = (first.body || first.snippet || '').replace(/\s+/g, ' ').trim().slice(0, 320);
+    const subject = readable(first.subject ?? '').slice(0, 90);
+    const gist = gistOf(first.body || first.snippet || '');
 
-    let line = `${sender} says: ${gist}`;
+    // The subject leads, because it is the one line written to be the summary.
+    // The body follows only if it adds something the subject did not.
+    let line = subject ? `${sender}, ${subject}.` : `${sender} wrote.`;
+    if (gist && !subject.toLowerCase().includes(gist.slice(0, 24).toLowerCase())) {
+      line += ` ${gist}`;
+    }
     if (messages.length > 1) line += ` And ${messages.length - 1} more.`;
     return { ok: true, spoken: line, detail: first.subject };
   },
@@ -353,6 +403,96 @@ const MAIL_SEND: Ability = {
   },
 };
 
+/**
+ * Google's events, in the same shape the phone's come back in.
+ *
+ * Null means Google could not be reached or is not connected — which is a
+ * different answer from an empty day, and the caller depends on telling them
+ * apart.
+ */
+async function readGoogleCalendar(
+  days: number
+): Promise<{ title: string; start: Date }[] | null> {
+  const events = await google.readCalendar(days);
+  if (events === null) return null;
+  return events
+    .map((e) => ({ title: e.title, start: new Date(e.start) }))
+    .filter((e) => !Number.isNaN(e.start.getTime()));
+}
+
+/** Two or three events and a count — a read-out list is unusable past that. */
+function sayEvents(
+  events: { title: string; start: Date }[],
+  lead = ''
+): string {
+  const [first, second] = events;
+  const rest = events.length - 2;
+  let line = `${first.title} at ${sayWhen(first.start)}`;
+  if (second) line += `, then ${second.title} at ${sayWhen(second.start)}`;
+  if (rest > 0) line += `, and ${rest} more`;
+  return `${lead}${line}.`;
+}
+
+/**
+ * Replying to something already in the inbox.
+ *
+ * Deliberately separate from mail.send. Sending needs an address and gets it
+ * from contacts; replying needs a *message*, and picking the wrong one sends
+ * your words to a stranger in a thread you were not thinking about. So this
+ * finds the message first, and when the description matches more than one
+ * plausible thread it asks rather than guesses — the same rule mail.send
+ * already applies to two people with the same first name.
+ */
+const MAIL_REPLY: Ability = {
+  id: 'mail.reply',
+  name: 'Reply',
+  what: 'Replies to an email you have had, in its own thread.',
+  where: 'server',
+  wired: true,
+  needs: ['email'],
+  args: {
+    to: { type: 'string', what: 'who the message was from' },
+    about: { type: 'string', what: 'what the message was about' },
+    body: { type: 'string', what: 'what the reply says', required: true },
+  },
+  examples: [
+    'reply to Priya saying that works for me',
+    'respond to that email and say I will be there',
+    'answer Sam that I am running late',
+  ],
+  run: async (args) => {
+    const body = (args.body || '').trim();
+    if (!body) return { ok: false, spoken: 'What should the reply say?' };
+
+    const found = await google.searchMail({ from: args.to, about: args.about, limit: 3 });
+    if (found === null) {
+      return { ok: false, spoken: 'Google is not connected. You can do that in Connections.' };
+    }
+    if (found.length === 0) {
+      const which = args.to ? ` from ${args.to}` : args.about ? ` about ${args.about}` : '';
+      return { ok: false, spoken: `I could not find the message${which} to reply to.` };
+    }
+
+    // Naming neither the sender nor the subject leaves "that email" meaning
+    // whatever happens to be newest, and a reply is not something to send on a
+    // guess. One clear candidate is fine; an unqualified pick from several is
+    // not.
+    if (found.length > 1 && !args.to && !args.about) {
+      return {
+        ok: false,
+        spoken: `I have ${found.length} recent messages. Which one — who was it from?`,
+        detail: found.map((m) => `${saySender(m.from)} — ${m.subject}`).join('\n'),
+      };
+    }
+
+    const target = found[0];
+    const sent = await google.replyTo(target, body);
+    return sent
+      ? { ok: true, spoken: `Replied to ${saySender(target.from)}.`, detail: target.subject }
+      : { ok: false, spoken: 'That reply did not send.' };
+  },
+};
+
 const CALENDAR_READ: Ability = {
   id: 'calendar.read',
   name: 'Calendar',
@@ -364,67 +504,50 @@ const CALENDAR_READ: Ability = {
   args: { when: { type: 'string', what: 'the day, e.g. "today" or "Thursday"' } },
   examples: ["what's on today", 'when is my next thing', 'am I free at four'],
   run: async (args) => {
-    // No early refusal. The phone's calendar and the Google one are two
-    // different calendars, and being denied the first says nothing about the
-    // second — refusing here meant someone who declined the iOS prompt could
-    // never hear their Google calendar at all, however well connected it was.
+    const asked = (args.when || '').toLowerCase();
+    const hours = /\bweek\b/.test(asked) ? 24 * 7 : /\btomorrow\b/.test(asked) ? 48 : 24;
+
+    // The phone first, because it is instant and needs no network.
     const onPhone = await ensureCalendarAccess();
-    if (!onPhone) {
-      const viaGoogle = await GCAL_READ.run({ when: args.when || '' });
-      if (viaGoogle.ok) return viaGoogle;
+    const phone = onPhone ? await eventsAhead(hours) : null;
+    if (phone && phone.length > 0) return { ok: true, spoken: sayEvents(phone) };
+
+    // Nothing on the phone is NOT nothing.
+    //
+    // This used to consult Google only when the phone had zero calendars, and
+    // a phone never has zero: iOS ships Birthdays and Siri Suggestions, so the
+    // count was always at least one, the Google branch was unreachable, and
+    // somebody looking at a full Google calendar was told "Nothing on" every
+    // single time. The count was never the right question — whether anything
+    // was FOUND is.
+    const days = Math.max(1, Math.ceil(hours / 24));
+    const google = await readGoogleCalendar(days);
+    if (google && google.length > 0) {
+      return { ok: true, spoken: sayEvents(google), detail: `${google.length} from Google` };
+    }
+
+    // Genuinely empty in the window asked about. "When is my next thing" is
+    // usually what was meant anyway, so look further out rather than stop at a
+    // technically-correct nothing.
+    const aheadPhone = onPhone ? ((await eventsAhead(24 * 14)) ?? []) : [];
+    const aheadGoogle = (await readGoogleCalendar(14)) ?? [];
+    const next = [...aheadPhone, ...aheadGoogle].sort(
+      (a, b) => a.start.getTime() - b.start.getTime()
+    )[0];
+    if (next) {
+      const when = hours > 24 ? 'this week' : 'left today';
+      return { ok: true, spoken: `Nothing ${when}. Next is ${next.title}, ${sayWhen(next.start)}.` };
+    }
+
+    // Nothing anywhere, and no way to look, are different answers.
+    if (!onPhone && google === null) {
       return {
         ok: false,
         spoken:
           'I cannot see a calendar. Allow calendar access in iOS Settings, or connect Google Workspace in Connections.',
       };
     }
-    // "tomorrow" and "this week" are the two that need a different window;
-    // everything else is the day in front of you.
-    const asked = (args.when || '').toLowerCase();
-    const hours = /\bweek\b/.test(asked) ? 24 * 7 : /\btomorrow\b/.test(asked) ? 48 : 24;
-
-    const events = await eventsAhead(hours);
-    if (events === null) return { ok: false, spoken: 'Could not read your calendar.' };
-
-    if (events.length === 0) {
-      // Empty has three quite different meanings and they used to share one
-      // sentence. Saying "Nothing on" to someone looking at a full Google
-      // calendar is the worst of them: it is confidently wrong, and it sends
-      // them looking for the bug in the wrong place.
-      const sources = await calendarCount();
-      if (sources === 0) {
-        // No calendars on the phone does not mean no calendar. If Google is
-        // connected, the answer is one call away — and asking the person to go
-        // and configure iOS before Grove will answer a question it can already
-        // answer is the kind of correct-but-useless reply this app should not
-        // give.
-        const viaGoogle = await GCAL_READ.run({ when: args.when || '' });
-        if (viaGoogle.ok) return viaGoogle;
-        return {
-          ok: false,
-          spoken:
-            'There are no calendars on this phone, and I could not reach your Google one either. Connect Google, or add the account in iOS Settings under Calendar.',
-        };
-      }
-
-      // Nothing in the window asked for is not nothing at all. Looking further
-      // out turns "Nothing on" into the answer the question was really after.
-      const later = (await eventsAhead(24 * 14)) ?? [];
-      const next = later[0];
-      if (next) {
-        return { ok: true, spoken: `Nothing ${hours > 24 ? 'this week' : 'left today'}. Next is ${next.title}, ${sayWhen(next.start)}.` };
-      }
-      return { ok: true, spoken: hours > 24 ? 'Nothing this week.' : 'Nothing on.' };
-    }
-
-    // Spoken, so the first two and a count — a read-out list is unusable in
-    // your ear past about three items.
-    const [first, second] = events;
-    const rest = events.length - 2;
-    let line = `${first.title} at ${sayWhen(first.start)}`;
-    if (second) line += `, then ${second.title} at ${sayWhen(second.start)}`;
-    if (rest > 0) line += `, and ${rest} more`;
-    return { ok: true, spoken: `${line}.`, detail: `${events.length} in the next ${hours}h` };
+    return { ok: true, spoken: hours > 24 ? 'Nothing this week.' : 'Nothing on.' };
   },
 };
 
@@ -854,6 +977,7 @@ const SET_MODE: Ability = {
 };
 
 export const ABILITIES: Ability[] = [
+  MAIL_REPLY,
   GCAL_READ,
   DOC_FIND,
   SET_MODE,
