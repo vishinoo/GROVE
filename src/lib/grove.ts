@@ -453,9 +453,26 @@ export async function askGrove(
     return allowed(guess ?? undefined) ? guess : null;
   };
 
+  // A read the model itself named, on a question that matched no keyword.
+  //
+  // LOOKUP_QUESTION is a keyword list, and no keyword list covers how people
+  // actually ask: "what time is my long walk at again" names nothing lookable,
+  // so no tool ran, and the model — which cannot see the calendar — answered
+  // that it has no access. The model had already picked calendar.find; the gate
+  // just refused to let it.
+  //
+  // Trusting it costs nothing that matters, because `reads` is the whole
+  // permission: the worst a wrong pick can do is look something up nobody asked
+  // about. mail.send, calendar.move and message.compose carry no such mark and
+  // remain unreachable from any question, which is the property that has to
+  // hold and still does.
+  const namedRead = allowed(named) && named?.wired && named.reads ? named : null;
+
   // Two gates, and the narrower one can only ever return a read. Whatever the
   // router suggested, a question cannot come out of here holding mail.send.
-  const chosen = acting ? pick() : looking ? (pick()?.reads ? pick() : null) : null;
+  const chosen = acting
+    ? pick()
+    : (namedRead ?? (looking && pick()?.reads ? pick() : null));
 
   // Something would fit, but it is not built or connected yet. Saying which is
   // the difference between a dead end and an instruction.
