@@ -223,7 +223,13 @@ export async function searchMail(
   }
   // Filtered before going into a query string, exactly as the server did: these
   // arrive from speech, and Gmail's query language has operators in it.
-  if (opts.from) terms.push(`from:${opts.from.replace(/[^\w@.\- ]/g, '')}`);
+  if (opts.from) {
+    // Quoted, because Gmail splits on spaces: from:Ali Express is read as
+    // from:Ali AND the word Express, which matches almost nothing. Any sender
+    // with two words in their name searched for the wrong thing entirely.
+    const who = opts.from.replace(/[^\w@.\- ]/g, '').trim();
+    if (who) terms.push(who.includes(' ') ? `from:"${who}"` : `from:${who}`);
+  }
   if (opts.about) terms.push(opts.about.replace(/[^\w@.\-' ]/g, ''));
   // Unread-first is the wrong default: "anything from Priya" means anything.
   const query = terms.join(' ') || 'newer_than:2d';
@@ -411,6 +417,83 @@ export async function readCalendar(days = 1): Promise<CalendarEvent[] | null> {
       location: e.location ?? '',
     }))
     .filter((e) => e.start);
+}
+
+/**
+ * Creating, moving and deleting on the Google calendar.
+ *
+ * Reads consulted Google and writes went to EventKit, which is worse than
+ * either alone: Grove read your real calendar and wrote to a different one. It
+ * would say "added, today at 15:45" and nothing would ever appear in Google
+ * Calendar, and "move my two o'clock" would fail to find an event it had read
+ * out a moment earlier.
+ *
+ * Times are sent as full ISO strings with an offset. Google reads a bare local
+ * time against the calendar's own timezone, which silently lands an event an
+ * hour or a day out when the two disagree — the classic calendar bug, and the
+ * kind nobody notices until they miss something.
+ */
+export async function createCalendarEvent(
+  title: string,
+  start: Date,
+  minutes = 60
+): Promise<boolean> {
+  const end = new Date(start.getTime() + Math.max(minutes, 5) * 60_000);
+  const made = await call<{ id?: string }>(
+    'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+    {
+      method: 'POST',
+      body: {
+        summary: title.slice(0, 200),
+        start: { dateTime: start.toISOString() },
+        end: { dateTime: end.toISOString() },
+      },
+    }
+  );
+  return made !== null;
+}
+
+export async function moveCalendarEvent(
+  id: string,
+  start: Date,
+  minutes = 60
+): Promise<boolean> {
+  const end = new Date(start.getTime() + Math.max(minutes, 5) * 60_000);
+  const moved = await call<{ id?: string }>(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      body: { start: { dateTime: start.toISOString() }, end: { dateTime: end.toISOString() } },
+    }
+  );
+  return moved !== null;
+}
+
+/**
+ * Deleting returns an empty body on success, which `call` reports as null —
+ * the same value it uses for failure. So this one checks the response itself
+ * rather than going through call(), or every successful delete would be
+ * reported as a failure.
+ */
+export async function deleteCalendarEvent(id: string): Promise<boolean> {
+  const token = await googleToken();
+  if (!token) {
+    lastReason = 'not-connected';
+    return false;
+  }
+  try {
+    const response = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(id)}`,
+      { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }
+    );
+    // 410 is "already gone", which is the outcome that was asked for.
+    if (response.ok || response.status === 410) return true;
+    lastReason = response.status === 401 ? 'auth-expired' : 'server';
+    return false;
+  } catch {
+    lastReason = 'offline';
+    return false;
+  }
 }
 
 /* ---------------------------------------------------------------- docs */

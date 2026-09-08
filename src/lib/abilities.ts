@@ -40,6 +40,7 @@ import { capabilities } from './capabilities';
 import { loadFacts, recall } from './memory';
 import { MODES } from './modes';
 import * as google from './google';
+import { isGoogleConnected } from './googleAuth';
 import { lightBrief, lightDigest } from './lightModel';
 
 /**
@@ -380,7 +381,14 @@ const MAIL_SEND: Ability = {
     // your contacts rather than demanded, because you obviously know who Priya
     // is and being asked for her address is the friction this exists to remove.
     let to = asked;
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(asked)) {
+    // "Send it to me" is the one address that needs no lookup and cannot be
+    // guessed wrong. mail.summarise already understood it; sending did not, so
+    // the same words worked in one place and failed in the other.
+    if (/^(me|myself|my ?self|my own|my email|my inbox)$/i.test(asked)) {
+      const own = await google.me();
+      if (!own) return { ok: false, spoken: 'I could not work out your own address.' };
+      to = own;
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(asked)) {
       const matches = await google.findContact(asked);
       if (matches === null) {
         return { ok: false, spoken: google.explain('sending that') };
@@ -399,9 +407,13 @@ const MAIL_SEND: Ability = {
     }
 
     const sent = await google.sendMail(to, args.subject || '', body);
+    // The reason matters most here. "That did not send" covered an expired
+    // sign-in, a missing scope and a dead network alike — and sending is the
+    // one thing where knowing which is the difference between fixing it in ten
+    // seconds and assuming Grove is broken.
     return sent
       ? { ok: true, spoken: asked === to ? 'Sent.' : `Sent to ${asked}.` }
-      : { ok: false, spoken: 'That did not send.' };
+      : { ok: false, spoken: google.explain('sending that') };
   },
 };
 
@@ -412,13 +424,26 @@ const MAIL_SEND: Ability = {
  * different answer from an empty day, and the caller depends on telling them
  * apart.
  */
-async function readGoogleCalendar(
-  days: number
-): Promise<{ title: string; start: Date }[] | null> {
+/**
+ * An event, and which calendar it actually lives in.
+ *
+ * The source is what makes writing possible. Without it, "move my two o'clock"
+ * had to guess, guessed the phone, and failed on an event Grove had just read
+ * out of Google — because Google events cannot be touched through EventKit and
+ * never appear there at all.
+ */
+type Dated = { id: string; title: string; start: Date; source: 'google' | 'phone' };
+
+async function readGoogleCalendar(days: number): Promise<Dated[] | null> {
   const events = await google.readCalendar(days);
   if (events === null) return null;
   return events
-    .map((e) => ({ title: e.title, start: new Date(e.start) }))
+    .map((e) => ({
+      id: e.id,
+      title: e.title,
+      start: new Date(e.start),
+      source: 'google' as const,
+    }))
     .filter((e) => !Number.isNaN(e.start.getTime()));
 }
 
@@ -432,22 +457,23 @@ async function readGoogleCalendar(
  * things it just listed, and it says there is nothing matching. Contradicting
  * itself one turn apart is worse than either answer alone.
  */
-async function allEvents(days: number): Promise<{ title: string; start: Date }[] | null> {
+async function allEvents(days: number): Promise<Dated[] | null> {
   const [phone, remote] = await Promise.all([
     (async () => ((await ensureCalendarAccess()) ? await eventsAhead(24 * days) : null))(),
     readGoogleCalendar(days),
   ]);
   if (phone === null && remote === null) return null;
-  return [...(phone ?? []), ...(remote ?? [])].sort(
-    (a, b) => a.start.getTime() - b.start.getTime()
-  );
+  const local: Dated[] = (phone ?? []).map((e) => ({
+    id: e.id,
+    title: e.title,
+    start: e.start,
+    source: 'phone' as const,
+  }));
+  return [...local, ...(remote ?? [])].sort((a, b) => a.start.getTime() - b.start.getTime());
 }
 
 /** The same substring match findEvents uses, over both calendars. */
-async function findAcrossCalendars(
-  query: string,
-  days = 60
-): Promise<{ title: string; start: Date }[] | null> {
+async function findAcrossCalendars(query: string, days = 60): Promise<Dated[] | null> {
   const upcoming = await allEvents(days);
   if (upcoming === null) return null;
   const needle = query.toLowerCase().replace(/^(?:my|the|a)\s+/, '').trim();
@@ -539,7 +565,12 @@ const MAIL_DIGEST: Ability = {
       [args.from, args.about, args.when].filter(Boolean).join(' ')
     );
     if (!digest) {
-      return { ok: false, spoken: 'I could not summarise those just now.' };
+      // The mail arrived; the model failed to condense it. Saying so beats a
+      // line that reads as though the mail could not be fetched.
+      return {
+        ok: false,
+        spoken: `I got ${messages.length} but could not summarise them just now.`,
+      };
     }
 
     const count = `${messages.length} message${messages.length === 1 ? '' : 's'}`;
@@ -572,7 +603,7 @@ const MAIL_DIGEST: Ability = {
     const sent = await google.sendMail(to, `Your email${scope}`, digest);
     return sent
       ? { ok: true, spoken: `${count}${scope}. Summary sent to ${wanted}.`, detail: digest }
-      : { ok: false, spoken: 'I summarised it but could not send it.' };
+      : { ok: false, spoken: `I summarised it, but ${google.explain('sending it').replace(/^./, (c) => c.toLowerCase())}` };
   },
 };
 
@@ -622,7 +653,7 @@ const MAIL_REPLY: Ability = {
     const sent = await google.replyTo(target, body);
     return sent
       ? { ok: true, spoken: `Replied to ${saySender(target.from)}.`, detail: target.subject }
-      : { ok: false, spoken: 'That reply did not send.' };
+      : { ok: false, spoken: google.explain('that reply') };
   },
 };
 
@@ -662,7 +693,19 @@ const CALENDAR_ADD: Ability = {
     if (!when) return { ok: false, spoken: `When is ${title}?` };
 
     const minutes = Number(args.minutes);
-    const result = await createEvent(title, when, Number.isFinite(minutes) && minutes > 0 ? minutes : 60);
+    const length = Number.isFinite(minutes) && minutes > 0 ? minutes : 60;
+
+    // Google first when it is connected, because that is where the events the
+    // person can actually see live. Writing to EventKit while reading from
+    // Google was the worst of both: Grove said "added" and nothing appeared in
+    // the calendar app they were looking at.
+    if (await isGoogleLinked()) {
+      const made = await google.createCalendarEvent(title, when, length);
+      if (made) return { ok: true, spoken: `Added ${title}, ${sayWhen(when)}.` };
+      return { ok: false, spoken: google.explain(`adding ${title}`) };
+    }
+
+    const result = await createEvent(title, when, length);
     if (result.ok) return { ok: true, spoken: `Added ${title}, ${sayWhen(when)}.` };
     if (result.reason === 'no-calendar') {
       return {
@@ -695,10 +738,17 @@ const CALENDAR_REMOVE: Ability = {
   run: async (args) => {
     const which = (args.which || '').trim();
     if (!which) return { ok: false, spoken: 'Which event?' };
-    const result = await removeEvent(which);
-    return result.ok
-      ? { ok: true, spoken: `Removed ${result.title}.` }
-      : { ok: false, spoken: `I could not find ${which} in your calendar.` };
+    const picked = await oneEvent(which);
+    if ('problem' in picked) return { ok: false, spoken: picked.problem };
+
+    const gone =
+      picked.event.source === 'google'
+        ? await google.deleteCalendarEvent(picked.event.id)
+        : (await removeEvent(which)).ok;
+
+    return gone
+      ? { ok: true, spoken: `Removed ${picked.event.title}.` }
+      : { ok: false, spoken: `I found ${picked.event.title} but could not remove it.` };
   },
 };
 
@@ -742,6 +792,49 @@ const CALENDAR_FIND: Ability = {
     return { ok: true, spoken: `${line}.`, detail: `${found.length} matching "${which}"` };
   },
 };
+
+/** Whether Google is signed in on this device. */
+async function isGoogleLinked(): Promise<boolean> {
+  try {
+    return await isGoogleConnected();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The one event a phrase means, or a reason it cannot be settled.
+ *
+ * Changing the wrong appointment is worse than changing none, so several
+ * matches is a question rather than a coin toss — the same rule mail.send
+ * already applies to two people with the same first name.
+ */
+async function oneEvent(
+  which: string
+): Promise<{ event: Dated } | { problem: string }> {
+  const found = await findAcrossCalendars(which);
+  if (found === null) {
+    return {
+      problem:
+        'I cannot see a calendar. Allow calendar access in iOS Settings, or connect Google Workspace.',
+    };
+  }
+  if (found.length === 0) return { problem: `I could not find ${which} in your calendar.` };
+  if (found.length > 1) {
+    const soonest = found[0];
+    // One clearly-soonest match is not ambiguous in the way that matters: it is
+    // what a person means by "my dentist" when there are two of them months
+    // apart. Same day is a genuine question.
+    const sameDay =
+      found[1].start.toDateString() === soonest.start.toDateString();
+    if (sameDay) {
+      return {
+        problem: `I have ${found.length} that match ${which} today. Which one — what time?`,
+      };
+    }
+  }
+  return { event: found[0] };
+}
 
 const CALENDAR_READ: Ability = {
   id: 'calendar.read',
@@ -820,10 +913,20 @@ const CALENDAR_MOVE: Ability = {
     // Refusing to guess is the point. A misread date moves a real appointment.
     if (!when) return { ok: false, spoken: 'When do you want it moved to?' };
 
-    const result = await moveEvent(which, when);
-    return result.ok
-      ? { ok: true, spoken: `Moved ${result.title} to ${sayWhen(when)}.` }
-      : { ok: false, spoken: `I could not find ${which} in your calendar.` };
+    // Routed by where the event actually lives. A Google event cannot be
+    // touched through EventKit and never appears there, so the old code found
+    // nothing and reported the event missing — one turn after reading it out.
+    const picked = await oneEvent(which);
+    if ('problem' in picked) return { ok: false, spoken: picked.problem };
+
+    const moved =
+      picked.event.source === 'google'
+        ? await google.moveCalendarEvent(picked.event.id, when)
+        : (await moveEvent(which, when)).ok;
+
+    return moved
+      ? { ok: true, spoken: `Moved ${picked.event.title} to ${sayWhen(when)}.` }
+      : { ok: false, spoken: `I found ${picked.event.title} but could not move it.` };
   },
 };
 
