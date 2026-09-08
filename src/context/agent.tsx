@@ -33,9 +33,15 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { capabilities } from '@/lib/capabilities';
-import { abilityById, runAbility, setCurrentAccount, setModeHandler } from '@/lib/abilities';
+import {
+  abilityById,
+  runAbility,
+  setCurrentAccount,
+  setModeHandler,
+  type Ability,
+} from '@/lib/abilities';
 import { loadOverrides, maySpeak, modeById, withOverrides } from '@/lib/modes';
-import { askGrove, newTurn, type Turn, type TurnTool } from '@/lib/grove';
+import { askGrove, detectActIntent, newTurn, type Turn, type TurnTool } from '@/lib/grove';
 import { abortListening, isListening, startListening, stopListening } from '@/lib/listen';
 import {
   DEFAULT_PERSONA,
@@ -163,6 +169,17 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    * Grove was doing nothing while it waited on Noctus.
    */
   const running = useRef(false);
+  /**
+   * An ability that asked something and is waiting for the answer.
+   *
+   * "What should I call it?" was a dead end: the question was asked, the turn
+   * ended, and the reply arrived as a brand new sentence with no verb in it —
+   * which opens no gate, reaches no ability, and errored. The asking half
+   * existed and the listening half did not.
+   */
+  const pending = useRef<{ ability: Ability; args: Record<string, string>; gap: string } | null>(
+    null
+  );
   /**
    * When Grove last spoke without being asked. Feeds the mode's rate control —
    * an assistant that volunteers something every time you unlock your phone
@@ -358,6 +375,29 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       utter(holdingFor(voice));
     }, 2200);
 
+    // An answer to Grove's own question runs the ability that asked it.
+    //
+    // Deliberately before the model: "Dinner with Sam" is a complete answer to
+    // "what should I call it?" and a meaningless sentence on its own, so
+    // routing it fresh could only ever fail. Cleared either way, so a question
+    // never captures more than the one reply.
+    const waiting = pending.current;
+    pending.current = null;
+    if (waiting && !detectActIntent(asked)) {
+      clearTimeout(holdTimer);
+      const filled = { ...waiting.args, [waiting.gap]: asked };
+      running.current = true;
+      setState('working');
+      const answered = await runAbility(waiting.ability, filled);
+      running.current = false;
+      if (!mine()) return;
+      setCaption(answered.spoken);
+      rememberQuestion(waiting.ability, filled, answered);
+      await whenQuiet();
+      if (mine()) utter(answered.ok ? answered.spoken : shortFailure(answered.spoken));
+      return;
+    }
+
     let reply;
     try {
       reply = await askGrove(history.current, asked, { persona: voice, facts: known });
@@ -385,7 +425,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // interrupted by the thing you were waiting for is worse than the wait.
     if (held) await whenQuiet();
     if (!mine()) return;
-    utter(reply.text);
+    // A read says nothing until it has something to say. The holding timer
+    // above covers a slow one; speaking here as well produced two "let me
+    // check"s and, when the lookup failed, no answer at all.
+    if (!reply.holdForTool) utter(reply.text);
 
     // Anything worth remembering was pulled locally, by keyword, from what was
     // said — never inferred by a model and stored where you cannot see it.
@@ -472,6 +515,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // screen" — which is the right thing to be able to read and the wrong
     // thing to have recited into your ear while walking. The card keeps the
     // full sentence; out loud it gets a short one.
+    rememberQuestion(ability, reply.args, outcome);
+
     const heard = outcome.ok ? outcome.spoken : shortFailure(outcome.spoken);
 
     // The result of work you interrupted is not something you still want read
@@ -541,7 +586,14 @@ function shortFailure(text: string): string {
   return first.length > 4 && first.length <= 120 ? first : text.slice(0, 120);
 }
 
-/** Speak, and let the state follow the audio rather than a timer. */
+/**
+   * Speak, and let the state follow the audio rather than a timer.
+   *
+   * A question opens the microphone when it finishes. Grove asking "what
+   * should I call it?" and then dropping to Ready puts the burden back on the
+   * person to press again — which, wearing glasses with the phone in a pocket,
+   * is the moment a conversation stops being hands-free.
+   */
   const utter = useCallback((text: string) => {
     // Claimed at the moment of speaking, because stopSpeaking() also fires
     // onDone — an interruption and a natural ending are the same callback.
@@ -557,12 +609,41 @@ function shortFailure(text: string): string {
         if (!mounted.current) return;
         // A newer press owns the app now; this speech is over and irrelevant.
         if (turn !== turnSeq.current) return;
+        // A question expects an answer, so listen for one rather than resting.
+        // Only when no ability is still running: something asked while work is
+        // in flight is rhetorical, not a prompt.
+        if (text.trim().endsWith('?') && !running.current) {
+          void beginListening(false);
+          return;
+        }
         // And even within the same turn, only speaking becomes resting. If
         // anything downstream has already moved on, it keeps its state.
         setState((current) => (current === 'speaking' ? restingState() : current));
       },
     });
+    // beginListening is declared below and is stable: its own deps are exchange
+    // and clearSilence, both useCallback with no deps. Listing it here would be
+    // a forward reference that changes nothing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * Note that an ability asked for something, and which argument is missing.
+   *
+   * A question is a failed run whose reply ends in a question mark — that is
+   * what "I need one more thing" looks like from out here. The gap is the first
+   * required argument that came back empty, which is the one being asked about.
+   */
+  const rememberQuestion = useCallback(
+    (ability: Ability, args: Record<string, string>, outcome: { ok: boolean; spoken: string }) => {
+      if (outcome.ok || !outcome.spoken.trim().endsWith('?')) return;
+      const gap = Object.entries(ability.args).find(
+        ([name, spec]) => spec.required === true && !(args[name] ?? '').trim()
+      )?.[0];
+      pending.current = gap ? { ability, args, gap } : null;
+    },
+    []
+  );
 
   const clearSilence = useCallback(() => {
     if (silence.current) {

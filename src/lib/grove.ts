@@ -26,7 +26,7 @@
  */
 
 import { ABILITIES, abilityById, isSchedulable, usableAbilities, type Ability } from './abilities';
-import { abilitiesFor, holdingLine, modeById, type Mode } from './modes';
+import { abilitiesFor, modeById, type Mode } from './modes';
 import { asPromptBlock, factFrom, type Extracted, type Fact } from './memory';
 import {
   isLightModelConfigured,
@@ -81,6 +81,13 @@ export type GroveReply = {
   instruction?: string;
   /** A fact worth keeping, pulled locally from what was said. */
   fact?: Extracted;
+  /**
+   * Say nothing yet — a read is running and its result is the answer.
+   *
+   * Set for abilities marked `reads`, where anything said first is either a
+   * second holding line or the model guessing at data it has not seen.
+   */
+  holdForTool?: boolean;
 };
 
 export function newTurn(role: Turn['role'], text: string, extra: Partial<Turn> = {}): Turn {
@@ -208,7 +215,7 @@ const POLITE_COMMAND = new RegExp(
 const ELLIPTICAL_LOOKUP = /^\s*(?:anything|any (?:mail|messages|emails|news))\b/i;
 
 const LOOKUP_QUESTION =
-  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|coat|umbrella|wear|traffic|how long|how far|eta|leave for|leave by|set off|get there|get home|which way|way to|route to|far is|my day|day looking|got on|first thing|last thing|next thing|first class|last class|of the day|first class|class|appointment|meeting|event|events|booked|flight|this week|anything with|anything on|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|doc|docs|document|plan|notes|spreadsheet|drive|news|markets|happened|remind me (?:what|who|about)|supposed to|do i know about|did i say|what did i|anything from|say about|did .{2,20} say)\b/i;
+  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|coat|umbrella|wear|traffic|how long|how far|eta|leave for|leave by|set off|get there|get home|which way|way to|route to|far is|my day|day looking|got on|first thing|last thing|next thing|what time is|what time'?s|first class|last class|of the day|first class|class|appointment|meeting|event|events|booked|flight|this week|anything with|anything on|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|doc|docs|document|plan|notes|spreadsheet|drive|news|markets|happened|remind me (?:what|who|about)|supposed to|do i know about|did i say|what did i|anything from|say about|did .{2,20} say)\b/i;
 
 /**
  * Whether this is a question Grove should look up rather than answer offhand.
@@ -331,22 +338,47 @@ function normalise(text: string): string {
 }
 
 /**
- * Arguments for the turn, with music's title backfilled from what was said.
+ * Arguments for the turn, with what the model left out read back off the
+ * sentence.
  *
- * Only ever adds a missing title; anything the model did supply wins, because
- * it sees the whole conversation and this only sees one sentence.
+ * The model drops arguments often enough to matter, and an ability that only
+ * ever sees `args` cannot tell "they did not say" from "the model did not pass
+ * it on". Music played a random track for a named artist that way; the calendar
+ * read the whole day back for "what is my first class", because the position
+ * lived in the sentence and never reached the ability.
+ *
+ * Only ever fills a gap. Anything the model did supply wins, since it sees the
+ * whole conversation and this sees one sentence.
  */
-function musicArgs(
+function fillArgs(
   chosen: Ability | null,
   fromModel: Record<string, string> | undefined,
   userText: string
 ): Record<string, string> {
-  const args = fromModel ?? {};
-  if (chosen?.id !== 'music.play') return args;
-  if ((args.what ?? '').trim()) return args;
-  const heard = musicQueryFrom(userText);
-  return heard ? { ...args, what: heard } : args;
+  const args = { ...(fromModel ?? {}) };
+
+  if (chosen?.id === 'music.play' && !(args.what ?? '').trim()) {
+    const heard = musicQueryFrom(userText);
+    if (heard) args.what = heard;
+  }
+
+  if (chosen?.id === 'calendar.read') {
+    // The position and the day are both in what was said, and both change the
+    // answer completely — "my last thing" is one event, "today" is a window.
+    if (!(args.which ?? '').trim() && POSITION_WORD.test(userText)) {
+      args.which = userText;
+    }
+    if (!(args.when ?? '').trim() && /\b(today|tomorrow|week|tonight)\b/i.test(userText)) {
+      args.when = userText;
+    }
+  }
+
+  return args;
 }
+
+/** Any wording that names a position rather than a window. */
+const POSITION_WORD =
+  /\b(first|last|next|final|latest|earliest|upcoming|after (?:this|that))\b/i;
 
 export function pickAbility(text: string): Ability | null {
   const haystack = text.toLowerCase();
@@ -516,9 +548,14 @@ export async function askGrove(
     // so for a read its prose is replaced by a holding line and the tool's
     // answer is the answer. It also removes a whole utterance from the turn,
     // which is the other half of why these felt slow.
-    if (chosen?.reads && usable) {
-      usable = holdingLine(mode);
-    }
+    // Nothing is said before a read. The tool's answer is the whole answer.
+    //
+    // Replacing the model's prose with a holding line was the wrong half of the
+    // fix: exchange() already speaks a holding line when a turn runs long, so a
+    // read said "let me check" twice and, if the lookup then failed, that was
+    // the entire reply — Grove announcing it was looking and never coming back.
+    // Silence here, the existing timer for slowness, the result when it lands.
+    const holdForTool = Boolean(chosen?.reads);
 
     return {
       text:
@@ -532,13 +569,14 @@ export async function askGrove(
           voice: activePreset(persona),
         }),
       ability: chosen ?? undefined,
+      holdForTool,
       // The model fills these normally, but it drops the title often enough to
       // matter: asked for Playboi Carti it named music.play with no `what` at
       // all, an empty title means shuffle, and a random jazz cover started
       // playing. An empty argument on a sentence that plainly names something
       // is a gap to fill, not an instruction to pick at random — so the local
       // reader backfills it whether or not the model ran.
-      args: musicArgs(chosen, light?.args, userText),
+      args: fillArgs(chosen, light?.args, userText),
       schedule: schedule ?? undefined,
       phrase: phrase ?? undefined,
       blocked: blocked ?? undefined,

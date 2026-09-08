@@ -828,6 +828,9 @@ const CALENDAR_FIND: Ability = {
     'what is my first class of the day',
     'do I have anything with Sam this week',
     'when is the flight',
+    'what time is dinner',
+    'what time is my meeting with Sam',
+    'when is my last class',
   ],
   run: async (args) => {
     const which = (args.which || '').trim();
@@ -1099,8 +1102,13 @@ const MUSIC: Ability = {
     }
     return {
       ok: false,
+      // Names the likeliest cause rather than leaving it a mystery. iOS only
+      // exposes the local library to a third-party app, so an Apple Music track
+      // that has never been downloaded is genuinely invisible here — no amount
+      // of searching finds it, and "not in your library" sounds like a lie to
+      // someone looking at it in the Music app.
       spoken: wanted
-        ? `I could not find ${wanted} in your library.`
+        ? `I could not find ${wanted}. I can only see downloaded music — Apple Music tracks that stream are invisible to me.`
         : 'I could not get your library to play.',
     };
   },
