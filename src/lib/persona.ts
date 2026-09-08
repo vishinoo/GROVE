@@ -50,6 +50,19 @@ export type Persona = {
    * thing the user chooses, not a synthesiser parameter.
    */
   voiceId?: string;
+  /**
+   * Your own four colours for the orb, or unset to follow the mode.
+   *
+   * The orb is the only thing on the Talk screen, so it is the whole of what
+   * Grove looks like — which makes it the one thing worth letting someone make
+   * theirs. Kept beside the name for the same reason: both are how you tell
+   * your assistant apart from anyone else's.
+   *
+   * Setting this overrides the mode palettes. That is the point, and it is also
+   * the cost: you stop being able to see which mode you are in at a glance, so
+   * clearing it is one tap away.
+   */
+  palette?: string[];
   /** The user's own words for how Grove should talk. May be empty. */
   manner: string;
   delivery: Delivery;
@@ -234,6 +247,14 @@ export async function loadPersona(): Promise<Persona> {
           : DEFAULT_NAME,
       voiceId: typeof parsed.voiceId === 'string' ? parsed.voiceId : undefined,
       mode: typeof parsed.mode === 'string' ? parsed.mode : 'normal',
+      // Four hex colours or nothing. A partial palette would paint some lobes
+      // and leave others on the mode's, which reads as a rendering bug.
+      palette:
+        Array.isArray(parsed.palette) &&
+        parsed.palette.length === 4 &&
+        parsed.palette.every((c) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c))
+          ? parsed.palette
+          : undefined,
       manner: upgradeManner(
         typeof parsed.manner === 'string' ? parsed.manner : DEFAULT_PERSONA.manner
       ),

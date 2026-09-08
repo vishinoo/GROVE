@@ -90,7 +90,9 @@ export default function Talk() {
             // The whole palette, not just the tint. Passing the tint alone
             // recoloured exactly one lobe of four, which read as a glitch
             // rather than a mode.
-            palette={modeById(persona.mode ?? 'normal').palette}
+            // Your own colours win over the mode's. Choosing them is choosing
+            // to see your assistant rather than your current situation.
+            palette={persona.palette ?? modeById(persona.mode ?? 'normal').palette}
           />
         </View>
 

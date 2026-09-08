@@ -108,6 +108,16 @@ const QUESTION_OPENERS =
  * upstairs" are untouched — only a sentence that is nothing but a mode name
  * counts as asking for one.
  */
+/**
+ * Any way of asking for a mode.
+ *
+ * Needs a switching word AND a mode name, so "I need to focus" and "the study
+ * is upstairs" are untouched, while every phrasing people actually use —
+ * turn it on, put me in, switch to, activate, set — reaches mode.set.
+ */
+const MODE_COMMAND =
+  /\b(?:turn|switch|go|put|set|activate|enter|start|enable|into)\b[^.?!]{0,24}?\b(?:focus|study|wind[-\s]?down|normal)\b/i;
+
 const BARE_MODE =
   /^\s*(?:back to\s+)?(?:focus|study|wind[-\s]?down|normal)(?:\s+mode)?\s*[.!]?\s*$/i;
 
@@ -222,6 +232,12 @@ export function detectActIntent(text: string): boolean {
   // "Study mode." "Back to normal." No verb anywhere, and unmistakably an
   // instruction — naming a mode is the whole sentence, the way a go-ahead is.
   if (BARE_MODE.test(t)) return true;
+  // "Turn focus mode on" splits its verb around the object, so the imperative
+  // test — which looks for a verb at the start — saw "turn" and no match, the
+  // gate stayed shut, and mode.set never ran. Grove said "focus mode" and
+  // changed nothing, which is the most annoying way to fail: it sounds like it
+  // worked.
+  if (MODE_COMMAND.test(t)) return true;
   // Addressed to Grove and carrying a verb: an instruction, question mark or
   // not. Checked before the question tests, which would otherwise refuse it.
   if (POLITE_COMMAND.test(t)) return true;
