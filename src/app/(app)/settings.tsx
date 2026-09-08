@@ -77,71 +77,43 @@ export default function Settings() {
     <Screen title="Settings">
       {reduced ? <Notice text={reduced} tone="info" /> : null}
 
-      {/* ------------------------------------------------------------- name */}
+      {/* ------------------------------------------------------- who it is */}
 
-      <Section label="Name">
-        <Card>
+      {/*
+        Name and colours together, at the top, because they are one decision.
+        Both answer "whose assistant is this" and neither reads as a setting —
+        splitting them across the screen made the orb feel like a theme option
+        rather than the thing you are naming.
+
+        The name sits where the state word goes, so you are editing it in the
+        place you will actually read it.
+      */}
+      <Section>
+        <Card style={{ alignItems: 'center', paddingVertical: 20, gap: 12 }}>
+          <Orb
+            state="idle"
+            level={0}
+            size={140}
+            palette={draftPalette}
+            showCaption={false}
+            onPress={() => {}}
+          />
+
           <TextInput
             value={persona.name}
             onChangeText={(name) => set({ name: name.slice(0, NAME_LIMIT) })}
             placeholder="Buddy"
             placeholderTextColor={palette.muted}
-            style={{
-              fontFamily: Type.cardTitle.fontFamily,
-              fontSize: 17,
-              color: palette.ink,
-              paddingVertical: 2,
-            }}
+            textAlign="center"
+            accessibilityLabel="What it answers to. Tap to rename."
+            style={[
+              Type.state,
+              { color: palette.ink, paddingVertical: 2, minWidth: 140 },
+            ]}
           />
-          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 6 }]}>
-            You’ll be saying it out loud in public. Pick something you don’t mind saying.
-          </Text>
-        </Card>
-      </Section>
-
-      {/* ------------------------------------------------------------ voice */}
-
-      <Section label="How it talks">
-        <MannerPicker
-          manner={persona.manner}
-          onSelect={(preset) => set({ manner: preset.manner, delivery: preset.delivery })}
-        />
-        <Card>
-          <TextInput
-            value={persona.manner}
-            onChangeText={(manner) => set({ manner: manner.slice(0, MANNER_LIMIT) })}
-            placeholder="Short and dry. Don’t be chirpy."
-            placeholderTextColor={palette.muted}
-            multiline
-            style={{
-              minHeight: 76,
-              fontFamily: Type.body.fontFamily,
-              fontSize: 14.5,
-              lineHeight: 21,
-              color: palette.ink,
-            }}
-          />
-          <Mono style={{ marginTop: 8 }}>
-            {persona.manner.length}/{MANNER_LIMIT}
-          </Mono>
-        </Card>
-      </Section>
-
-      {/* --------------------------------------------------------- the orb */}
-
-      <Section label="Its colours">
-        <Card style={{ alignItems: 'center', paddingVertical: 18, gap: 14 }}>
-          {/*
-            A live one, not a swatch row. The orb is the whole of what Grove
-            looks like, and four colours in a list tell you nothing about how
-            they read once they are drifting over each other.
-          */}
-          <Orb state="idle" level={0} size={132} palette={draftPalette} onPress={() => {}} />
 
           <Text style={[Type.bodySm, { color: palette.muted, textAlign: 'center' }]}>
-            {persona.palette
-              ? 'Yours. Tap a circle to change it.'
-              : 'Following the mode. Tap a circle to make it yours.'}
+            You&rsquo;ll be saying it out loud in public. Tap a circle to recolour it.
           </Text>
 
           <View style={{ flexDirection: 'row', gap: 12 }}>
@@ -152,9 +124,9 @@ export default function Settings() {
                 accessibilityLabel={`Change colour ${lobe + 1}`}
                 onPress={() => setEditing(editing === lobe ? null : lobe)}
                 style={({ pressed }) => ({
-                  width: 40,
-                  height: 40,
-                  borderRadius: 20,
+                  width: 38,
+                  height: 38,
+                  borderRadius: 19,
                   backgroundColor: colour,
                   borderWidth: editing === lobe ? 3 : 1,
                   borderColor: editing === lobe ? palette.ink : palette.line,
@@ -200,6 +172,32 @@ export default function Settings() {
               }}
             />
           ) : null}
+        </Card>
+      </Section>
+
+      <Section label="How it talks">
+        <MannerPicker
+          manner={persona.manner}
+          onSelect={(preset) => set({ manner: preset.manner, delivery: preset.delivery })}
+        />
+        <Card>
+          <TextInput
+            value={persona.manner}
+            onChangeText={(manner) => set({ manner: manner.slice(0, MANNER_LIMIT) })}
+            placeholder="Short and dry. Don’t be chirpy."
+            placeholderTextColor={palette.muted}
+            multiline
+            style={{
+              minHeight: 76,
+              fontFamily: Type.body.fontFamily,
+              fontSize: 14.5,
+              lineHeight: 21,
+              color: palette.ink,
+            }}
+          />
+          <Mono style={{ marginTop: 8 }}>
+            {persona.manner.length}/{MANNER_LIMIT}
+          </Mono>
         </Card>
       </Section>
 
