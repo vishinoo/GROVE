@@ -27,7 +27,10 @@ import {
   addReminder,
   ensureCalendarAccess,
   ensureRemindersAccess,
+  createEvent,
   eventsAhead,
+  findEvents,
+  removeEvent,
   moveEvent,
   readWhen,
   sayWhen,
@@ -252,8 +255,8 @@ const GCAL_READ: Ability = {
     // your ear past about three items.
     const [first, second] = events;
     const rest = events.length - 2;
-    let line = `${first.title} at ${sayWhen(new Date(first.start))}`;
-    if (second) line += `, then ${second.title} at ${sayWhen(new Date(second.start))}`;
+    let line = `${first.title} ${sayWhen(new Date(first.start))}`;
+    if (second) line += `, then ${second.title} ${sayWhen(new Date(second.start))}`;
     if (rest > 0) line += `, and ${rest} more`;
     return { ok: true, spoken: `${line}.`, detail: `${events.length} from Google` };
   },
@@ -427,8 +430,8 @@ function sayEvents(
 ): string {
   const [first, second] = events;
   const rest = events.length - 2;
-  let line = `${first.title} at ${sayWhen(first.start)}`;
-  if (second) line += `, then ${second.title} at ${sayWhen(second.start)}`;
+  let line = `${first.title} ${sayWhen(first.start)}`;
+  if (second) line += `, then ${second.title} ${sayWhen(second.start)}`;
   if (rest > 0) line += `, and ${rest} more`;
   return `${lead}${line}.`;
 }
@@ -490,6 +493,123 @@ const MAIL_REPLY: Ability = {
     return sent
       ? { ok: true, spoken: `Replied to ${saySender(target.from)}.`, detail: target.subject }
       : { ok: false, spoken: 'That reply did not send.' };
+  },
+};
+
+/**
+ * Putting something in the calendar.
+ *
+ * Grove could read a calendar and move things around it and had no way to add
+ * anything, so "add an event today at 9:30" went to the closest ability that
+ * existed — moving one — which searched for an event that was never there and
+ * answered "which one?". A missing ability does not fail cleanly; it gets
+ * mistaken for a broken one.
+ */
+const CALENDAR_ADD: Ability = {
+  id: 'calendar.add',
+  name: 'Add to calendar',
+  what: 'Puts a new event in your calendar.',
+  where: 'device',
+  wired: true,
+  needs: ['calendar-permission'],
+  args: {
+    what: { type: 'string', what: 'what the event is called', required: true },
+    when: { type: 'string', what: 'when it starts, e.g. "today at 9:30" or "Thursday at 2"', required: true },
+    minutes: { type: 'number', what: 'how long it lasts in minutes, if said' },
+  },
+  examples: [
+    'add an event to my calendar today at 9:30',
+    'put lunch with Sam in my calendar on Friday at one',
+    'book gym tomorrow at seven',
+    'schedule a call with Priya Thursday at 2',
+  ],
+  run: async (args) => {
+    const title = (args.what || '').trim();
+    if (!title) return { ok: false, spoken: 'What should I call it?' };
+
+    const when = readWhen(args.when || '');
+    // Never guessed. An event at a time nobody chose is worse than a question.
+    if (!when) return { ok: false, spoken: `When is ${title}?` };
+
+    const minutes = Number(args.minutes);
+    const result = await createEvent(title, when, Number.isFinite(minutes) && minutes > 0 ? minutes : 60);
+    if (result.ok) return { ok: true, spoken: `Added ${title}, ${sayWhen(when)}.` };
+    if (result.reason === 'no-calendar') {
+      return {
+        ok: false,
+        spoken:
+          'There is no calendar on this phone I am allowed to write to. Add your account in iOS Settings under Calendar.',
+      };
+    }
+    if (result.reason === 'no-access') {
+      return { ok: false, spoken: 'I need permission to change your calendar. It is in iOS Settings.' };
+    }
+    return { ok: false, spoken: `I could not add ${title}.` };
+  },
+};
+
+/** Taking something out again. Names what it removed rather than going quiet. */
+const CALENDAR_REMOVE: Ability = {
+  id: 'calendar.remove',
+  name: 'Remove from calendar',
+  what: 'Deletes an event from your calendar.',
+  where: 'device',
+  wired: true,
+  needs: ['calendar-permission'],
+  args: { which: { type: 'string', what: 'which event', required: true } },
+  examples: [
+    'cancel my dentist appointment',
+    'delete the gym event tomorrow',
+    'take the 3pm meeting off my calendar',
+  ],
+  run: async (args) => {
+    const which = (args.which || '').trim();
+    if (!which) return { ok: false, spoken: 'Which event?' };
+    const result = await removeEvent(which);
+    return result.ok
+      ? { ok: true, spoken: `Removed ${result.title}.` }
+      : { ok: false, spoken: `I could not find ${which} in your calendar.` };
+  },
+};
+
+/**
+ * Asking about one thing rather than the whole day.
+ *
+ * "When is my dentist appointment" was answered by reading today out and
+ * hoping, which is why the calendar felt like it could not be asked anything
+ * specific. Searches a couple of months out, because the thing you ask the date
+ * of is usually the thing that is not today.
+ */
+const CALENDAR_FIND: Ability = {
+  id: 'calendar.find',
+  name: 'Find in calendar',
+  what: 'Finds a particular thing in your calendar and says when it is.',
+  where: 'device',
+  wired: true,
+  needs: ['calendar-permission'],
+  reads: true,
+  args: { which: { type: 'string', what: 'what to look for', required: true } },
+  examples: [
+    'when is my dentist appointment',
+    'what is my first class of the day',
+    'do I have anything with Sam this week',
+    'when is the flight',
+  ],
+  run: async (args) => {
+    const which = (args.which || '').trim();
+    if (!which) return { ok: false, spoken: 'What am I looking for?' };
+
+    const found = await findEvents(which);
+    if (found === null) {
+      return { ok: false, spoken: 'I cannot see a calendar. Allow calendar access in iOS Settings.' };
+    }
+    if (found.length === 0) return { ok: true, spoken: `Nothing matching ${which}.` };
+
+    const [first, second] = found;
+    let line = `${first.title} ${sayWhen(first.start)}`;
+    if (second) line += `, then ${second.title} ${sayWhen(second.start)}`;
+    if (found.length > 2) line += `, and ${found.length - 2} more`;
+    return { ok: true, spoken: `${line}.`, detail: `${found.length} matching "${which}"` };
   },
 };
 
@@ -746,7 +866,18 @@ const DIRECTIONS: Ability = {
     to: { type: 'string', what: 'where to — use what you know of where they live or work', required: true },
     how: { type: 'string', what: '"walking" if they said so, otherwise driving' },
   },
-  examples: ['how long to get home', 'when should I leave for the office', 'how far is the station'],
+  // These are the words people actually use to ask for a route. Without them
+  // the keyword fallback matched nothing, so a request only worked while the
+  // model was reachable.
+  examples: [
+    'how long to get home',
+    'when should I leave for the office',
+    'how far is the station',
+    "let's go to the University of Alberta campus",
+    'take me to the airport',
+    'directions to the station',
+    'which way to campus',
+  ],
   run: async (args) => {
     const to = (args.to || '').trim();
     if (!to) return { ok: false, spoken: 'Where to?' };
@@ -819,7 +950,7 @@ const DAY: Ability = {
       parts.push('Nothing in the diary.');
     } else {
       const [first, second] = events;
-      let line = `${events.length} thing${events.length === 1 ? '' : 's'} on — ${first.title} at ${sayWhen(first.start)}`;
+      let line = `${events.length} thing${events.length === 1 ? '' : 's'} on — ${first.title} ${sayWhen(first.start)}`;
       if (second) line += `, then ${second.title}`;
       parts.push(`${line}.`);
     }
@@ -977,6 +1108,9 @@ const SET_MODE: Ability = {
 };
 
 export const ABILITIES: Ability[] = [
+  CALENDAR_ADD,
+  CALENDAR_REMOVE,
+  CALENDAR_FIND,
   MAIL_REPLY,
   GCAL_READ,
   DOC_FIND,

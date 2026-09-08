@@ -232,6 +232,110 @@ export async function moveEvent(
   }
 }
 
+/**
+ * The calendar new events should land in.
+ *
+ * `getDefaultCalendarAsync` is the right answer and is not always available —
+ * on a phone whose only account is Google it can return something unwritable —
+ * so the first calendar that actually allows modification is the fallback.
+ * Writing into a read-only calendar fails silently at the OS level, which is
+ * the worst outcome: Grove would say "added" and nothing would be there.
+ */
+async function writableCalendarId(): Promise<string | null> {
+  const m = mod();
+  if (!m) return null;
+  try {
+    const preferred = await m.getDefaultCalendarAsync?.();
+    if (preferred?.allowsModifications) return preferred.id;
+  } catch {
+    // Not available on every install; fall through to the scan.
+  }
+  try {
+    const all = await m.getCalendarsAsync(m.EntityTypes.EVENT);
+    return all.find((c) => c.allowsModifications)?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Puts something in the calendar.
+ *
+ * Grove had no way to do this at all, so "add an event at 9:30" was routed to
+ * the nearest thing that existed — moving one — which then failed looking for
+ * an event that was never there and asked "which one?".
+ *
+ * An hour is assumed when no end is given, because that is what most things
+ * are and a zero-length event is invisible in every calendar app.
+ */
+export async function createEvent(
+  title: string,
+  start: Date,
+  minutes = 60
+): Promise<{ ok: boolean; reason?: 'no-access' | 'no-calendar' | 'failed' }> {
+  const m = mod();
+  if (!m) return { ok: false, reason: 'no-access' };
+  if (!(await ensureCalendarAccess())) return { ok: false, reason: 'no-access' };
+
+  const calendarId = await writableCalendarId();
+  if (!calendarId) return { ok: false, reason: 'no-calendar' };
+
+  try {
+    await m.createEventAsync(calendarId, {
+      title: title.slice(0, 120),
+      startDate: start,
+      endDate: new Date(start.getTime() + minutes * 60_000),
+    });
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: 'failed' };
+  }
+}
+
+/**
+ * Removes an event by describing it.
+ *
+ * Matched the same way moveEvent matches, and for the same reason: a fuzzy
+ * match across a whole calendar is how you delete the wrong thing. Returns
+ * what it removed so Grove can name it back — deleting silently is not
+ * something to be quiet about.
+ */
+export async function removeEvent(which: string): Promise<{ ok: boolean; title?: string }> {
+  const m = mod();
+  if (!m || !(await ensureCalendarAccess())) return { ok: false };
+  try {
+    const hit = (await findEvents(which)) ?? [];
+    if (hit.length === 0) return { ok: false };
+    await m.deleteEventAsync(hit[0].id);
+    return { ok: true, title: hit[0].title };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
+ * Events whose title matches, soonest first.
+ *
+ * "When is my dentist appointment" is a different question from "what is on
+ * today", and answering it by reading the whole day out and hoping the right
+ * one is in there is what made the calendar feel like it could not be asked
+ * anything specific.
+ */
+export async function findEvents(
+  query: string,
+  days = 60
+): Promise<SimpleEvent[] | null> {
+  const upcoming = await eventsAhead(24 * days);
+  if (upcoming === null) return null;
+  const needle = query.toLowerCase().replace(/^(?:my|the|a)\s+/, '').trim();
+  if (!needle) return upcoming;
+  const words = needle.split(/\s+/).filter((w) => w.length > 2);
+  return upcoming.filter((e) => {
+    const title = e.title.toLowerCase();
+    return title.includes(needle) || words.some((w) => title.includes(w));
+  });
+}
+
 function numberWord(n: number): string {
   return ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'][n] ?? '';
 }

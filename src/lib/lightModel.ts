@@ -59,6 +59,22 @@ const TIMEOUT_MS = 8_000;
  * it happens, rather than by sitting silent for twice as long.
  */
 const SEARCH_TIMEOUT_MS = 22_000;
+
+/**
+ * How long a call straight to the provider gets.
+ *
+ * Separate from TIMEOUT_MS, which was tuned when this call went to Noctus on
+ * the same Wi-Fi and a slow answer meant a slow laptop. It now leaves the phone
+ * for Google over whatever signal there is, and eight seconds is not a budget
+ * for that — it is a coin toss.
+ *
+ * The regression that made this obvious was mine: skipping web grounding for
+ * turns a local tool answers also dropped them from the 22-second search budget
+ * to the 8-second one, so the calendar, mail and maps all began reporting the
+ * model as unreachable. Grounding and patience are different questions and are
+ * no longer answered by the same number.
+ */
+const DIRECT_TIMEOUT_MS = 16_000;
 const PROBE_TIMEOUT_MS = 1_500;
 
 export type LightMessage = { role: 'user' | 'assistant'; content: string };
@@ -251,7 +267,7 @@ async function askDirect(
   if (!key) return null;
 
   try {
-    const response = await withTimeout(json || !search ? TIMEOUT_MS : SEARCH_TIMEOUT_MS, (signal) =>
+    const response = await withTimeout(search && !json ? SEARCH_TIMEOUT_MS : DIRECT_TIMEOUT_MS, (signal) =>
       fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
           DIRECT_MODEL
@@ -582,6 +598,8 @@ ${context.manner}
 
 ${HOUSE_RULES}
 - When one of the abilities above covers the request, name it on the ABILITY line and pull its arguments onto the ARGS line. Say you are doing it. Do not narrate the steps.
+- ANYTHING SPECIFIC YOU NAME IN YOUR REPLY MUST APPEAR IN ARGS. If you say "let's go with Fleetwood Mac", then ARGS must carry what=Fleetwood Mac. The ability does not read your reply — it only sees ARGS — so a name that is not there is not the thing that happens, and the person hears you promise one song and get another.
+- If you are leaving the choice to the ability, say so without naming anything: "putting something on", not the name of a band you did not pass along.
 - When nothing above covers it, write ABILITY: none and just answer. Never imply you did something you have no ability for.
 
 - If the request is a standing job — it has a time, a recurrence, or a "whenever I say..." in it — also give a TITLE line: two or three words naming it, as a person would label it. "Morning brief". "Market check". "Leave now". Not a sentence, not a restatement.

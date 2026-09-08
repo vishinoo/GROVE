@@ -378,6 +378,9 @@ public class GroveRemoteModule: Module {
     player.setQueue(with: MPMediaItemCollection(items: items))
     player.shuffleMode = .songs
     player.play()
+    // Music is real audio, so it keeps the session alive on its own. The
+    // silence has nothing left to do and only competes with it.
+    keepAlive?.pause()
     return [
       "ok": true,
       "title": player.nowPlayingItem?.title ?? items[0].title ?? "something",
@@ -439,10 +442,23 @@ public class GroveRemoteModule: Module {
    */
   private func configureSession() throws {
     let session = AVAudioSession.sharedInstance()
+    // `.mixWithOthers` is what lets your music keep playing.
+    //
+    // Without it this session interrupts whatever else is making sound, and
+    // because Grove renders silence continuously to stay resident, that
+    // interruption is permanent rather than momentary: start a song and it
+    // stops, every time. `.duckOthers` was meant to soften that and cannot —
+    // ducking still means Grove owns the session, and the silence holds it for
+    // as long as the app is open.
+    //
+    // Mixing means Grove speaks over the music instead of in place of it,
+    // which is what someone wearing the glasses actually wants. The cost is
+    // that the microphone can hear the music during recognition; that is the
+    // right trade for a thing you listen to music on.
     try session.setCategory(
       .playAndRecord,
       mode: .spokenAudio,
-      options: [.allowBluetooth, .allowBluetoothA2DP, .duckOthers, .defaultToSpeaker]
+      options: [.allowBluetooth, .allowBluetoothA2DP, .mixWithOthers, .defaultToSpeaker]
     )
     try session.setActive(true, options: [])
   }

@@ -121,7 +121,7 @@ export const MODES: Mode[] = [
     label: 'Focus',
     what: 'Working. Grove stays quiet unless asked.',
     manner: 'They are concentrating. Answer in as few words as will do, and never volunteer more.',
-    allow: ['mode.set', 'reminders.add', 'calendar.read', 'gcal.read', 'weather.now', 'memory.recall', 'music.play'],
+    allow: ['mode.set', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.find', 'calendar.add', 'weather.now', 'memory.recall', 'music.play'],
     interrupt: 'never',
     holding: ['Moment.', 'Checking.'],
     empty: 'Nothing useful.',
@@ -135,7 +135,7 @@ export const MODES: Mode[] = [
     what: 'Explains properly instead of being terse.',
     manner:
       'They are learning something. Explain it properly — three or four sentences is right here, and being clipped is unhelpful. Use an example. Check they followed before moving on.',
-    allow: ['mode.set', 'memory.recall', 'reminders.add', 'calendar.read', 'gcal.read'],
+    allow: ['mode.set', 'memory.recall', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.find', 'calendar.add'],
     interrupt: 'never',
     holding: ['Let me look that up properly — one moment.', 'Good question. Give me a second to check rather than guess.'],
     empty: "I couldn't find a good source for that, so I'd rather not guess.",
