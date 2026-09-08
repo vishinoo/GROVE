@@ -78,22 +78,23 @@ function compile() {
  * the router can reach an ability, not whether this laptop has a microphone.
  */
 function stub() {
-  const handler = {
-    get: (target, prop) => {
-      // capabilities.ts gates the ring and music on Platform.OS === 'ios', so
-      // without this the stub reported a non-iOS device, music.play and
-      // maps.eta came back unwired, and every check below silently skipped
-      // them. A harness that quietly tests less than it appears to is the
-      // worst kind.
-      if (prop === 'OS') return 'ios';
-      if (prop === 'isAvailable') return () => true;
-      if (prop === '__esModule') return true;
-      if (prop === 'default') return new Proxy({}, handler);
-      if (prop in target) return target[prop];
-      return () => undefined;
-    },
-  };
-  return new Proxy({ EntityTypes: { EVENT: 'event' } }, handler);
+  // Recursive: every unknown property is itself a stub, so `Platform.OS` and
+  // `require('grove-remote').isAvailable()` both resolve. A flat stub returned
+  // a bare function for `Platform`, `.OS` on it was undefined, capabilities.ts
+  // decided this was not an iPhone, and music.play and maps.eta came back
+  // unwired — so every routing check silently skipped them.
+  const make = () =>
+    new Proxy(function () {}, {
+      get: (_t, prop) => {
+        if (prop === '__esModule') return true;
+        if (prop === 'OS') return 'ios';
+        if (prop === 'EntityTypes') return { EVENT: 'event' };
+        if (prop === Symbol.toPrimitive || prop === 'then') return undefined;
+        return make();
+      },
+      apply: () => true,
+    });
+  return make();
 }
 
 const NATIVE = /^(react-native|expo-|@react-native|@supabase|grove-remote)/;

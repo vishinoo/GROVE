@@ -193,7 +193,7 @@ const POLITE_COMMAND = new RegExp(
 const ELLIPTICAL_LOOKUP = /^\s*(?:anything|any (?:mail|messages|emails|news))\b/i;
 
 const LOOKUP_QUESTION =
-  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|coat|umbrella|wear|traffic|how long|how far|eta|my day|day looking|got on|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|doc|docs|document|plan|notes|spreadsheet|drive|news|markets|happened|remind me (?:what|who|about)|supposed to|do i know about|did i say|what did i|anything from|say about|did .{2,20} say)\b/i;
+  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|coat|umbrella|wear|traffic|how long|how far|eta|leave for|leave by|set off|get there|get home|my day|day looking|got on|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|doc|docs|document|plan|notes|spreadsheet|drive|news|markets|happened|remind me (?:what|who|about)|supposed to|do i know about|did i say|what did i|anything from|say about|did .{2,20} say)\b/i;
 
 /**
  * Whether this is a question Grove should look up rather than answer offhand.
