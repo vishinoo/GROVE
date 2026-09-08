@@ -34,7 +34,7 @@ import {
   lightTurn,
   type LightMessage,
 } from './lightModel';
-import { activePreset, fallback, mannerDirective, type Persona } from './persona';
+import { activePreset, fallback, mannerDirective, type Persona, notedFor } from './persona';
 import { describeSchedule, parseSchedule, phraseTrigger, type Schedule } from './sparks';
 
 export type TurnTool = {
@@ -188,6 +188,41 @@ const POLITE_COMMAND = new RegExp(
 );
 
 /**
+ * Asking to be taken somewhere.
+ *
+ * Anchored to the start of the sentence, like the imperative test and for the
+ * same reason: "she said she would drive to work tomorrow" contains a perfectly
+ * good route request belonging to someone else. A destination has to follow,
+ * which keeps "I want to go" out of it.
+ */
+const NAV_COMMAND = new RegExp(
+  `^\\s*${ADDRESS}(?:` +
+    // "take me to…", "navigate to…", "directions to…"
+    `(?:take me|navigate|directions|route|drive|walk|head)\\s+(?:me\\s+)?to\\s+\\S` +
+    // "I want to go to…", "I'm going to head to…"
+    `|(?:i(?:'d| would)? (?:want|need|like) to |i'?m going to )(?:go|get|drive|walk|head)\\s+to\\s+\\S` +
+    // "how do I get to…", "which way to…", "let's go to…"
+    `|how (?:do i|can i|long to) get to\\s+\\S` +
+    `|which way to\\s+\\S` +
+    `|let'?s (?:go|head|drive) to\\s+\\S` +
+    `)`,
+  'i'
+);
+
+/**
+ * Things that follow "go to" and are not places.
+ *
+ * "I want to go to bed" and "I need to get to the bottom of this" are the two
+ * that actually came up: both are shaped exactly like a route request and
+ * neither is one. Checked separately rather than woven into the pattern above,
+ * because a list of exceptions is easier to read and to add to than a regex
+ * with holes cut in it.
+ */
+const NOT_A_DESTINATION =
+  /\b(?:bed|sleep|the bottom of|the trouble|the point)\b/i;
+
+
+/**
  * Whether the user wants something done, rather than discussed.
  *
  * This gates every ability run, so it errs toward "no".
@@ -250,6 +285,11 @@ export function detectActIntent(text: string): boolean {
   // changed nothing, which is the most annoying way to fail: it sounds like it
   // worked.
   if (MODE_COMMAND.test(t)) return true;
+  // Asking to be taken somewhere is a request however it is phrased, and most
+  // phrasings put the verb after the subject: "I want to go to the airport"
+  // led with "I", so the imperative test refused it — and the goal extractor
+  // then filed it as an ambition and said "noted".
+  if (NAV_COMMAND.test(t) && !NOT_A_DESTINATION.test(t)) return true;
   // Addressed to Grove and carrying a verb: an instruction, question mark or
   // not. Checked before the question tests, which would otherwise refuse it.
   if (POLITE_COMMAND.test(t)) return true;
@@ -524,9 +564,15 @@ export async function askGrove(
    * Only when nothing else is going on: a sentence that also asks for something
    * still gets a proper turn.
    */
-  if (fact && !acting && !schedule && !phrase) {
+  // ...and only when nothing else is going to happen.
+  //
+  // "I want to go to the airport" matches the goal pattern, so directions were
+  // answered with "Noted — you want to go to the airport" and nothing else
+  // happened. An ability having been chosen means the sentence was a request,
+  // whatever else it also looks like, and the request wins.
+  if (fact && !chosen && !acting && !schedule && !phrase) {
     return {
-      text: `Noted — ${fact.value.replace(/^i /i, 'you ')}.`,
+      text: notedFor(persona, fact.value.replace(/^i /i, 'you ')),
       args: {},
       fact,
     };

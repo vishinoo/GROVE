@@ -1214,6 +1214,9 @@ const DIRECTIONS: Ability = {
     'take me to the airport',
     'directions to the station',
     'which way to campus',
+    'navigate to work',
+    'I want to go to the gym',
+    'how do I get to the mall',
   ],
   run: async (args) => {
     const to = (args.to || '').trim();

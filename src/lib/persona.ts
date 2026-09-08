@@ -101,6 +101,8 @@ export type Preset = {
   empty: string;
   /** Nothing answered at all — no model, no network. */
   stuck: string;
+  /** Acknowledging something worth remembering. */
+  noted: (what: string) => string;
 };
 
 /**
@@ -122,6 +124,7 @@ export const PRESETS: Preset[] = [
     holding: ['Alright, hang on, having a dig through this.', 'Give me a sec, actually doing the work here.', 'Hang on, going to go and find out.', 'One sec, looking into it.'],
     empty: "Yeah, nothing. Whatever's out there isn't saying.",
     stuck: "Can't get to anything right now. Not my finest hour.",
+    noted: (what: string) => `Right, ${what}. Filed away.`,
   },
   {
     key: 'alfred',
@@ -133,6 +136,7 @@ export const PRESETS: Preset[] = [
     holding: ["One moment, I'll have a look.", 'Allow me a moment to check that properly.', 'Let me see what I can find for you.'],
     empty: "I'm afraid I couldn't find anything reliable on that.",
     stuck: "I can't reach anything to check with at present. Do try me again shortly.",
+    noted: (what: string) => `Noted, sir — ${what}. I shan't forget.`,
   },
   {
     key: 'hal',
@@ -144,6 +148,7 @@ export const PRESETS: Preset[] = [
     holding: ['Searching.', 'Retrieving.', 'One moment. Querying.'],
     empty: 'No result.',
     stuck: 'No connection. Cannot retrieve.',
+    noted: (what: string) => `Recorded. ${what.replace(/^./, (c) => c.toUpperCase())}.`,
   },
 ];
 
@@ -298,6 +303,21 @@ function clamp(value: unknown, min: number, max: number, fallbackValue: number):
 export function activePreset(persona: Persona): Preset | undefined {
   const manner = persona.manner.trim();
   return PRESETS.find((p) => p.manner.trim() === manner);
+}
+
+/**
+ * Acknowledging something remembered, in the voice that is speaking.
+ *
+ * "Noted — you owe Sam twelve quid" was the same flat line whichever character
+ * was talking, and it is one of the phrases said most often. A personality that
+ * drops every time Grove does something ordinary is not a personality; it is a
+ * costume worn for the interesting bits.
+ *
+ * A custom manner has no preset, so it falls back to something plain rather
+ * than borrowing another character's voice.
+ */
+export function notedFor(persona: Persona, what: string): string {
+  return activePreset(persona)?.noted(what) ?? `Noted — ${what}.`;
 }
 
 /** One of the voice's holding lines, or a neutral one. */
