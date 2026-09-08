@@ -318,6 +318,18 @@ const ABOUT_PATTERNS: { key: string; test: RegExp; open: boolean }[] = [
  * "I want to" mid-sentence is usually a clause about something else ("she said
  * I want to be careful"), and storing those fills the list with fragments.
  */
+/**
+ * Things that follow "I want to" and are jobs for right now, not ambitions.
+ *
+ * "I want to go to the airport", "I need to send an email", "I want to hear my
+ * emails" all match the goal shape exactly, and every one of them was filed as
+ * a life goal and answered with "noted" while nothing happened. An aspiration
+ * is something you are working towards; these are things to do in the next
+ * thirty seconds, and the difference is the verb.
+ */
+const IMMEDIATE =
+  /^(?:go|get|head|drive|walk|know|hear|see|find|check|ask|send|play|call|email|text|message|read|look|listen|add|book|remind|open|show|tell|put)\b/i;
+
 const GOAL_PATTERNS: { key: string; test: RegExp }[] = [
   { key: 'goal', test: /^i (?:want|need|plan|intend|hope) to\s+(.{3,100})/i },
   { key: 'goal', test: /^(?:my goal is|my aim is|i'?m aiming) (?:to\s+)?(.{3,100})/i },
@@ -328,7 +340,13 @@ const GOAL_PATTERNS: { key: string; test: RegExp }[] = [
 
 const FACT_PATTERNS: { key: string; test: RegExp }[] = [
   { key: 'name', test: /\b(?:i'?m|my name is|call me)\s+([A-Z][a-z]+)/ },
-  { key: 'work', test: /\bi (?:work|am) (?:at|a|an)\s+(.{3,60})/i },
+  // Anchored, and not followed by a quantity word: "I am a bit confused" and
+  // "I am a little tired" both matched this and became permanent facts about
+  // the person's job.
+  {
+    key: 'work',
+    test: /^i (?:work (?:at|for)|am (?:a|an))\s+(?!bit\b|little\b|lot\b|few\b|couple\b)(.{3,60})/i,
+  },
   { key: 'home', test: /\bi live in\s+(.{2,40})/i },
   { key: 'commute', test: /\bi (?:leave|set off)(?: for work)? at\s+(.{2,20})/i },
   { key: 'watchlist', test: /\b(?:my watchlist is|i hold|i own)\s+(.{2,80})/i },
@@ -373,6 +391,8 @@ export function factFrom(text: string): Extracted | null {
   for (const { key, test } of GOAL_PATTERNS) {
     const hit = test.exec(t);
     if (hit?.[1]) {
+      // A job for now is not a goal, however much it sounds like one.
+      if (IMMEDIATE.test(hit[1].trim())) break;
       return {
         key,
         subject: 'me',

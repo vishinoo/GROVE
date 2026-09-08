@@ -62,6 +62,7 @@ function fromBase64Url(data: string): string {
  * told it broke, because it sends you to fix something that was never wrong.
  */
 export type Reason =
+  | 'none'
   | 'not-connected'
   | 'auth-expired'
   | 'api-disabled'
@@ -71,11 +72,15 @@ export type Reason =
   | 'offline'
   | 'server';
 
-let lastReason: Reason = 'not-connected';
+let lastReason: Reason = 'none';
 
 /** The failure, as a sentence to say out loud. */
 export function explain(what = 'that'): string {
   switch (lastReason) {
+    case 'none':
+      // Nothing failed at the network level, so the call simply came back with
+      // nothing useful. Saying "not connected" here is the false alarm.
+      return `Google gave me nothing back on ${what}.`;
     case 'auth-expired':
       return 'My Google sign-in has expired. Reconnect Google in Connections.';
     case 'api-disabled':
@@ -139,6 +144,14 @@ async function call<T>(
             : 'server';
       return null;
     }
+    // Cleared on success, or it lies about the next failure.
+    //
+    // This is module state, and nothing reset it: one genuine "not connected"
+    // early on made every later failure — a timeout, an empty result, a
+    // mistyped search — report that Grove could not reach the inbox, long after
+    // it plainly could. A stale reason is worse than no reason, because it is
+    // specific and confident and sends you to fix something that is not broken.
+    lastReason = 'none';
     const text = await response.text();
     return text ? (JSON.parse(text) as T) : null;
   } catch (problem) {

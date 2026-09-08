@@ -133,6 +133,10 @@ const MODE_COMMAND =
 const BARE_MODE =
   /^\s*(?:back to\s+)?(?:focus|study|wind[-\s]?down|normal)(?:\s+mode)?\s*[.!]?\s*$/i;
 
+/** Being asked outright to remember something. */
+const EXPLICIT_REMEMBER =
+  /\b(?:remember|note that|make a note|don'?t (?:let me )?forget|keep in mind|jog my memory|for the record)\b/i;
+
 const BARE_GO_AHEAD =
   /^\s*(?:(?:ok|okay|yes|yeah|yep|sure|right)[,.\s]+)?(?:please\s+)?(?:do it|do that|go ahead|go on|run it|sort it|handle it|get on with it|make it so|please do|go|now)[.!\s]*$/i;
 
@@ -564,13 +568,18 @@ export async function askGrove(
    * Only when nothing else is going on: a sentence that also asks for something
    * still gets a proper turn.
    */
-  // ...and only when nothing else is going to happen.
+  // ...and only when being told to remember is the whole of it.
   //
-  // "I want to go to the airport" matches the goal pattern, so directions were
-  // answered with "Noted — you want to go to the airport" and nothing else
-  // happened. An ability having been chosen means the sentence was a request,
-  // whatever else it also looks like, and the request wins.
-  if (fact && !chosen && !acting && !schedule && !phrase) {
+  // The shortcut used to fire on anything the extractor recognised, which is a
+  // much wider net than it sounds: "I need to know what time my class is" and
+  // "I am a bit confused" both looked like facts, so both were answered with
+  // "noted" and nothing else happened. The extractor is narrower now, but the
+  // rule matters on its own — a sentence gets this treatment because the person
+  // asked Grove to remember something, not because it happens to parse as one.
+  //
+  // The fact is still recorded on the ordinary path, so nothing is lost by
+  // falling through: this only decides whether the model is worth waking.
+  if (fact && EXPLICIT_REMEMBER.test(userText) && !chosen && !acting && !schedule && !phrase) {
     return {
       text: notedFor(persona, fact.value.replace(/^i /i, 'you ')),
       args: {},
