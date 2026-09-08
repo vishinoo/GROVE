@@ -198,7 +198,11 @@ const GCAL_READ: Ability = {
   needs: ['email'],
   reads: true,
   args: { when: { type: 'string', what: 'the day, e.g. "today", "tomorrow" or "this week"' } },
-  examples: ['what is on my google calendar', "what's on today", 'am I free tomorrow'],
+  examples: [
+    'what is on my google calendar',
+    'what is on my google calendar tomorrow',
+    'check my google calendar for this week',
+  ],
   run: async (args) => {
     const asked = (args.when || '').toLowerCase();
     const days = /\bweek\b/.test(asked) ? 7 : /\btomorrow\b/.test(asked) ? 2 : 1;
@@ -314,7 +318,7 @@ const MAIL_SEND: Ability = {
     subject: { type: 'string', what: 'the subject line' },
     body: { type: 'string', what: 'what it says', required: true },
   },
-  examples: ['email Priya to say I am running late', 'send Sam the address'],
+  examples: ['email Priya to say I am running late', 'email Sam the address'],
   run: async (args) => {
     const asked = (args.to || '').trim();
     const body = (args.body || '').trim();

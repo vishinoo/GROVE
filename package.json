@@ -52,7 +52,8 @@
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "check-model": "node scripts/check-model.js",
-    "set-key": "node scripts/set-key.js"
+    "set-key": "node scripts/set-key.js",
+    "verify": "node scripts/verify.js"
   },
   "private": true,
   "engines": {

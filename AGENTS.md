@@ -157,6 +157,20 @@ due sparks when Grove is next opened.
 ## Checks
 
 ```bash
+npm run verify      # does Grove actually reach its own abilities?
+```
+
+Runs the real modules — not a copy of their regexes — with the native halves
+stubbed as present, and asserts the wiring: every ability is reachable from the
+phrases it advertises, a question can only ever reach an ability marked `reads`,
+ordinary conversation sets nothing off, connections unlock ids that exist, mode
+allow-lists name real abilities, and the OAuth scopes cover the APIs actually
+called. Every fault it checks for has shipped at least once. None of them is a
+type error, so `tsc` cannot see any of them.
+
+
+
+```bash
 npx tsc --noEmit
 npx expo lint
 npx expo export --platform web    # catches bad imports across every route

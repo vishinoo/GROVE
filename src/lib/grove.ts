@@ -101,6 +101,16 @@ const QUESTION_OPENERS =
  * read as instructions — they start with "now" and "go on" — and went on to
  * pick something and run it. Those are questions.
  */
+/**
+ * A mode named on its own.
+ *
+ * Anchored to the whole sentence so that "I need to focus" and "the study is
+ * upstairs" are untouched — only a sentence that is nothing but a mode name
+ * counts as asking for one.
+ */
+const BARE_MODE =
+  /^\s*(?:back to\s+)?(?:focus|study|wind[-\s]?down|normal)(?:\s+mode)?\s*[.!]?\s*$/i;
+
 const BARE_GO_AHEAD =
   /^\s*(?:(?:ok|okay|yes|yeah|yep|sure|right)[,.\s]+)?(?:please\s+)?(?:do it|do that|go ahead|go on|run it|sort it|handle it|get on with it|make it so|please do|go|now)[.!\s]*$/i;
 
@@ -109,8 +119,42 @@ const BARE_YES =
   /^\s*(?:(?:ok|okay|yes|yeah|yep|sure)(?:[,\s]+please)?|please do)[.!\s]*$/i;
 
 /** A verb of work aimed at Grove. */
-const WORK_VERB =
-  /\b(make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up|play|read|brief|tell me about)\b/i;
+/**
+ * Verbs that mean something should happen — in the position that means it.
+ *
+ * Matching a verb anywhere in the sentence was the original design and it was
+ * wrong in the dangerous direction: "I was going to text Sam later" and "she
+ * said she would email me back" both fired, because both contain the verb. The
+ * rule this gate exists to protect is that a false positive sends mail nobody
+ * wrote, and a statement about sending mail is exactly how that happens.
+ *
+ * An instruction to Grove leads with its verb. A statement puts a subject
+ * first. That distinction does the work that counting keywords could not:
+ *
+ *   "text Sam that we are going at seven"   -> acts
+ *   "I was going to text Sam later"         -> does not
+ *
+ * Address forms are allowed in front of it, because people say "please" and
+ * "hey Grove" and mean the imperative that follows.
+ */
+const VERBS = String.raw`make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up|play|read|brief|tell me about|email|text|message|call|switch to|switch into|go into|turn on|turn off|open|handle|push|reschedule|delay|shift|dim|start|stop|queue|skip|pause|resume|let .{2,20} know|give me`;
+
+/** "hey Grove, please …" — anything that can precede an instruction. */
+const ADDRESS = String.raw`(?:(?:hey\s+)?grove[,\s]+)?(?:(?:ok(?:ay)?|now|then|also|and|please|just)\s+)*`;
+
+const IMPERATIVE = new RegExp(`^\\s*${ADDRESS}(?:${VERBS})\\b`, 'i');
+
+/**
+ * "Can you play something?" is an instruction wearing a question mark.
+ *
+ * The subject is what separates it from a question that must never act:
+ * "can YOU send it" is addressed to Grove, "should I send it" is asking for
+ * advice about something the person will do themselves.
+ */
+const POLITE_COMMAND = new RegExp(
+  `^\\s*${ADDRESS}(?:can|could|will|would)\\s+you\\s+(?:please\\s+)?(?:${VERBS})\\b`,
+  'i'
+);
 
 /**
  * Whether the user wants something done, rather than discussed.
@@ -131,8 +175,16 @@ const WORK_VERB =
  * false positive here costs a calendar lookup nobody wanted. It cannot send
  * mail, move an event or message anyone — those still need detectActIntent.
  */
+/**
+ * Requests that read as questions without being shaped like one.
+ *
+ * Anchored to the start, so this admits "anything from Priya" and leaves
+ * "I'll do anything" alone.
+ */
+const ELLIPTICAL_LOOKUP = /^\s*(?:anything|any (?:mail|messages|emails|news))\b/i;
+
 const LOOKUP_QUESTION =
-  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|traffic|how long|how far|eta|my day|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|doc|docs|document|spreadsheet|drive|remind me (?:what|who|about)|did i say|what did i)\b/i;
+  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|coat|umbrella|wear|traffic|how long|how far|eta|my day|day looking|got on|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|doc|docs|document|plan|notes|spreadsheet|drive|news|markets|happened|remind me (?:what|who|about)|supposed to|do i know about|did i say|what did i|anything from|say about|did .{2,20} say)\b/i;
 
 /**
  * Whether this is a question Grove should look up rather than answer offhand.
@@ -146,7 +198,10 @@ export function detectLookupIntent(text: string): boolean {
   if (!t) return false;
   // Already handled by the stricter gate; nothing to add.
   if (detectActIntent(t)) return false;
-  const isQuestion = QUESTION_OPENERS.test(t) || t.endsWith('?');
+  // "Anything from Priya?" without the question mark is not question-shaped and
+  // carries no verb, so both gates refused it and the mail ability could never
+  // run. It is still unmistakably a request to go and look.
+  const isQuestion = QUESTION_OPENERS.test(t) || t.endsWith('?') || ELLIPTICAL_LOOKUP.test(t);
   return isQuestion && LOOKUP_QUESTION.test(t);
 }
 
@@ -155,9 +210,15 @@ export function detectActIntent(text: string): boolean {
   if (!t) return false;
   // A bare go-ahead beats the question test, because it is the whole sentence.
   if (BARE_GO_AHEAD.test(t) || BARE_YES.test(t)) return true;
+  // "Study mode." "Back to normal." No verb anywhere, and unmistakably an
+  // instruction — naming a mode is the whole sentence, the way a go-ahead is.
+  if (BARE_MODE.test(t)) return true;
+  // Addressed to Grove and carrying a verb: an instruction, question mark or
+  // not. Checked before the question tests, which would otherwise refuse it.
+  if (POLITE_COMMAND.test(t)) return true;
   if (QUESTION_OPENERS.test(t)) return false;
   if (t.endsWith('?')) return false;
-  return WORK_VERB.test(t);
+  return IMPERATIVE.test(t);
 }
 
 /**
@@ -214,6 +275,19 @@ export function musicQueryFrom(text: string): string {
   return rest.slice(0, 120);
 }
 
+/** Words too common to distinguish one ability from another. */
+const NOT_DISTINCTIVE = new Set([
+  'what', 'whats', 'when', 'where', 'which', 'that', 'this', 'with', 'from',
+  'your', 'have', 'will', 'would', 'should', 'could', 'about', 'they', 'them',
+  'then', 'than', 'into', 'some', 'more', 'most', 'just', 'like', 'does',
+  'need', 'want', 'been', 'being', 'here', 'there', 'today',
+]);
+
+/** "what's on today" -> "whats on today", so an example can be matched whole. */
+function normalise(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
 export function pickAbility(text: string): Ability | null {
   const haystack = text.toLowerCase();
   const words = new Set(
@@ -224,11 +298,21 @@ export function pickAbility(text: string): Ability | null {
   );
   if (words.size === 0) return null;
 
+  const said = normalise(text);
   const scored = usableAbilities()
     .map((ability) => {
       const corpus = `${ability.name} ${ability.what} ${ability.examples.join(' ')}`.toLowerCase();
       let score = 0;
-      for (const w of words) if (corpus.includes(w)) score += 1;
+      for (const w of words) if (!NOT_DISTINCTIVE.has(w) && corpus.includes(w)) score += 1;
+      // An ability that advertises this exact sentence wins outright. Counting
+      // shared words alone let "what's on today" — verbatim one of the calendar
+      // examples — go to the weather, because both mention "today" and neither
+      // word count knew which phrase it came from.
+      const quoted = ability.examples.some((e) => {
+        const example = normalise(e);
+        return example.length > 6 && (said.includes(example) || example.includes(said));
+      });
+      if (quoted) score += 5;
       return { ability, score };
     })
     .filter((s) => s.score > 1)
