@@ -38,6 +38,8 @@ type SessionValue = {
   /** Finish sign-in from a pasted callback URL or one-time code. */
   finishSignIn: (pasted: string, email?: string) => Promise<void>;
   signInAsDev: () => Promise<void>;
+  /** Use Grove with no account at all. Not a bypass — see below. */
+  continueLocally: () => Promise<void>;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
 
@@ -227,6 +229,27 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [hydrate]
   );
 
+  /**
+   * Start using Grove without an account.
+   *
+   * Deliberately NOT the dev-login bypass, which is gated on __DEV__ and must
+   * stay that way: that one mints a token for a real backend user, and shipping
+   * it in a release build would be a way into somebody's data.
+   *
+   * This grants nothing. It takes the same path a fresh standalone install
+   * already takes — a local id in the Keychain, no session, no server — and is
+   * only reachable from the login screen because a build made before Grove went
+   * standalone still points at a backend it may not be able to reach. Sitting
+   * behind a login for an account system the app no longer needs is the actual
+   * fault; this is the door out of it.
+   */
+  const continueLocally = useCallback(async () => {
+    setUser(null);
+    setUid(await localIdentity());
+    setNotice(null);
+    setStatus('signed-in');
+  }, []);
+
   const signInAsDev = useCallback(async () => {
     setNotice(null);
     await api.setDevSession(true);
@@ -351,6 +374,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       signInWithEmail,
       finishSignIn,
       signInAsDev,
+      continueLocally,
       signOut,
       refresh: hydrate,
       connect,
@@ -368,6 +392,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       signInWithEmail,
       finishSignIn,
       signInAsDev,
+      continueLocally,
       signOut,
       hydrate,
       connect,

@@ -32,12 +32,13 @@ import { usePalette } from '@/hooks/use-palette';
 import { getNoctusUrl, setNoctusUrl } from '@/lib/noctusApi';
 import { DEV_LOGIN_ENABLED, isSupabaseConfigured, redirectTo } from '@/lib/noctusAuth';
 
-type Busy = null | 'noctus' | 'email' | 'dev' | 'rescue';
+type Busy = null | 'noctus' | 'email' | 'dev' | 'rescue' | 'local';
 
 export default function Login() {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
-  const { status, signIn, signInWithEmail, finishSignIn, signInAsDev, notice } = useSession();
+  const { status, signIn, signInWithEmail, finishSignIn, signInAsDev, continueLocally, notice } =
+    useSession();
 
   const [busy, setBusy] = useState<Busy>(null);
   const [email, setEmail] = useState('');
@@ -271,6 +272,31 @@ export default function Login() {
             {error ?? notice}
           </Text>
         ) : null}
+
+        {/*
+          The way out of a login Grove no longer needs.
+
+          Not gated on __DEV__, unlike the dev bypass below it, because it is a
+          different thing: it grants nothing and reaches no backend. Grove is
+          standalone — Google signs in on the device, the model is called
+          directly — so an account is now a thing you may opt into rather than
+          the price of opening the app. A build made before that change still
+          shows this screen, and without this button there is no way past it.
+        */}
+        <View style={{ marginTop: 26 }}>
+          <Button
+            label="Continue without an account"
+            icon="person"
+            tone="quiet"
+            busy={busy === 'local'}
+            disabled={busy !== null}
+            onPress={() => run('local', continueLocally)}
+          />
+          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 9 }]}>
+            Everything works this way: your calendar, mail and docs sign in through Google on this
+            phone, and what Grove remembers stays on it.
+          </Text>
+        </View>
 
         {DEV_LOGIN_ENABLED ? (
           <View style={{ marginTop: 30, gap: 14 }}>
