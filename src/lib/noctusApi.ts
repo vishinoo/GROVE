@@ -24,7 +24,18 @@ import { DEV_TOKEN, getSession } from './noctusAuth';
 const NOCTUS_URL_KEY = 'grove.noctus_url';
 const DEV_MODE_KEY = 'grove.dev_session';
 
-const DEFAULT_NOCTUS_URL = process.env.EXPO_PUBLIC_NOCTUS_URL || 'https://www.noctusai.org';
+/**
+ * The backend, if there is one. Empty means there is not.
+ *
+ * The hardcoded fallback here defeated the whole standalone design: unsetting
+ * the environment variable was supposed to mean "no server", and instead it
+ * meant "quietly use noctusai.org" — so a build made with no backend configured
+ * still demanded a login, against a deployment that may not outlive its trial.
+ *
+ * A default that overrides an explicit absence is not a default, it is a
+ * setting nobody chose.
+ */
+const DEFAULT_NOCTUS_URL = (process.env.EXPO_PUBLIC_NOCTUS_URL ?? '').trim();
 
 /**
  * Every authenticated call sends the user's Supabase JWT to whatever this
