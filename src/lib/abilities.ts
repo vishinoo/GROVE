@@ -497,6 +497,54 @@ async function allEvents(days: number): Promise<Dated[] | null> {
 }
 
 /**
+ * The day someone named, as a window.
+ *
+ * Widening the search to two days is not the same as asking about tomorrow.
+ * "My first class tomorrow" was answered with the first class in the next two
+ * days, which is today's — right by the letter of the query and wrong by every
+ * other measure. A named day is a filter, not a horizon.
+ */
+function dayWindow(text: string): { from: Date; to: Date } | null {
+  const t = text.toLowerCase();
+  const midnight = (offset: number) => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + offset);
+    return d;
+  };
+  if (/\btomorrow\b/.test(t)) return { from: midnight(1), to: midnight(2) };
+  if (/\b(today|tonight|this (?:morning|afternoon|evening))\b/.test(t)) {
+    return { from: midnight(0), to: midnight(1) };
+  }
+  return null;
+}
+
+/**
+ * The search term, with the framing words taken out.
+ *
+ * "My first class tomorrow" describes one event called "class"; first and
+ * tomorrow say which one, and no event is titled either. Left in, they matched
+ * nothing and took the real term down with them.
+ */
+function cleanTerm(query: string): string {
+  return query
+    .toLowerCase()
+    .replace(/\b(?:first|last|next|final|latest|earliest|upcoming)\b/g, ' ')
+    .replace(/\b(?:today|tomorrow|tonight|this morning|this afternoon|this evening)\b/g, ' ')
+    .replace(/^(?:my|the|a)\s+/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Only the events falling inside a named day. */
+function within(events: Dated[], window: { from: Date; to: Date } | null): Dated[] {
+  if (!window) return events;
+  return events.filter(
+    (e) => e.start >= window.from && e.start < window.to
+  );
+}
+
+/**
  * Which one of them the question is actually about.
  *
  * "My first class", "my last meeting", "what's next" all name a position, and
@@ -523,14 +571,10 @@ function sayOne(event: Dated, position: 'first' | 'last' | 'next' | null): strin
 async function findAcrossCalendars(query: string, days = 60): Promise<Dated[] | null> {
   const upcoming = await allEvents(days);
   if (upcoming === null) return null;
-  // Position words are how the question is framed, not part of any event's
-  // name — searching titles for "last" matches nothing and loses the real term.
-  const needle = query
-    .toLowerCase()
-    .replace(/\b(?:first|last|next|final|latest|earliest|upcoming)\b/g, ' ')
-    .replace(/^(?:my|the|a)\s+/, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  // One cleaner shared with the spoken fallback, so the term searched for and
+  // the term said back can never disagree. Position and day words are how the
+  // question is framed, not part of any event's name.
+  const needle = cleanTerm(query);
   if (!needle) return upcoming;
   const words = needle.split(/\s+/).filter((w) => w.length > 2);
   return upcoming.filter((e) => {
@@ -836,9 +880,18 @@ const CALENDAR_FIND: Ability = {
     const which = (args.which || '').trim();
     if (!which) return { ok: false, spoken: 'What am I looking for?' };
 
-    const found = await findAcrossCalendars(which);
-    if (found === null) return { ok: false, spoken: google.explain('your calendar') };
-    if (found.length === 0) return { ok: true, spoken: `Nothing matching ${which}.` };
+    const matches = await findAcrossCalendars(which);
+    if (matches === null) return { ok: false, spoken: google.explain('your calendar') };
+
+    // "My first class tomorrow" names a thing, a position and a day, and all
+    // three have to be honoured or the answer is confidently about the wrong
+    // event.
+    const window = dayWindow(which);
+    const found = within(matches, window);
+    if (found.length === 0) {
+      const when = window ? ` ${/tomorrow/i.test(which) ? 'tomorrow' : 'today'}` : '';
+      return { ok: true, spoken: `Nothing matching ${cleanTerm(which)}${when}.` };
+    }
 
     // "My last class" names both a thing and a position, and answering with a
     // list leaves the person to work out which one they asked for.
@@ -937,8 +990,12 @@ const CALENDAR_READ: Ability = {
     const days = /\bweek\b/.test(asked) ? 7 : /\btomorrow\b/.test(asked) ? 2 : 1;
     const position = positionIn(asked);
 
-    const events = await readGoogleCalendar(days);
-    if (events === null) return { ok: false, spoken: google.explain('your calendar') };
+    const all = await readGoogleCalendar(days);
+    if (all === null) return { ok: false, spoken: google.explain('your calendar') };
+
+    // A named day narrows the list before anything else looks at it, or "first
+    // thing tomorrow" answers with the first thing today.
+    const events = within(all, dayWindow(asked));
 
     if (events.length > 0) {
       // A named position gets one event, not a list. "What is my first class"
