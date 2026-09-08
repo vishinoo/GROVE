@@ -80,6 +80,13 @@ function compile() {
 function stub() {
   const handler = {
     get: (target, prop) => {
+      // capabilities.ts gates the ring and music on Platform.OS === 'ios', so
+      // without this the stub reported a non-iOS device, music.play and
+      // maps.eta came back unwired, and every check below silently skipped
+      // them. A harness that quietly tests less than it appears to is the
+      // worst kind.
+      if (prop === 'OS') return 'ios';
+      if (prop === 'isAvailable') return () => true;
       if (prop === '__esModule') return true;
       if (prop === 'default') return new Proxy({}, handler);
       if (prop in target) return target[prop];
