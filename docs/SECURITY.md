@@ -100,6 +100,36 @@ that contains a token or a key.
 
 ---
 
+## Reopened deliberately
+
+### The model key is in the bundle again — 2026-09-07
+
+The section above records this being closed by moving the key to
+`POST /api/grove/chat` on Noctus. Noctus has since been cut out of the critical
+path entirely, and with no server there is nowhere else for a key to live but
+the device.
+
+`loadOwnKey()` prefers the Keychain and falls back to
+`EXPO_PUBLIC_GEMINI_API_KEY`, which **is compiled into the JavaScript bundle and
+is extractable from any build**. The earlier fix is therefore no longer in
+force, and the honest statement is that the key ships.
+
+Why that is acceptable here: the key is pre-paid, scoped to one API, spends a
+capped balance, and is trivial to rotate. The alternative — keeping a deployment
+alive purely to hold it — is what made signing in from a phone impossible in the
+first place.
+
+Why it would not be acceptable for public distribution: every installer gets the
+key. Before Grove goes to anyone who is not the author, either leave
+`EXPO_PUBLIC_GEMINI_API_KEY` unset and require each device to paste its own key
+in Settings, or put a minimal key-proxy back in front of the model. The
+mechanism for the first already exists and takes precedence over the build key.
+
+This entry exists because a security note that quietly stops being true is worse
+than one that admits a regression and says why.
+
+---
+
 ## Accepted risks, with reasons
 
 ### The silent-audio keep-alive

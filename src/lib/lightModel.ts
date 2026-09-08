@@ -189,12 +189,37 @@ const OWN_KEY = 'grove:own-model-key:v1';
 
 let ownKey: string | null | undefined;
 
+/**
+ * The key this device thinks with.
+ *
+ * Two sources, and the order is deliberate. The Keychain wins, because a key
+ * typed into Settings is a per-device choice someone made on purpose. The build
+ * key is the fallback, so a fresh install can think before anyone has been
+ * asked to paste anything.
+ *
+ * THE TRADE, STATED PLAINLY. `EXPO_PUBLIC_*` is compiled into the JavaScript
+ * bundle and extractable from any build, and docs/SECURITY.md closed exactly
+ * that hole by moving the key to a server. Cutting the server back out reopens
+ * it, and pretending otherwise would be worse than the exposure itself.
+ *
+ * It is a deliberate trade for a personal build, on a pre-paid key scoped to
+ * one API and cheap to rotate. It is the wrong trade for public distribution:
+ * there, put the key in the Keychain only and leave this one unset.
+ *
+ * Before this fallback existed, `scripts/set-key.js` wrote a variable that
+ * nothing in src/ ever read, so the documented way of configuring a model
+ * quietly did nothing at all.
+ */
 export async function loadOwnKey(): Promise<string | null> {
   if (ownKey !== undefined) return ownKey;
   try {
     ownKey = await SecureStore.getItemAsync(OWN_KEY);
   } catch {
     ownKey = null;
+  }
+  if (!ownKey) {
+    const built = (process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '').trim();
+    ownKey = built.length > 0 ? built : null;
   }
   return ownKey;
 }
@@ -265,7 +290,18 @@ async function askDirect(
   }
 }
 
-const DIRECT_MODEL = 'gemini-3.1-flash-lite';
+/**
+ * The model called directly from the device.
+ *
+ * Read from the environment rather than written down here, because it was
+ * written down in both places and they disagreed: `.env` still said
+ * gemini-2.5-flash-lite, which Google has since closed to new keys, while this
+ * constant said 3.1. `npm run check-model` reads the env var, so the diagnostic
+ * was reporting on a model the app never actually called — a check that can
+ * fail while the app works, and pass while it does not, is worse than no check.
+ */
+const DIRECT_MODEL =
+  (process.env.EXPO_PUBLIC_GEMINI_MODEL ?? '').trim() || 'gemini-3.5-flash-lite';
 
 async function askServer(
   system: string,
