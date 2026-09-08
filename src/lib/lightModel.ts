@@ -35,6 +35,7 @@
 import * as SecureStore from 'expo-secure-store';
 
 import { fetchJson } from './net';
+import { getNoctusUrl } from './noctusApi';
 
 const OLLAMA_URL = (process.env.EXPO_PUBLIC_OLLAMA_URL ?? '').replace(/\/$/, '');
 const OLLAMA_MODEL = process.env.EXPO_PUBLIC_OLLAMA_MODEL || 'llama3.2';
@@ -86,6 +87,10 @@ export type AbilitySummary = { id: string; what: string }[];
  * report "no model" on a perfectly working install.
  */
 export function isLightModelConfigured(): boolean {
+  // Kept true because the answer is genuinely "it depends": a key may sit in
+  // the Keychain, Ollama may be up, or a backend may hold one. Reporting "no
+  // model" from static configuration was wrong on working installs, and it is
+  // the kind of wrong that sends someone looking for a bug that is not there.
   return true;
 }
 
@@ -214,13 +219,14 @@ export async function setOwnKey(key: string): Promise<void> {
 async function askDirect(
   system: string,
   messages: LightMessage[],
-  json: boolean
+  json: boolean,
+  search = true
 ): Promise<string | null> {
   const key = await loadOwnKey();
   if (!key) return null;
 
   try {
-    const response = await withTimeout(json ? TIMEOUT_MS : SEARCH_TIMEOUT_MS, (signal) =>
+    const response = await withTimeout(json || !search ? TIMEOUT_MS : SEARCH_TIMEOUT_MS, (signal) =>
       fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
           DIRECT_MODEL
@@ -240,7 +246,11 @@ async function askDirect(
               temperature: 0.7,
               ...(json ? { responseMimeType: 'application/json' } : {}),
             },
-            ...(json ? {} : { tools: [{ google_search: {} }] }),
+            // Grounding costs a round trip to Google before a word is
+            // written, so it is asked for only when the turn plausibly needs
+            // the web. It used to run on every non-JSON turn, which made
+            // "play something mellow" as slow as "what happened in the markets".
+            ...(json || !search ? {} : { tools: [{ google_search: {} }] }),
           }),
         }
       )
@@ -290,13 +300,35 @@ async function complete(
     ollamaReachable = false;
   }
 
-  const viaServer = await askServer(system, messages, json, deep, search);
-  if (viaServer !== null) return viaServer;
+  // The phone's own key comes before the server now, and the order is the whole
+  // point of cutting Noctus loose. While the server came first, every single
+  // turn paid its timeout before falling through — ten seconds of silence, on a
+  // deployment that need not exist at all. Grove answers from the device and
+  // treats a backend as an optional extra rather than the path of first resort.
+  const direct = await askDirect(system, messages, json, search);
+  if (direct !== null) return direct;
 
-  // Last resort: the key on this phone, so Noctus being unreachable does not
-  // take Grove's ability to think with it.
-  return askDirect(system, messages, json);
+  // Only if one is actually configured. An unset URL is not a failure to
+  // report, it is a Grove that was never pointed at a server.
+  if (!(await hasNoctus())) return null;
+  return askServer(system, messages, json, deep, search);
+}
 
+/**
+ * Whether this install has a backend at all.
+ *
+ * Grove is standalone by default. Noctus survives as an integration layer for
+ * anyone who wants shared credentials or server-run sparks, and everything
+ * still works when it is absent — which is the difference between a dependency
+ * and an option.
+ */
+async function hasNoctus(): Promise<boolean> {
+  try {
+    const url = await getNoctusUrl();
+    return typeof url === 'string' && url.trim().length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -527,6 +559,26 @@ TITLE: <two or three words, only for a standing job>`;
  * output goes straight to the speech synthesiser, which will happily read a
  * pair of curly braces out loud.
  */
+/**
+ * A short spoken briefing on something, grounded in a web search.
+ *
+ * This ability was declared and never built: it wanted a /api/grove/brief
+ * endpoint on Noctus that was never written, so `wired: false` was the honest
+ * setting. With the model reachable from the device and grounding already on
+ * the direct path, the endpoint is no longer the missing piece — there is
+ * nothing left to build it out of but a prompt.
+ */
+export async function lightBrief(topic: string): Promise<string | null> {
+  const text = await complete(
+    'You brief someone out loud, in two or three sentences. Lead with what actually changed or happened, with numbers where there are numbers. Spoken aloud, so no markdown, no URLs, no bullet points, no preamble. If you genuinely cannot find anything current, say so plainly rather than guessing.',
+    [{ role: 'user', content: `Brief me on: ${topic}` }],
+    false,
+    false,
+    true
+  );
+  return text?.trim() || null;
+}
+
 export async function lightSummarise(
   toolName: string,
   task: string,

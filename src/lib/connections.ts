@@ -87,11 +87,11 @@ export const CONNECTIONS: Connection[] = [
     // One consent screen covers all of it, which is deliberate: a second
     // prompt later is a second interruption, and people decline those.
     //
-    // Worth stating plainly because it is the thing people get wrong: this
-    // grants the *server* access. It puts nothing on the phone, so the iOS
-    // Calendar app still will not show these events, and Grove reads them
-    // through Google rather than through the phone.
-    note: 'Connects the account, not the phone. Grove reads your Google calendar directly.',
+    // Signed in on the device now, with no server in the middle: the tokens
+    // live in this phone's Keychain. Still worth saying that it does not put
+    // anything into the iOS Calendar app — Grove reads Google directly, so
+    // those events are readable here and still absent from Calendar.
+    note: 'Signed in on this phone. Grove reads Google directly — these events stay out of the iOS Calendar app.',
   },
   {
     key: 'maps',

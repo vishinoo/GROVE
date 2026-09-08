@@ -13,8 +13,11 @@ import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
+import * as SecureStore from 'expo-secure-store';
+
 import * as api from '@/lib/noctusApi';
 import { grantDevice, isDevicePermission } from '@/lib/devicePermissions';
+import { connectGoogle, disconnectGoogle, isGoogleConnected } from '@/lib/googleAuth';
 import * as auth from '@/lib/noctusAuth';
 
 type Status = 'loading' | 'signed-out' | 'signed-in';
@@ -51,6 +54,29 @@ export function useSession(): SessionValue {
   const value = useContext(SessionContext);
   if (!value) throw new Error('useSession must be used inside <SessionProvider>');
   return value;
+}
+
+/**
+ * Who "you" are on a phone with no accounts.
+ *
+ * uid keys everything stored per person — memory, sparks, the transcript — so
+ * it has to be stable across launches or Grove forgets you every time it opens.
+ * A random id minted once and kept in the Keychain does that without needing
+ * anyone to sign in to anything.
+ */
+async function localIdentity(): Promise<string> {
+  const KEY = 'grove.local.uid';
+  try {
+    const held = await SecureStore.getItemAsync(KEY);
+    if (held) return held;
+    const minted = `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    await SecureStore.setItemAsync(KEY, minted);
+    return minted;
+  } catch {
+    // A phone that will not keep an id still has to work, and a fixed one is
+    // right for the single-user case this fallback already assumes.
+    return 'local';
+  }
 }
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
@@ -113,6 +139,21 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const bootstrap = useCallback(async () => {
     if (await api.isDevSession()) {
       await hydrate();
+      return;
+    }
+    // No backend configured means no account to sign in to, and a login screen
+    // in front of a standalone app is a locked door with no building behind it.
+    //
+    // This is the last thing that made Noctus mandatory. Everything else moved
+    // to the device — Google is signed in through the Keychain, the model is
+    // called directly, abilities run here — but the app still refused to start
+    // without a session from a server that might not exist any more. Grove is
+    // one person's assistant on one phone; it does not need to know who you are
+    // to read your calendar out.
+    if (!(await api.hasNoctusConfigured())) {
+      setUser(null);
+      setUid(await localIdentity());
+      setStatus('signed-in');
       return;
     }
     const session = await auth.getSession();
@@ -205,6 +246,18 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   /** Re-reads what's connected, then recomputes every tool against it. */
   const syncConnections = useCallback(async () => {
+    // Google is held on this phone now, not in a table on a server, so it is
+    // read from the Keychain rather than fetched. This is the whole shape of
+    // the change: the answer to "is Google connected" no longer depends on a
+    // backend being awake.
+    try {
+      const live = await isGoogleConnected();
+      setGranted((held) =>
+        live ? [...new Set([...held, 'email'])] : held.filter((k) => k !== 'email')
+      );
+    } catch {
+      // A Keychain read that fails is not a disconnection.
+    }
     try {
       const { connected } = await api.fetchConnections();
       setConnections(connected ?? []);
@@ -237,6 +290,19 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         if (!ok) throw new Error(outcome);
         return;
       }
+      // Google signs in on the device, with no server in the middle. A web
+      // OAuth client can only come home to an https:// address, which is why
+      // signing in from the phone could never work against a laptop backend —
+      // localhost resolves, on the phone, to nothing at all.
+      if (bindingKey === 'google' || bindingKey === 'email') {
+        const ok = await connectGoogle();
+        setGranted((held) =>
+          ok ? [...new Set([...held, 'email'])] : held.filter((k) => k !== 'email')
+        );
+        if (!ok) throw new Error('Sign-in was cancelled.');
+        return;
+      }
+
       const { url } = await api.oauthUrl(bindingKey);
       await WebBrowser.openAuthSessionAsync(url, auth.redirectTo);
       await syncConnections();
@@ -246,6 +312,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   const disconnect = useCallback(
     async (bindingKey: string) => {
+      // Signing out of Google is deleting the tokens from this Keychain. There
+      // is no server holding a copy to revoke.
+      if (bindingKey === 'google' || bindingKey === 'email') {
+        await disconnectGoogle();
+        setGranted((held) => held.filter((k) => k !== 'email'));
+        return;
+      }
       // iOS has no API to hand a permission back, so the honest thing is to
       // forget it here and say where it is actually revoked.
       if (isDevicePermission(bindingKey)) {

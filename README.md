@@ -63,19 +63,24 @@ npm run check-model     # confirms Grove has a model it can reach
 npm start
 ```
 
-You also need the Noctus backend running, which is a separate repository:
+Grove is standalone: no backend, no account, no login. `EXPO_PUBLIC_NOCTUS_URL`
+is blank by default and everything works — Google is signed in on the device and
+the model is called directly.
+
+Two things to set up once:
 
 ```bash
-cd ../NOCTUS/Backend && npm run dev     # dev, not start — it has --watch
+npm run set-key          # your Gemini key, into the Keychain (never the bundle)
 ```
 
-`EXPO_PUBLIC_NOCTUS_URL` must be this machine's **LAN IP**, not `localhost` — a
-phone cannot resolve `localhost` to your Mac. It drifts when the DHCP lease
-renews; if Grove says it cannot reach Noctus, check that first:
+And a **Google iOS OAuth client** at console.cloud.google.com → Credentials →
+OAuth client ID → iOS, with bundle ID `org.noctusai.grove`. There is no client
+secret; installed apps use PKCE. Paste the id into `.env` as
+`EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`. Changing it changes the app's URL scheme, so
+it needs a rebuild rather than an OTA update.
 
-```bash
-ipconfig getifaddr en0
-```
+Pointing `EXPO_PUBLIC_NOCTUS_URL` at a Noctus deployment is optional, and buys
+one shared model key across devices plus server-run sparks.
 
 ### What works without a device build
 

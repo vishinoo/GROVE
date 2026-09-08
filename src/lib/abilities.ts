@@ -38,7 +38,8 @@ import { Linking, Platform } from 'react-native';
 import { capabilities } from './capabilities';
 import { loadFacts, recall } from './memory';
 import { MODES } from './modes';
-import { fetchJson } from './net';
+import * as google from './google';
+import { lightBrief } from './lightModel';
 
 /**
  * Weather codes as a person would say them, not as WMO defines them.
@@ -149,12 +150,11 @@ const BRIEF: Ability = {
   id: 'brief.web',
   name: 'Briefing',
   what: 'Reads out what moved — stocks, news, or the weather.',
-  where: 'server',
-  // Honest until /api/grove/brief exists on Noctus. It was `true`, which meant
-  // the router picked it, Grove said it was checking, and nothing came back —
-  // the exact failure this flag is here to prevent.
-  wired: false,
-  needs: ['a briefing endpoint on Noctus'],
+  // On the device, like everything else now: the model call goes straight to
+  // the provider, so there is no server left for this to run on.
+  where: 'device',
+  wired: true,
+  needs: [],
   reads: true,
   args: {
     topic: { type: 'string', what: 'what to brief on, e.g. "my watchlist" or "the news"', required: true },
@@ -167,26 +167,18 @@ const BRIEF: Ability = {
   run: async (args) => {
     const topic = (args.topic || '').trim();
     if (!topic) return { ok: false, spoken: "I need to know what to brief you on." };
-    const data = await fetchJson<{ summary?: string }>('/api/grove/brief', {
-      method: 'POST',
-      body: { topic },
-    });
-    const summary = data?.summary?.trim();
+    const summary = (await lightBrief(topic))?.trim();
     return summary
       ? { ok: true, spoken: summary }
       : { ok: false, spoken: `Nothing came back for ${topic}.` };
   },
 };
 
-type MailMessage = { from?: string; subject?: string; snippet?: string; body?: string };
-
 /** "Priya Sharma <p@x.com>" is not how you say a name out loud. */
 function saySender(from: string): string {
   const named = /^\s*"?([^"<]+?)"?\s*</.exec(from);
   return (named?.[1] ?? from.replace(/[<>]/g, '')).split('@')[0].trim();
 }
-
-type GoogleEvent = { title: string; start: string; allDay?: boolean; location?: string };
 
 /**
  * The Google calendar, as opposed to the phone's.
@@ -211,10 +203,10 @@ const GCAL_READ: Ability = {
     const asked = (args.when || '').toLowerCase();
     const days = /\bweek\b/.test(asked) ? 7 : /\btomorrow\b/.test(asked) ? 2 : 1;
 
-    const data = await fetchJson<{ events?: GoogleEvent[] }>(`/api/grove/calendar?days=${days}`);
-    if (!data) return { ok: false, spoken: 'Could not reach your Google calendar. Is Google connected?' };
-
-    const events = data.events ?? [];
+    const events = await google.readCalendar(days);
+    if (events === null) {
+      return { ok: false, spoken: 'Google is not connected. You can do that in Connections.' };
+    }
     if (events.length === 0) {
       return { ok: true, spoken: days > 1 ? 'Nothing on your Google calendar.' : 'Nothing on it today.' };
     }
@@ -250,19 +242,14 @@ const DOC_FIND: Ability = {
     const wanted = (args.what || '').trim();
     if (!wanted) return { ok: false, spoken: 'Which document?' };
 
-    const data = await fetchJson<{
-      files?: { name: string }[];
-      match?: { name: string };
-      text?: string;
-    }>(`/api/grove/doc?q=${encodeURIComponent(wanted)}`, { slow: true });
-
-    if (!data) return { ok: false, spoken: 'Could not reach your Drive. Is Google connected?' };
-    if (!data.files || data.files.length === 0) {
+    const data = await google.findDoc(wanted);
+    if (!data) return { ok: false, spoken: 'Google is not connected. You can do that in Connections.' };
+    if (data.files.length === 0) {
       return { ok: false, spoken: `I could not find a document called ${wanted}.` };
     }
 
     const name = data.match?.name ?? data.files[0].name;
-    const text = (data.text || '').trim();
+    const text = data.text.trim();
     if (!text) {
       // A spreadsheet or a PDF matched. Saying which is more use than silence.
       return { ok: true, spoken: `I found ${name}, but it is not a document I can read out.` };
@@ -292,14 +279,14 @@ const MAIL_READ: Ability = {
     if (args.about) params.set('q', args.about);
     params.set('limit', '3');
 
-    const data = await fetchJson<{ messages?: MailMessage[] }>(
-      `/api/grove/mail?${params.toString()}`
-    );
-    if (!data) {
-      return { ok: false, spoken: 'Could not reach your mail. Is Google connected?' };
+    const messages = await google.searchMail({
+      from: args.from,
+      about: args.about,
+      limit: 3,
+    });
+    if (messages === null) {
+      return { ok: false, spoken: 'Google is not connected. You can do that in Connections.' };
     }
-
-    const messages = data.messages ?? [];
     const who = args.from ? ` from ${args.from}` : '';
     if (messages.length === 0) return { ok: true, spoken: `Nothing${who}.` };
 
@@ -338,10 +325,10 @@ const MAIL_SEND: Ability = {
     // is and being asked for her address is the friction this exists to remove.
     let to = asked;
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(asked)) {
-      const found = await fetchJson<{ matches?: { name: string; email: string }[] }>(
-        `/api/grove/contact?name=${encodeURIComponent(asked)}`
-      );
-      const matches = found?.matches ?? [];
+      const matches = await google.findContact(asked);
+      if (matches === null) {
+        return { ok: false, spoken: 'Google is not connected. You can do that in Connections.' };
+      }
       if (matches.length === 0) return { ok: false, spoken: `I have no address for ${asked}.` };
       // Two people with the same first name is a question, not a coin toss —
       // and mail is the one ability here that cannot be taken back.
@@ -355,11 +342,8 @@ const MAIL_SEND: Ability = {
       to = matches[0].email;
     }
 
-    const data = await fetchJson<{ sent?: boolean }>('/api/grove/mail', {
-      method: 'POST',
-      body: { to, subject: args.subject || '', body },
-    });
-    return data?.sent
+    const sent = await google.sendMail(to, args.subject || '', body);
+    return sent
       ? { ok: true, spoken: asked === to ? 'Sent.' : `Sent to ${asked}.` }
       : { ok: false, spoken: 'That did not send.' };
   },

@@ -35,6 +35,23 @@ const DEFAULT_NOCTUS_URL = process.env.EXPO_PUBLIC_NOCTUS_URL || 'https://www.no
  * also meant anything able to write one AsyncStorage key could redirect every
  * token to a host of its choosing.
  */
+/**
+ * Whether this install points at a backend at all.
+ *
+ * Grove runs standalone by default and treats Noctus as an optional
+ * integration layer. Everything that used to require it — Google, the model,
+ * every ability — now works on the device, so an unset URL is a configuration,
+ * not a fault, and nothing should report it as one.
+ */
+export async function hasNoctusConfigured(): Promise<boolean> {
+  try {
+    const url = await getNoctusUrl();
+    return typeof url === 'string' && url.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function getNoctusUrl(): Promise<string> {
   if (!__DEV__) return DEFAULT_NOCTUS_URL.replace(/\/$/, '');
   const stored = await AsyncStorage.getItem(NOCTUS_URL_KEY);

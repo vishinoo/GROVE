@@ -125,10 +125,10 @@ export default function Connections() {
           { color: palette.muted, paddingHorizontal: 2, marginTop: 4 },
         ]}
       >
-        Calendar, Reminders, Music and Maps are permissions on this phone —
-        allowing one asks iOS, not a website. Mail is an account, so it opens a
-        browser. Anything you turn down here is changed again in iOS Settings ›
-        Grove.
+        Reminders, Music, Maps and Messages are permissions on this phone —
+        allowing one asks iOS, not a website. Google Workspace signs in through
+        Google and keeps its tokens in this phone&rsquo;s Keychain. Anything you
+        turn down here is changed again in iOS Settings › Grove.
       </Text>
     </Screen>
   );
