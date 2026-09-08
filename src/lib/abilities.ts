@@ -41,7 +41,7 @@ import { capabilities } from './capabilities';
 import { loadFacts, recall } from './memory';
 import { MODES } from './modes';
 import * as google from './google';
-import { lightBrief } from './lightModel';
+import { lightBrief, lightDigest } from './lightModel';
 
 /**
  * Weather codes as a person would say them, not as WMO defines them.
@@ -446,6 +446,100 @@ function sayEvents(
  * plausible thread it asks rather than guesses — the same rule mail.send
  * already applies to two people with the same first name.
  */
+/**
+ * A stack of mail, reduced to what matters — and optionally sent on.
+ *
+ * Five is the cap, and it is a product decision rather than a technical one:
+ * beyond about five messages a spoken summary stops being a summary and becomes
+ * a list you cannot hold in your head. Asking for "everything from this week"
+ * gets the five most recent and says so, which is more honest than quietly
+ * truncating twenty.
+ *
+ * `send_to` is what makes this useful rather than merely clever: the summary is
+ * most wanted at the moment you cannot read it, and forwarding it to yourself
+ * or to someone else is the thing you would otherwise do by hand later.
+ */
+const MAIL_DIGEST: Ability = {
+  id: 'mail.summarise',
+  name: 'Summarise mail',
+  what: 'Summarises your recent email, and can send that summary on.',
+  where: 'server',
+  wired: true,
+  needs: ['email'],
+  reads: true,
+  args: {
+    from: { type: 'string', what: 'only mail from this person, if they named one' },
+    about: { type: 'string', what: 'only mail about this, if they named a topic' },
+    when: { type: 'string', what: 'the window, e.g. "this morning", "today", "this week"' },
+    send_to: { type: 'string', what: 'who to send the summary to — "me" for themselves' },
+  },
+  examples: [
+    'summarise my emails from this morning',
+    'summarise everything from Priya',
+    'catch me up on my email',
+    'summarise my email and send it to me',
+  ],
+  run: async (args) => {
+    const messages = await google.searchMail({
+      from: args.from,
+      about: args.about,
+      since: args.when,
+      // Five, capped deliberately. See above.
+      limit: 5,
+    });
+    if (messages === null) {
+      return { ok: false, spoken: 'Google is not connected. You can do that in Connections.' };
+    }
+
+    const scope = args.from ? ` from ${args.from}` : args.when ? ` from ${args.when}` : '';
+    if (messages.length === 0) return { ok: true, spoken: `Nothing${scope}.` };
+
+    const digest = await lightDigest(
+      messages.map((m) => ({
+        from: saySender(m.from),
+        subject: readable(m.subject ?? ''),
+        body: readable(m.body || m.snippet || ''),
+      })),
+      [args.from, args.about, args.when].filter(Boolean).join(' ')
+    );
+    if (!digest) {
+      return { ok: false, spoken: 'I could not summarise those just now.' };
+    }
+
+    const count = `${messages.length} message${messages.length === 1 ? '' : 's'}`;
+    if (!args.send_to) {
+      return { ok: true, spoken: `${count}${scope}. ${digest}`, detail: digest };
+    }
+
+    // Sending it on. "me" means the account Grove is signed in as, which is the
+    // one case where no lookup is needed and guessing is safe.
+    const wanted = args.send_to.trim();
+    let to = wanted;
+    if (/^(me|myself|my ?self)$/i.test(wanted)) {
+      to = (await google.me()) ?? '';
+      if (!to) return { ok: false, spoken: 'I could not work out your own address.' };
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(wanted)) {
+      const matches = await google.findContact(wanted);
+      if (!matches || matches.length === 0) {
+        return { ok: false, spoken: `I have no address for ${wanted}.` };
+      }
+      if (matches.length > 1) {
+        return {
+          ok: false,
+          spoken: `I have ${matches.length} people called ${wanted}. Which one?`,
+          detail: matches.map((m) => `${m.name} — ${m.email}`).join('\n'),
+        };
+      }
+      to = matches[0].email;
+    }
+
+    const sent = await google.sendMail(to, `Your email${scope}`, digest);
+    return sent
+      ? { ok: true, spoken: `${count}${scope}. Summary sent to ${wanted}.`, detail: digest }
+      : { ok: false, spoken: 'I summarised it but could not send it.' };
+  },
+};
+
 const MAIL_REPLY: Ability = {
   id: 'mail.reply',
   name: 'Reply',
@@ -1108,6 +1202,7 @@ const SET_MODE: Ability = {
 };
 
 export const ABILITIES: Ability[] = [
+  MAIL_DIGEST,
   CALENDAR_ADD,
   CALENDAR_REMOVE,
   CALENDAR_FIND,

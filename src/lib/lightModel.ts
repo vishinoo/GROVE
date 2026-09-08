@@ -648,6 +648,32 @@ export async function lightBrief(topic: string): Promise<string | null> {
   return text?.trim() || null;
 }
 
+/**
+ * Several emails, reduced to something worth hearing.
+ *
+ * Kept apart from lightSummarise because the job is different: that one reports
+ * what a tool just did, this one reads a stack of messages and works out what
+ * matters. Deliberately no web grounding — everything needed is in the mail,
+ * and searching would only add a round trip and an opportunity to wander.
+ */
+export async function lightDigest(
+  items: { from: string; subject: string; body: string }[],
+  focus: string
+): Promise<string | null> {
+  if (items.length === 0) return null;
+  const material = items
+    .map((m, i) => `${i + 1}. From ${m.from} — ${m.subject}\n${m.body.slice(0, 900)}`)
+    .join('\n\n');
+
+  return complete(
+    'You summarise email for someone who is listening, not reading. One or two sentences per message, led by who it is from and what they want. Say what needs a reply and what does not. No preamble, no markdown, no bullet characters, no URLs, no quoting headers. If several say the same thing, say it once.',
+    [{ role: 'user', content: `${focus ? `They asked about: ${focus}\n\n` : ''}${material}` }],
+    false,
+    false,
+    false
+  ).then((t) => t?.trim() || null);
+}
+
 export async function lightSummarise(
   toolName: string,
   task: string,

@@ -60,6 +60,8 @@ export function isSpeaking(): boolean {
  * on one release is `com.apple.ttsbundle.Daniel-premium` on another.
  */
 const PREFERRED_NAMES = [
+  // The iOS 17 premium English voices come first: they are the ones worth
+  // downloading, and the ones people mean when they say it sounds real.
   'oliver', // en-GB premium, the best of these when installed
   'daniel', // en-GB, the classic British male
   'arthur', // en-GB
@@ -69,6 +71,9 @@ const PREFERRED_NAMES = [
   'evan',
   'nathan',
   'tom',
+  'joelle',
+  'zoe',
+  'ava',
 ];
 
 /** Higher is better. Quality dominates, because it is the audible difference. */
@@ -77,6 +82,12 @@ function scoreVoice(voice: Speech.Voice): number {
 
   // An enhanced voice beats a compact one of any accent, by a distance.
   if (voice.quality === Speech.VoiceQuality.Enhanced) score += 40;
+
+  // Premium is a third tier iOS added above Enhanced, and it is the one that
+  // stops sounding synthetic. expo-speech's VoiceQuality enum predates it and
+  // reports Premium as Enhanced, so the only way to tell them apart is the
+  // identifier — which is exactly why this is checked here and not by quality.
+  if (/premium/i.test(voice.identifier || '')) score += 25;
 
   const lang = (voice.language || '').toLowerCase();
   if (lang.startsWith('en-gb')) score += 12;

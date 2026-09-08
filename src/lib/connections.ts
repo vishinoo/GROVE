@@ -83,7 +83,7 @@ export const CONNECTIONS: Connection[] = [
     what: 'Gmail, Calendar, Docs and contacts',
     icon: 'google',
     kind: 'account',
-    unlocks: ['mail.send', 'mail.search', 'mail.reply', 'gcal.read', 'doc.find', 'calendar.read', 'calendar.move', 'calendar.add', 'calendar.remove', 'calendar.find'],
+    unlocks: ['mail.send', 'mail.search', 'mail.reply', 'mail.summarise', 'gcal.read', 'doc.find', 'calendar.read', 'calendar.move', 'calendar.add', 'calendar.remove', 'calendar.find'],
     // One consent screen covers all of it, which is deliberate: a second
     // prompt later is a second interruption, and people decline those.
     //

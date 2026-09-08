@@ -130,9 +130,19 @@ function bodyOf(part: GmailPart | undefined): string {
 }
 
 export async function searchMail(
-  opts: { from?: string; about?: string; limit?: number } = {}
+  opts: { from?: string; about?: string; limit?: number; since?: string } = {}
 ): Promise<MailMessage[] | null> {
   const terms: string[] = [];
+  // "this morning", "today", "this week" — Gmail understands a relative window
+  // natively, so the spoken phrase maps to a query term rather than to
+  // client-side filtering of a page we might not have fetched.
+  if (opts.since) {
+    const said = opts.since.toLowerCase();
+    if (/week/.test(said)) terms.push('newer_than:7d');
+    else if (/yesterday/.test(said)) terms.push('newer_than:2d');
+    else if (/month/.test(said)) terms.push('newer_than:30d');
+    else if (/(today|morning|afternoon|tonight|evening)/.test(said)) terms.push('newer_than:1d');
+  }
   // Filtered before going into a query string, exactly as the server did: these
   // arrive from speech, and Gmail's query language has operators in it.
   if (opts.from) terms.push(`from:${opts.from.replace(/[^\w@.\- ]/g, '')}`);
@@ -226,6 +236,23 @@ export async function replyTo(message: MailMessage, body: string): Promise<boole
     }
   );
   return sent !== null;
+}
+
+/**
+ * The address Grove is signed in as.
+ *
+ * "Send it to me" is the one recipient that needs no contact lookup and cannot
+ * be got wrong, so it is worth resolving properly rather than asking someone
+ * for their own email address.
+ */
+let ownAddress: string | null | undefined;
+export async function me(): Promise<string | null> {
+  if (ownAddress !== undefined) return ownAddress;
+  const profile = await call<{ emailAddress?: string }>(
+    'https://gmail.googleapis.com/gmail/v1/users/me/profile'
+  );
+  ownAddress = profile?.emailAddress ?? null;
+  return ownAddress;
 }
 
 /* ------------------------------------------------------------ contacts */
