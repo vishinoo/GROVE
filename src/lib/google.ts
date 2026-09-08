@@ -51,12 +51,56 @@ function fromBase64Url(data: string): string {
 
 /* ------------------------------------------------------------- the call */
 
+/**
+ * Why the last call failed.
+ *
+ * Null used to mean all of these at once — not connected, token expired, API
+ * not switched on in the console, rate limited, timed out, no signal — and
+ * every caller reported the first one. So a Gmail request that timed out told
+ * someone their mail was not hooked up, while they were looking at it working
+ * a minute earlier. Being told a confident, wrong reason is worse than being
+ * told it broke, because it sends you to fix something that was never wrong.
+ */
+export type Reason =
+  | 'not-connected'
+  | 'auth-expired'
+  | 'api-disabled'
+  | 'rate-limited'
+  | 'timeout'
+  | 'offline'
+  | 'server';
+
+let lastReason: Reason = 'not-connected';
+
+/** The failure, as a sentence to say out loud. */
+export function explain(what = 'that'): string {
+  switch (lastReason) {
+    case 'auth-expired':
+      return 'My Google sign-in has expired. Reconnect Google in Connections.';
+    case 'api-disabled':
+      return `Google is refusing ${what} — that API is not switched on for this project yet.`;
+    case 'rate-limited':
+      return 'Google is rate-limiting me. Give it a few seconds.';
+    case 'timeout':
+      return `Google took too long over ${what}. Try me again.`;
+    case 'offline':
+      return 'I cannot reach Google right now — no signal.';
+    case 'server':
+      return 'Google had an error on that one.';
+    default:
+      return 'Google is not connected. You can do that in Connections.';
+  }
+}
+
 async function call<T>(
   url: string,
   init: { method?: string; body?: unknown; timeoutMs?: number } = {}
 ): Promise<T | null> {
   const token = await googleToken();
-  if (!token) return null;
+  if (!token) {
+    lastReason = 'not-connected';
+    return null;
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), init.timeoutMs ?? 15_000);
@@ -70,10 +114,24 @@ async function call<T>(
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
       signal: controller.signal,
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      // 403 is the one worth separating out: it is what Google returns when the
+      // account is fine and the API simply has not been enabled in the console,
+      // which is a one-click fix nobody can guess from "not connected".
+      lastReason =
+        response.status === 401
+          ? 'auth-expired'
+          : response.status === 403
+            ? 'api-disabled'
+            : response.status === 429
+              ? 'rate-limited'
+              : 'server';
+      return null;
+    }
     const text = await response.text();
     return text ? (JSON.parse(text) as T) : null;
-  } catch {
+  } catch (problem) {
+    lastReason = problem instanceof Error && problem.name === 'AbortError' ? 'timeout' : 'offline';
     return null;
   } finally {
     clearTimeout(timer);

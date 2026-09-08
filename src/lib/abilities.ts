@@ -29,7 +29,6 @@ import {
   ensureRemindersAccess,
   createEvent,
   eventsAhead,
-  findEvents,
   removeEvent,
   moveEvent,
   readWhen,
@@ -245,7 +244,7 @@ const GCAL_READ: Ability = {
 
     const events = await google.readCalendar(days);
     if (events === null) {
-      return { ok: false, spoken: 'Google is not connected. You can do that in Connections.' };
+      return { ok: false, spoken: google.explain('your calendar') };
     }
     if (events.length === 0) {
       return { ok: true, spoken: days > 1 ? 'Nothing on your Google calendar.' : 'Nothing on it today.' };
@@ -283,7 +282,7 @@ const DOC_FIND: Ability = {
     if (!wanted) return { ok: false, spoken: 'Which document?' };
 
     const data = await google.findDoc(wanted);
-    if (!data) return { ok: false, spoken: 'Google is not connected. You can do that in Connections.' };
+    if (!data) return { ok: false, spoken: google.explain('that document') };
     if (data.files.length === 0) {
       return { ok: false, spoken: `I could not find a document called ${wanted}.` };
     }
@@ -336,7 +335,7 @@ const MAIL_READ: Ability = {
       limit: 3,
     });
     if (messages === null) {
-      return { ok: false, spoken: 'Google is not connected. You can do that in Connections.' };
+      return { ok: false, spoken: google.explain('your mail') };
     }
     const who = args.from ? ` from ${args.from}` : '';
     if (messages.length === 0) return { ok: true, spoken: `Nothing${who}.` };
@@ -384,7 +383,7 @@ const MAIL_SEND: Ability = {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(asked)) {
       const matches = await google.findContact(asked);
       if (matches === null) {
-        return { ok: false, spoken: 'Google is not connected. You can do that in Connections.' };
+        return { ok: false, spoken: google.explain('sending that') };
       }
       if (matches.length === 0) return { ok: false, spoken: `I have no address for ${asked}.` };
       // Two people with the same first name is a question, not a coin toss —
@@ -421,6 +420,43 @@ async function readGoogleCalendar(
   return events
     .map((e) => ({ title: e.title, start: new Date(e.start) }))
     .filter((e) => !Number.isNaN(e.start.getTime()));
+}
+
+/**
+ * Everything upcoming, from both calendars, in time order.
+ *
+ * calendar.read learned to fall back to Google; calendar.find never did, so it
+ * searched the phone's EventKit calendar alone. On a phone whose events all
+ * live in Google that calendar is empty, which produced the sequence people
+ * actually hit: Grove lists your week correctly, you ask about one of the
+ * things it just listed, and it says there is nothing matching. Contradicting
+ * itself one turn apart is worse than either answer alone.
+ */
+async function allEvents(days: number): Promise<{ title: string; start: Date }[] | null> {
+  const [phone, remote] = await Promise.all([
+    (async () => ((await ensureCalendarAccess()) ? await eventsAhead(24 * days) : null))(),
+    readGoogleCalendar(days),
+  ]);
+  if (phone === null && remote === null) return null;
+  return [...(phone ?? []), ...(remote ?? [])].sort(
+    (a, b) => a.start.getTime() - b.start.getTime()
+  );
+}
+
+/** The same substring match findEvents uses, over both calendars. */
+async function findAcrossCalendars(
+  query: string,
+  days = 60
+): Promise<{ title: string; start: Date }[] | null> {
+  const upcoming = await allEvents(days);
+  if (upcoming === null) return null;
+  const needle = query.toLowerCase().replace(/^(?:my|the|a)\s+/, '').trim();
+  if (!needle) return upcoming;
+  const words = needle.split(/\s+/).filter((w) => w.length > 2);
+  return upcoming.filter((e) => {
+    const title = e.title.toLowerCase();
+    return title.includes(needle) || words.some((w) => title.includes(w));
+  });
 }
 
 /** Two or three events and a count — a read-out list is unusable past that. */
@@ -488,7 +524,7 @@ const MAIL_DIGEST: Ability = {
       limit: 5,
     });
     if (messages === null) {
-      return { ok: false, spoken: 'Google is not connected. You can do that in Connections.' };
+      return { ok: false, spoken: google.explain('your mail') };
     }
 
     const scope = args.from ? ` from ${args.from}` : args.when ? ` from ${args.when}` : '';
@@ -563,7 +599,7 @@ const MAIL_REPLY: Ability = {
 
     const found = await google.searchMail({ from: args.to, about: args.about, limit: 3 });
     if (found === null) {
-      return { ok: false, spoken: 'Google is not connected. You can do that in Connections.' };
+      return { ok: false, spoken: google.explain('that reply') };
     }
     if (found.length === 0) {
       const which = args.to ? ` from ${args.to}` : args.about ? ` about ${args.about}` : '';
@@ -693,7 +729,7 @@ const CALENDAR_FIND: Ability = {
     const which = (args.which || '').trim();
     if (!which) return { ok: false, spoken: 'What am I looking for?' };
 
-    const found = await findEvents(which);
+    const found = await findAcrossCalendars(which);
     if (found === null) {
       return { ok: false, spoken: 'I cannot see a calendar. Allow calendar access in iOS Settings.' };
     }

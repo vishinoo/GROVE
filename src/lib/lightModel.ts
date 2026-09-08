@@ -257,14 +257,36 @@ export async function setOwnKey(key: string): Promise<void> {
  * The fallback for when Noctus is unreachable — on cellular, or because the
  * machine it runs on went to sleep. Same prompt, same model, no server.
  */
+/**
+ * Why the model last came back with nothing.
+ *
+ * "Can't get to anything right now" was said for a rate limit, a timeout, an
+ * expired key and a dead network alike, because all four arrived as null. Rate
+ * limiting is the one that actually happens in normal use — ask three questions
+ * quickly and the free tier starts refusing — and it is also the one where the
+ * right advice is simply to wait a moment, which nobody can guess from the
+ * generic line.
+ */
+export type ModelTrouble = 'none' | 'no-key' | 'rate-limited' | 'timeout' | 'offline' | 'refused';
+
+let modelTrouble: ModelTrouble = 'none';
+
+export function lastModelTrouble(): ModelTrouble {
+  return modelTrouble;
+}
+
 async function askDirect(
   system: string,
   messages: LightMessage[],
   json: boolean,
-  search = true
+  search = true,
+  attempt = 0
 ): Promise<string | null> {
   const key = await loadOwnKey();
-  if (!key) return null;
+  if (!key) {
+    modelTrouble = 'no-key';
+    return null;
+  }
 
   try {
     const response = await withTimeout(search && !json ? SEARCH_TIMEOUT_MS : DIRECT_TIMEOUT_MS, (signal) =>
@@ -296,12 +318,27 @@ async function askDirect(
         }
       )
     );
-    if (!response.ok) return null;
+    if (!response.ok) {
+      // 429 and 5xx are worth one retry: they are transient by definition, and
+      // the alternative is telling someone Grove is broken because they asked
+      // two questions in quick succession. One retry only — a backoff loop in
+      // front of someone waiting for an answer is its own kind of broken.
+      if ((response.status === 429 || response.status >= 500) && attempt === 0) {
+        await new Promise((done) => setTimeout(done, 1200));
+        return askDirect(system, messages, json, search, 1);
+      }
+      modelTrouble = response.status === 429 ? 'rate-limited' : 'refused';
+      return null;
+    }
     const data = (await response.json()) as {
       candidates?: { content?: { parts?: { text?: string }[] } }[];
     };
-    return data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('').trim() || null;
-  } catch {
+    const text =
+      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('').trim() || null;
+    modelTrouble = text ? 'none' : 'refused';
+    return text;
+  } catch (problem) {
+    modelTrouble = problem instanceof Error && problem.name === 'AbortError' ? 'timeout' : 'offline';
     return null;
   }
 }
@@ -656,17 +693,26 @@ export async function lightBrief(topic: string): Promise<string | null> {
  * matters. Deliberately no web grounding — everything needed is in the mail,
  * and searching would only add a round trip and an opportunity to wander.
  */
+/**
+ * Several messages, as one thing you can listen to.
+ *
+ * The first version recited five emails in full and appended whether each
+ * needed a reply, which is longer than reading the inbox yourself and is the
+ * opposite of the point. A summary that takes as long as the source is not a
+ * summary. One clause each, automated noise dropped, and if there is nothing
+ * worth saying it says that instead of filling the silence.
+ */
 export async function lightDigest(
   items: { from: string; subject: string; body: string }[],
   focus: string
 ): Promise<string | null> {
   if (items.length === 0) return null;
   const material = items
-    .map((m, i) => `${i + 1}. From ${m.from} — ${m.subject}\n${m.body.slice(0, 900)}`)
+    .map((m, i) => `${i + 1}. From ${m.from} — ${m.subject}\n${m.body.slice(0, 400)}`)
     .join('\n\n');
 
   return complete(
-    'You summarise email for someone who is listening, not reading. One or two sentences per message, led by who it is from and what they want. Say what needs a reply and what does not. No preamble, no markdown, no bullet characters, no URLs, no quoting headers. If several say the same thing, say it once.',
+    'You summarise email for someone listening while walking. ONE short clause per message — who it is from and the single thing they want, under twelve words. Never explain what a message is not, never say whether it needs a reply unless it explicitly asks for something, never restate the subject line you were given. Skip anything automated: receipts, security alerts, newsletters, notifications. If nothing is worth mentioning, say so in four words. No preamble, no markdown, no bullets, no URLs, no headers.',
     [{ role: 'user', content: `${focus ? `They asked about: ${focus}\n\n` : ''}${material}` }],
     false,
     false,

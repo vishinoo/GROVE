@@ -28,7 +28,12 @@
 import { ABILITIES, abilityById, isSchedulable, usableAbilities, type Ability } from './abilities';
 import { abilitiesFor, modeById, type Mode } from './modes';
 import { asPromptBlock, factFrom, type Extracted, type Fact } from './memory';
-import { isLightModelConfigured, lightTurn, type LightMessage } from './lightModel';
+import {
+  isLightModelConfigured,
+  lastModelTrouble,
+  lightTurn,
+  type LightMessage,
+} from './lightModel';
 import { activePreset, fallback, mannerDirective, type Persona } from './persona';
 import { describeSchedule, parseSchedule, phraseTrigger, type Schedule } from './sparks';
 
@@ -538,6 +543,19 @@ function offlineLine(
     return `${describeSchedule(context.schedule)}. I'll tell you what comes back.`;
   }
   if (context.ability || context.acting) return fallback.onIt(userText);
+
+  // A real reason beats a stylish one.
+  //
+  // Rate limiting is what actually happens in normal use: ask three things in
+  // quick succession and the free tier starts refusing, and "Can't get to
+  // anything right now" then reads as Grove being broken rather than busy. The
+  // fix is to wait five seconds, and nobody can guess that from the stock line.
+  const trouble = lastModelTrouble();
+  if (trouble === 'rate-limited') return 'Too many at once — give me about five seconds.';
+  if (trouble === 'timeout') return 'That took too long to come back. Ask me again.';
+  if (trouble === 'offline') return 'I have no connection right now.';
+  if (trouble === 'no-key') return fallback.unconfigured();
+
   // In the voice's own words, falling back to the mode's. A stock line after a
   // personality has been talking to you for ten minutes is the moment the
   // character drops, and that is exactly when someone stops believing any of it.
