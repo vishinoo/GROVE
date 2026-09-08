@@ -126,6 +126,13 @@ rather than let a briefing quietly not arrive. See
 - `src/lib/memory.ts` — facts carry a subject, so "what was I supposed to ask
   Sarah about" is answerable. Capped at 40 and sent whole; there is no retrieval
   step because at this size sending everything is cheaper than fetching some.
+  Goals (`kind: 'goal'`) are capped separately and never compete with facts for
+  room: one oldest-first cap meant an intention set months ago was always
+  evicted before a passing note about lunch, and recency is the wrong measure
+  for a goal. They also carry their own heading in the prompt, so the model can
+  tell "wants to run a half marathon" from "ran a half marathon". Memory is read
+  and edited on the Sparks screen rather than in Settings — a spark is a
+  standing instruction and a fact is standing context.
 
 ## Checks
 
