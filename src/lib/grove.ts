@@ -394,6 +394,15 @@ function normalise(text: string): string {
  * Only ever fills a gap. Anything the model did supply wins, since it sees the
  * whole conversation and this sees one sentence.
  */
+/** The backfill, exposed so `npm run verify` can exercise it directly. */
+export function fillArgsForTest(
+  chosen: Ability,
+  fromModel: Record<string, string> | undefined,
+  userText: string
+): Record<string, string> {
+  return fillArgs(chosen, fromModel, userText);
+}
+
 function fillArgs(
   chosen: Ability | null,
   fromModel: Record<string, string> | undefined,

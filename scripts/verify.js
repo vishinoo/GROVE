@@ -260,6 +260,16 @@ const NEEDED = {
   'mail.send': 'https://mail.google.com/',
   'gcal.read': 'https://www.googleapis.com/auth/calendar',
   'doc.find': 'https://www.googleapis.com/auth/documents.readonly',
+  // Writing a calendar needs the full scope, not calendar.readonly — a read
+  // scope accepts the request and refuses the write, which surfaces as a 403
+  // long after the consent screen said yes.
+  'calendar.add': 'https://www.googleapis.com/auth/calendar',
+  'calendar.move': 'https://www.googleapis.com/auth/calendar',
+  'calendar.remove': 'https://www.googleapis.com/auth/calendar',
+  'tasks.add': 'https://www.googleapis.com/auth/tasks',
+  'tasks.list': 'https://www.googleapis.com/auth/tasks',
+  'tasks.done': 'https://www.googleapis.com/auth/tasks',
+  'contact.find': 'https://www.googleapis.com/auth/contacts.readonly',
 };
 for (const [id, scope] of Object.entries(NEEDED)) {
   if (!byId.has(id)) continue;
@@ -270,7 +280,66 @@ check(
   'contacts scope present (needed to turn a name into an address)'
 );
 
-/* 8. Spoken output is spoken, not printed. */
+/* 8. An ability that asks for something must be recognisable as asking. */
+section('Questions abilities ask can be answered');
+// The clarification flow records a pending question by spotting a question mark
+// in the reply. A prompt without one is a dead end: Grove asks, the answer is
+// routed as a fresh sentence, and it asks again. That exact bug shipped twice.
+for (const ability of ALL) {
+  if (!ability.wired) continue;
+  const required = Object.entries(ability.args).filter(([, spec]) => spec.required);
+  if (required.length === 0) continue;
+  const source = fs.readFileSync(path.join(ROOT, 'src/lib/abilities.ts'), 'utf8');
+  const body = source.slice(source.indexOf(`id: '${ability.id}'`));
+  const end = body.indexOf('\n};');
+  const prompts = [...body.slice(0, end).matchAll(/spoken:\s*(['"`])((?:\\.|(?!\1).)*)\1/g)]
+    .map((m) => m[2])
+    .filter((t) => /^(what|which|who|where|when)\b/i.test(t.trim()));
+  for (const prompt of prompts) {
+    check(
+      prompt.includes('?'),
+      `${ability.id} asks "${prompt.slice(0, 44)}" as a question`,
+      'no question mark, so the answer will not be captured'
+    );
+  }
+}
+
+/* 9. Nothing may be permanently unreachable in every mode. */
+section('Every ability is available in at least one mode');
+for (const ability of ALL) {
+  if (!ability.wired) continue;
+  const anywhere = modes.MODES.some((m) => !m.allow || m.allow.includes(ability.id));
+  check(anywhere, `${ability.id} is allowed somewhere`, 'no mode permits it, including normal');
+}
+
+/* 10. Arguments the model forgets have to come from somewhere. */
+section('Missing arguments are filled from the sentence');
+const BACKFILLED = [
+  ['play a song by Playboi Carti', 'music.play', 'what'],
+  ['any emails from Xbox today', 'mail.search', 'from'],
+  ['what time is dinner', 'calendar.find', 'which'],
+  ['what is my first thing today', 'calendar.read', 'which'],
+];
+for (const [said, id, argName] of BACKFILLED) {
+  const ability = byId.get(id);
+  if (!ability) continue;
+  // Exactly the situation that keeps recurring: the model named the ability
+  // and passed nothing at all.
+  const filled = grove.fillArgsForTest
+    ? grove.fillArgsForTest(ability, {}, said)
+    : null;
+  if (filled === null) {
+    check(true, `${id} backfill not exposed for testing — skipped`);
+    continue;
+  }
+  check(
+    Boolean((filled[argName] ?? '').trim()),
+    `"${said}" fills ${id}.${argName}`,
+    'nothing was recovered from the sentence, so the ability will ask'
+  );
+}
+
+/* 11. Spoken output is spoken, not printed. */
 section('Nothing speaks markdown, JSON or a URL');
 const source = fs.readFileSync(path.join(ROOT, 'src/lib/abilities.ts'), 'utf8');
 for (const m of source.matchAll(/spoken:\s*(['"`])((?:\\.|(?!\1).)*)\1/g)) {
