@@ -132,7 +132,28 @@ export function useAgent(): AgentValue {
 export function AgentProvider({ children }: { children: React.ReactNode }) {
   const { status, uid } = useSession();
 
-  const [state, setState] = useState<AgentState>('asleep');
+  const [state, setRenderedState] = useState<AgentState>('asleep');
+
+  /**
+   * The state as of the last thing that changed it, not the last render.
+   *
+   * React batches, so a ref filled during render is one press behind: tap to
+   * start listening and tap again quickly, and the second press reads the state
+   * from before the first took effect and takes the wrong branch. That is the
+   * whole of "the clicks are not coordinated" — the handler was working from a
+   * picture of the app that was a few milliseconds stale, which is exactly the
+   * window in which someone double-taps.
+   */
+  const stateNow = useRef<AgentState>('asleep');
+
+  const setState = useCallback(
+    (next: AgentState | ((current: AgentState) => AgentState)) => {
+      const resolved = typeof next === 'function' ? next(stateNow.current) : next;
+      stateNow.current = resolved;
+      setRenderedState(resolved);
+    },
+    []
+  );
   const [caption, setCaption] = useState('');
   const [heard, setHeard] = useState('');
   const [level, setLevel] = useState(0);
@@ -779,7 +800,7 @@ function shortFailure(text: string): string {
         setState(restingState());
       }, SILENCE_TIMEOUT_MS);
     },
-    [exchange, clearSilence]
+    [exchange, clearSilence, setState]
   );
 
   /**
@@ -790,7 +811,7 @@ function shortFailure(text: string): string {
    * rather than by three implementations agreeing with each other.
    */
   const press = useCallback(() => {
-    const current = live.current.state;
+    const current = stateNow.current;
 
     // The only confirmation available to someone whose phone is in a pocket
     // and whose ring has no feedback of its own. Without it there is a silent
@@ -882,10 +903,10 @@ function shortFailure(text: string): string {
         case 'hold-start':
           // A held button means "I am still talking" — keep the recogniser
           // open rather than letting it endpoint at the first pause.
-          if (live.current.state !== 'listening') void beginListening(true);
+          if (stateNow.current !== 'listening') void beginListening(true);
           break;
         case 'hold-end':
-          if (live.current.state === 'listening') stopListening();
+          if (stateNow.current === 'listening') stopListening();
           break;
       }
     });
@@ -911,7 +932,7 @@ function shortFailure(text: string): string {
       offRoute();
       appSub.remove();
     };
-  }, [status, press, beginListening, catchUp]);
+  }, [status, press, beginListening, catchUp, setState]);
 
   /**
    * The volume-down fallback follows the preference, but only once the session
@@ -943,7 +964,7 @@ function shortFailure(text: string): string {
       history.current = [];
       setCaption('');
     }
-  }, [status]);
+  }, [status, setState]);
 
   const value = useMemo<AgentValue>(
     () => ({

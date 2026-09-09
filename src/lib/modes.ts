@@ -152,6 +152,7 @@ export const MODES: Mode[] = [
       'mode.set', 'memory.recall', 'memory.add', 'calendar.find', 'music.play',
       'doc.find', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.add',
       'mail.search', 'tasks.add', 'tasks.list', 'tasks.done', 'contact.find',
+      'weather.now', 'maps.eta',
     ],
     interrupt: 'never',
     // Study is the one mode where being asked something back is the point, so
