@@ -19,7 +19,7 @@ import { Card, Mono, Notice, Screen, Section } from '@/components/ui';
 import { Radius, Type } from '@/constants/theme';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
-import { abilityById } from '@/lib/abilities';
+import { ABILITIES, abilityById } from '@/lib/abilities';
 import { CONNECTIONS, providerFor, type Connection } from '@/lib/connections';
 import { grantMessage, type GrantOutcome } from '@/lib/devicePermissions';
 
@@ -117,6 +117,43 @@ export default function Connections() {
             onPress={() => void act(item)}
           />
         ))}
+      </Section>
+
+      {/*
+        What all of that adds up to.
+        
+        A connection is not a capability, and the screen only showed the former:
+        Tasks, Contacts and Calling all arrive through the Google row, so adding
+        them changed nothing visible and there was no way to find out what Grove
+        could suddenly do. This is the list, with an example of each, because
+        the useful question is never "is Google connected" but "what can I say".
+      */}
+      <Section label="Everything it can do">
+        {ABILITIES.filter((a) => a.wired).map((ability) => {
+          const ready = ability.needs.every((need) => live.has(need));
+          return (
+            <Card key={ability.id} style={{ marginBottom: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={[Type.cardTitle, { color: palette.ink, flex: 1 }]}>
+                  {ability.name}
+                </Text>
+                <Mono color={ready ? palette.signal : palette.muted}>
+                  {ready ? 'ready' : 'needs Google'}
+                </Mono>
+              </View>
+              <Text style={[Type.bodySm, { color: palette.muted, marginTop: 4 }]}>
+                {ability.what}
+              </Text>
+              {ability.examples[0] ? (
+                <Text
+                  style={[Type.bodySm, { color: palette.inkSoft, marginTop: 5, fontStyle: 'italic' }]}
+                >
+                  &ldquo;{ability.examples[0]}&rdquo;
+                </Text>
+              ) : null}
+            </Card>
+          );
+        })}
       </Section>
 
       <Text
