@@ -31,6 +31,10 @@ export default function Connections() {
   const [error, setError] = useState<string | null>(null);
   /** Set when the fix is in iOS Settings, so the notice can go straight there. */
   const [needsSettings, setNeedsSettings] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+
+  /** Only what is actually built — a list of things that do not work is noise. */
+  const wired = ABILITIES.filter((a) => a.wired);
 
   const live = new Set(connections);
   const connected = CONNECTIONS.filter((c) => live.has(c.key));
@@ -121,39 +125,52 @@ export default function Connections() {
 
       {/*
         What all of that adds up to.
-        
-        A connection is not a capability, and the screen only showed the former:
-        Tasks, Contacts and Calling all arrive through the Google row, so adding
-        them changed nothing visible and there was no way to find out what Grove
-        could suddenly do. This is the list, with an example of each, because
-        the useful question is never "is Google connected" but "what can I say".
+
+        A connection is not a capability, and this screen only showed the
+        former: Contacts and Calling both arrive through the Google row, so
+        adding them changed nothing visible and there was no way to find out
+        what Grove could suddenly do. The useful question is never "is Google
+        connected" but "what can I say", and this answers it.
+
+        Folded away, because two dozen cards is a wall rather than a list. Open
+        it when you want to know what to ask for; the rest of the time this
+        screen is about what is connected, which is five rows.
       */}
       <Section label="Everything it can do">
-        {ABILITIES.filter((a) => a.wired).map((ability) => {
-          const ready = ability.needs.every((need) => live.has(need));
-          return (
-            <Card key={ability.id} style={{ marginBottom: 8 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={[Type.cardTitle, { color: palette.ink, flex: 1 }]}>
-                  {ability.name}
-                </Text>
-                <Mono color={ready ? palette.signal : palette.muted}>
-                  {ready ? 'ready' : 'needs Google'}
-                </Mono>
-              </View>
-              <Text style={[Type.bodySm, { color: palette.muted, marginTop: 4 }]}>
-                {ability.what}
-              </Text>
-              {ability.examples[0] ? (
-                <Text
-                  style={[Type.bodySm, { color: palette.inkSoft, marginTop: 5, fontStyle: 'italic' }]}
-                >
-                  &ldquo;{ability.examples[0]}&rdquo;
-                </Text>
-              ) : null}
-            </Card>
-          );
-        })}
+        <Card style={{ paddingVertical: 0 }}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showAll }}
+            onPress={() => setShowAll((was) => !was)}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+              paddingVertical: 14,
+              opacity: pressed ? 0.6 : 1,
+            })}
+          >
+            <Text style={[Type.body, { color: palette.ink, flex: 1 }]}>
+              {wired.length} things you can ask for
+            </Text>
+            <Mono color={palette.muted}>{showAll ? 'hide' : 'show'}</Mono>
+          </Pressable>
+
+          {showAll ? (
+            <View style={{ paddingBottom: 12, gap: 12 }}>
+              {wired.map((ability) => (
+                <View key={ability.id} style={{ borderTopWidth: 1, borderTopColor: palette.line, paddingTop: 10 }}>
+                  <Text style={[Type.cardTitle, { color: palette.ink }]}>{ability.name}</Text>
+                  {ability.examples[0] ? (
+                    <Text style={[Type.bodySm, { color: palette.muted, marginTop: 3 }]}>
+                      &ldquo;{ability.examples[0]}&rdquo;
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          ) : null}
+        </Card>
       </Section>
 
       <Text

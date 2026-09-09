@@ -266,9 +266,6 @@ const NEEDED = {
   'calendar.add': 'https://www.googleapis.com/auth/calendar',
   'calendar.move': 'https://www.googleapis.com/auth/calendar',
   'calendar.remove': 'https://www.googleapis.com/auth/calendar',
-  'tasks.add': 'https://www.googleapis.com/auth/tasks',
-  'tasks.list': 'https://www.googleapis.com/auth/tasks',
-  'tasks.done': 'https://www.googleapis.com/auth/tasks',
   'contact.find': 'https://www.googleapis.com/auth/contacts.readonly',
 };
 for (const [id, scope] of Object.entries(NEEDED)) {

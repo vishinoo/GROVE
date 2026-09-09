@@ -80,7 +80,7 @@ export const CONNECTIONS: Connection[] = [
     key: 'email',
     provider: 'google',
     label: 'Google Workspace',
-    what: 'Gmail, Calendar, Tasks, Docs, contacts and calling',
+    what: 'Gmail, Calendar, Docs, contacts and calling',
     icon: 'google',
     kind: 'account',
     unlocks: [
@@ -95,9 +95,6 @@ export const CONNECTIONS: Connection[] = [
       'calendar.add',
       'calendar.remove',
       'calendar.find',
-      'tasks.add',
-      'tasks.list',
-      'tasks.done',
       'contact.find',
       'call.start',
     ],

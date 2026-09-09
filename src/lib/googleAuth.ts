@@ -57,7 +57,6 @@ export const SCOPES = [
   'https://www.googleapis.com/auth/contacts.readonly',
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/documents.readonly',
-  'https://www.googleapis.com/auth/tasks',
 ];
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';

@@ -128,8 +128,7 @@ export const MODES: Mode[] = [
     allow: [
       'mode.set', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.find',
       'calendar.add', 'weather.now', 'memory.recall', 'memory.add', 'music.play',
-      'mail.search', 'mail.summarise', 'tasks.add', 'tasks.list', 'tasks.done',
-      'contact.find',
+      'mail.search', 'mail.summarise', 'contact.find',
     ],
     interrupt: 'never',
     // Something happens on the way in, rather than the mode being a label on a
@@ -151,7 +150,7 @@ export const MODES: Mode[] = [
     allow: [
       'mode.set', 'memory.recall', 'memory.add', 'calendar.find', 'music.play',
       'doc.find', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.add',
-      'mail.search', 'tasks.add', 'tasks.list', 'tasks.done', 'contact.find',
+      'mail.search', 'contact.find',
       'weather.now', 'maps.eta',
     ],
     interrupt: 'never',
@@ -175,8 +174,7 @@ export const MODES: Mode[] = [
     allow: [
       'mode.set', 'music.play', 'weather.now', 'reminders.add', 'memory.recall',
       'memory.add', 'day.brief', 'calendar.read', 'gcal.read', 'calendar.find',
-      'mail.search', 'tasks.list',
-    ],
+      'mail.search', ],
     interrupt: 'sparingly',
     // The evening version of a brief: what is coming tomorrow, said once, and
     // something quiet on. Nothing that opens a thread — no mail, no sending —

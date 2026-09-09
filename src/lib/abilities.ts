@@ -297,7 +297,7 @@ const GCAL_READ: Ability = {
     const rest = events.length - 2;
     let line = `${first.title} ${sayWhen(new Date(first.start))}`;
     if (second) line += `, then ${second.title} ${sayWhen(new Date(second.start))}`;
-    if (rest > 0) line += `, and ${rest} more`;
+    if (rest > 0) line += `, and ${saidCount(rest)} more`;
     return { ok: true, spoken: `${line}.`, detail: `${events.length} from Google` };
   },
 };
@@ -423,12 +423,12 @@ const MAIL_READ: Ability = {
       .slice(0, 3)
       .map((m) => readable(m.subject ?? '').slice(0, 60) || saySender(m.from ?? ''))
       .filter(Boolean);
-    const more = messages.length > 3 ? `, and ${messages.length - 3} more` : '';
+    const more = messages.length > 3 ? `, and ${saidCount(messages.length - 3)} more` : '';
 
     // When they named the sender, saying it back on every line is noise; when
     // they did not, it is the only thing that tells the messages apart.
     const body = asked
-      ? `${asked}: ${subjects.join('; ')}${more}.`
+      ? `${asked}: ${saidList(subjects)}${more}.`
       : `${messages
           .slice(0, 3)
           .map((m) => {
@@ -436,7 +436,9 @@ const MAIL_READ: Ability = {
             const what = readable(m.subject ?? '').slice(0, 60);
             return what ? `${who} about ${what}` : who;
           })
-          .join('; ')}${more}.`;
+          .filter(Boolean)
+          .reduce<string[]>((all, one) => [...all, one], [])
+          .join(', ')}${more}.`;
 
     return {
       ok: true,
@@ -743,6 +745,35 @@ async function findAcrossCalendars(query: string, days = 60): Promise<Dated[] | 
   return scored.filter((m) => m.score === best).map((m) => m.event);
 }
 
+/**
+ * A list, said the way a person says one.
+ *
+ * Semicolons are a reading convention and they do not survive being spoken:
+ * "Xbox: order confirmed; shipping update; renewal" arrives as one long run
+ * with no shape to it. An "and" before the last item is what tells a listener
+ * the list is ending, which is the only cue speech has.
+ */
+function saidList(items: string[]): string {
+  const clean = items.map((i) => i.trim()).filter(Boolean);
+  if (clean.length <= 1) return clean[0] ?? '';
+  return `${clean.slice(0, -1).join(', ')} and ${clean[clean.length - 1]}`;
+}
+
+/**
+ * Small numbers as words.
+ *
+ * "3 messages" is read out by the synthesiser as a digit and lands like a
+ * counter rather than a sentence. Past twelve, words are worse than the number.
+ */
+const SPOKEN_NUMBER = [
+  'no', 'one', 'two', 'three', 'four', 'five', 'six',
+  'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve',
+];
+
+function saidCount(n: number): string {
+  return SPOKEN_NUMBER[n] ?? String(n);
+}
+
 /** Two or three events and a count — a read-out list is unusable past that. */
 /** Just the clock, for events already placed on a day. */
 function clockOnly(date: Date): string {
@@ -765,7 +796,7 @@ function sayEvents(events: { title: string; start: Date }[], lead = ''): string 
   if (events.length === 1) return `${lead}${first.title}, ${sayWhen(first.start)}.`;
 
   const sameDay = !second || first.start.toDateString() === second.start.toDateString();
-  const opening = `${events.length} on. ${first.title} ${sayWhen(first.start)}`;
+  const opening = `${saidCount(events.length)} on today. ${first.title} ${sayWhen(first.start)}`;
   let line = opening;
   if (second) {
     line += sameDay
@@ -773,7 +804,7 @@ function sayEvents(events: { title: string; start: Date }[], lead = ''): string 
       : `, then ${second.title} ${sayWhen(second.start)}`;
   }
   const rest = events.length - 2;
-  if (rest > 0) line += `, and ${rest} more`;
+  if (rest > 0) line += `, and ${saidCount(rest)} more`;
   return `${lead}${line}.`;
 }
 
@@ -1099,7 +1130,7 @@ const CALENDAR_FIND: Ability = {
     const [first, second] = found;
     let line = `${first.title} ${sayWhen(first.start)}`;
     if (second) line += `, then ${second.title} ${sayWhen(second.start)}`;
-    if (found.length > 2) line += `, and ${found.length - 2} more`;
+    if (found.length > 2) line += `, and ${saidCount(found.length - 2)} more`;
     return { ok: true, spoken: `${line}.`, detail: `${found.length} matching "${which}"` };
   },
 };
@@ -1684,81 +1715,8 @@ const DAY: Ability = {
  * outlive the cap: an intention set months ago is exactly what you want kept,
  * and recency is the wrong measure for it.
  */
-/* ---------------------------------------------------------------- tasks */
 
-const TASK_ADD: Ability = {
-  id: 'tasks.add',
-  name: 'Tasks',
-  what: 'Puts something on your Google Tasks list.',
-  where: 'server',
-  wired: true,
-  needs: ['email'],
-  args: {
-    what: { type: 'string', what: 'the task, in their own words', required: true },
-    when: { type: 'string', what: 'when it is due, if they said' },
-  },
-  examples: [
-    'add finish the report to my tasks',
-    'put call the bank on my to-do list',
-    'add buy milk to my list',
-  ],
-  run: async (args) => {
-    const what = (args.what || '').trim();
-    if (!what) return { ok: false, spoken: 'What should I add?' };
-    const due = args.when ? readWhen(args.when) : null;
-    const saved = await google.addTask(what, due);
-    if (!saved) return { ok: false, spoken: google.explain('adding that') };
-    return {
-      ok: true,
-      spoken: due ? `Added ${what}, due ${sayWhen(due)}.` : `Added ${what} to your tasks.`,
-    };
-  },
-};
 
-const TASK_LIST: Ability = {
-  id: 'tasks.list',
-  name: 'Tasks',
-  what: 'Says what is still on your task list.',
-  where: 'server',
-  wired: true,
-  needs: ['email'],
-  reads: true,
-  args: {},
-  examples: ["what's on my to-do list", 'what are my tasks', 'what do I still have to do'],
-  run: async () => {
-    const tasks = await google.listTasks();
-    if (tasks === null) return { ok: false, spoken: google.explain('your tasks') };
-    if (tasks.length === 0) return { ok: true, spoken: 'Nothing on your list.' };
-
-    // Three and a count, like everything else spoken here: a read-out list is
-    // unusable past about that.
-    const named = tasks.slice(0, 3).map((t) => t.title).join('; ');
-    const rest = tasks.length > 3 ? `, and ${tasks.length - 3} more` : '';
-    return {
-      ok: true,
-      spoken: `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}. ${named}${rest}.`,
-      detail: tasks.map((t) => t.title).join('\n'),
-    };
-  },
-};
-
-const TASK_DONE: Ability = {
-  id: 'tasks.done',
-  name: 'Tasks',
-  what: 'Ticks something off your task list.',
-  where: 'server',
-  wired: true,
-  needs: ['email'],
-  args: { what: { type: 'string', what: 'which task', required: true } },
-  examples: ['tick off buy milk', 'mark call the bank as done', 'complete the report task'],
-  run: async (args) => {
-    const what = (args.what || '').trim();
-    if (!what) return { ok: false, spoken: 'Which one?' };
-    const done = await google.completeTask(what);
-    if (!done.ok) return { ok: false, spoken: `I could not find ${what} on your list.` };
-    return { ok: true, spoken: `Ticked off ${done.title}.` };
-  },
-};
 
 /* ------------------------------------------------------------- contacts */
 
@@ -2226,9 +2184,6 @@ export const ABILITIES: Ability[] = [
   MAC_TASK,
   RIDE,
   DELIVERY,
-  TASK_ADD,
-  TASK_LIST,
-  TASK_DONE,
   CONTACT_FIND,
   CALL,
   MEMORY_ADD,
