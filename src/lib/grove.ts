@@ -406,6 +406,22 @@ function fillArgs(
     if (heard) args.what = heard;
   }
 
+  if (chosen?.id === 'mail.search' || chosen?.id === 'mail.summarise') {
+    // "Any recent emails from Xbox" arrived with no `from` at all, so the
+    // search fell back to "everything from the last two days" and read out five
+    // unrelated messages. The sender is right there in the sentence.
+    if (!(args.from ?? '').trim()) {
+      const named = senderIn(userText);
+      if (named) args.from = named;
+    }
+    if (!(args.category ?? '').trim() && CATEGORY_IN.test(userText)) {
+      args.category = (CATEGORY_IN.exec(userText)?.[1] ?? '').trim();
+    }
+    if (!(args.when ?? '').trim() && /\b(today|yesterday|this week|this morning)\b/i.test(userText)) {
+      args.when = userText;
+    }
+  }
+
   if (chosen?.id === 'calendar.read') {
     // The position and the day are both in what was said, and both change the
     // answer completely — "my last thing" is one event, "today" is a window.
@@ -419,6 +435,51 @@ function fillArgs(
 
   return args;
 }
+
+/**
+ * The sender named in a question about mail.
+ *
+ * Written out rather than done in one regex because the stopping rule is the
+ * whole problem: a name runs until a word that cannot be part of one. The regex
+ * version used a case-insensitive flag, which quietly made its "second word
+ * must be capitalised" rule match anything — so "emails from linkedin today"
+ * came back as a sender called "linkedin today", which matches nothing.
+ *
+ * Two words at most, because "from Ali Express" is a sender and "from Priya
+ * about the invoice we discussed" is a sender and then a subject.
+ */
+const NOT_PART_OF_A_NAME = new Set([
+  'about', 'regarding', 're', 'today', 'yesterday', 'this', 'last', 'in', 'on',
+  'at', 'with', 'and', 'or', 'the', 'a', 'any', 'my', 'me', 'recently', 'lately',
+  'saying', 'that', 'which', 'week', 'month', 'morning', 'afternoon',
+]);
+
+export function senderIn(text: string): string | null {
+  const after = /\bfrom\s+(.*)$/i.exec(text);
+  if (!after?.[1]) return null;
+
+  const words: string[] = [];
+  for (const raw of after[1].split(/\s+/)) {
+    const word = raw.replace(/[?.!,;:]+$/, '');
+    if (!word) break;
+    if (NOT_PART_OF_A_NAME.has(word.toLowerCase())) break;
+    words.push(word);
+    // A second word only counts when it looks like part of a proper name —
+    // "Ali Express", not "linkedin today".
+    if (words.length === 2) break;
+    if (words.length === 1 && !/^[A-Z]/.test(word)) {
+      // A lowercase first word is a service name like "xbox" or "linkedin",
+      // which is one word on its own.
+      break;
+    }
+  }
+  const name = words.join(' ').trim();
+  return name.length > 1 ? name : null;
+}
+
+/** A kind of mail, when one is named. */
+const CATEGORY_IN =
+  /\b(unread|important|urgent|starred|flagged|new)\b/i;
 
 /** Any wording that names a position rather than a window. */
 const POSITION_WORD =

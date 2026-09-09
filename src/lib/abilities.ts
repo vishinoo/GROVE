@@ -381,7 +381,10 @@ const MAIL_READ: Ability = {
     const rest = messages.length > 3 ? `, and ${messages.length - 3} more` : '';
     return {
       ok: true,
-      spoken: `${messages.length}${who}. ${named}${rest}. Want me to read one?`,
+      // Never a bare number. "5." opening a spoken reply is a count with no
+      // noun attached, and it lands as though Grove has answered a different
+      // question — which, when the sender filter was being dropped, it had.
+      spoken: `${messages.length} ${messages.length === 1 ? 'message' : 'messages'}${who}. ${named}${rest}. Want me to read one?`,
       detail: messages.map((m) => `${saySender(m.from ?? '')} — ${m.subject}`).join('\n'),
     };
   },
@@ -568,19 +571,108 @@ function sayOne(event: Dated, position: 'first' | 'last' | 'next' | null): strin
 }
 
 /** The same substring match findEvents uses, over both calendars. */
+/**
+ * Words that say how you are asking, not what you are asking for.
+ *
+ * "Look for mark 312" was searched verbatim, so "look" and "for" went into the
+ * match — and "for" is three letters, which was the bar for being significant,
+ * so it matched the substring in "Information Session" and anything else
+ * containing it. The question's scaffolding has to come out before the search
+ * starts.
+ */
+const NOT_A_SEARCH_TERM = new Set([
+  'look', 'find', 'search', 'check', 'show', 'tell', 'what', 'when', 'where',
+  'which', 'whats', 'have', 'has', 'got', 'any', 'all', 'the', 'for', 'and',
+  'about', 'with', 'from', 'that', 'this', 'there', 'thing', 'things', 'event',
+  'events', 'calendar', 'schedule', 'time', 'again', 'please', 'anything',
+]);
+
+/**
+ * Kinds of thing, so a category finds its members.
+ *
+ * "What are my classes" should find MARK 312 Lecture, and it never would by
+ * substring — nothing in that title contains the word "class". These are the
+ * groupings people actually ask by, and each expands to the words that appear
+ * in real calendar entries.
+ */
+const KINDS: Record<string, string[]> = {
+  class: ['class', 'lecture', 'lab', 'seminar', 'tutorial', 'course', 'lesson'],
+  meeting: ['meeting', 'sync', 'standup', 'stand-up', 'call', '1:1', 'one on one', 'catch up'],
+  appointment: ['appointment', 'appt', 'consult', 'checkup', 'check-up'],
+  workout: ['gym', 'workout', 'training', 'run', 'yoga', 'climb', 'swim'],
+  exam: ['exam', 'midterm', 'final', 'test', 'quiz'],
+  interview: ['interview', 'screening'],
+  flight: ['flight', 'departure', 'boarding'],
+};
+
+/** "classes" and "class" are the same search. */
+function singular(word: string): string {
+  if (word.length > 4 && word.endsWith('ies')) return `${word.slice(0, -3)}y`;
+  if (word.length > 4 && word.endsWith('es')) return word.slice(0, -2);
+  if (word.length > 3 && word.endsWith('s')) return word.slice(0, -1);
+  return word;
+}
+
+/** The terms a query is really made of, category words expanded. */
+function searchTerms(query: string): string[] {
+  const words = cleanTerm(query)
+    .split(/[^a-z0-9:]+/i)
+    .map((w) => w.trim())
+    .filter((w) => w.length > 1 && !NOT_A_SEARCH_TERM.has(w));
+
+  const terms = new Set<string>();
+  for (const word of words) {
+    const root = singular(word);
+    terms.add(root);
+    for (const spellings of Object.values(KINDS)) {
+      if (spellings.includes(root)) spellings.forEach((k) => terms.add(k));
+    }
+  }
+  return [...terms];
+}
+
+/**
+ * Events matching a description, best first.
+ *
+ * Scored rather than filtered. A course code is two tokens — "mark" and "312" —
+ * and an event matching both is a better answer than one matching either, which
+ * a boolean filter cannot express: it returned everything containing any word,
+ * in time order, so the exactly-right event sat behind three near-misses.
+ *
+ * Ties keep calendar order, so among equally good matches the earliest wins,
+ * which is what "my first" then means.
+ */
 async function findAcrossCalendars(query: string, days = 60): Promise<Dated[] | null> {
   const upcoming = await allEvents(days);
   if (upcoming === null) return null;
-  // One cleaner shared with the spoken fallback, so the term searched for and
-  // the term said back can never disagree. Position and day words are how the
-  // question is framed, not part of any event's name.
+
   const needle = cleanTerm(query);
   if (!needle) return upcoming;
-  const words = needle.split(/\s+/).filter((w) => w.length > 2);
-  return upcoming.filter((e) => {
-    const title = e.title.toLowerCase();
-    return title.includes(needle) || words.some((w) => title.includes(w));
-  });
+  const terms = searchTerms(query);
+  if (terms.length === 0) return upcoming;
+
+  const scored = upcoming
+    .map((event, order) => {
+      const title = event.title.toLowerCase();
+      const words = title.split(/[^a-z0-9:]+/i).map(singular);
+      let score = 0;
+      for (const term of terms) {
+        // A whole word beats a substring: "mark" should match MARK 312 more
+        // strongly than it matches "Denmark trip".
+        if (words.includes(term)) score += 3;
+        else if (title.includes(term)) score += 1;
+      }
+      // The whole phrase, if it survived cleaning, is the strongest signal.
+      if (needle.length > 3 && title.includes(needle)) score += 4;
+      return { event, score, order };
+    })
+    .filter((m) => m.score > 0)
+    .sort((a, b) => b.score - a.score || a.order - b.order);
+
+  // Only the best tier. A query matching one event on three tokens should not
+  // come back with the four that matched on one.
+  const best = scored[0]?.score ?? 0;
+  return scored.filter((m) => m.score === best).map((m) => m.event);
 }
 
 /** Two or three events and a count — a read-out list is unusable past that. */
