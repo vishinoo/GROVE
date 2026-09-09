@@ -121,7 +121,16 @@ export const MODES: Mode[] = [
     label: 'Focus',
     what: 'Working. Grove stays quiet unless asked.',
     manner: 'They are concentrating. Answer in as few words as will do, and never volunteer more.',
-    allow: ['mode.set', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.find', 'calendar.add', 'weather.now', 'memory.recall', 'memory.add', 'music.play'],
+    // Reading mail on request is not an interruption — asking for it is the
+    // opposite of being interrupted by it. `interrupt: never` below is what
+    // actually protects concentration. Sending stays off: composing mail is the
+    // thing that pulls someone out of what they were doing.
+    allow: [
+      'mode.set', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.find',
+      'calendar.add', 'weather.now', 'memory.recall', 'memory.add', 'music.play',
+      'mail.search', 'mail.summarise', 'tasks.add', 'tasks.list', 'tasks.done',
+      'contact.find',
+    ],
     interrupt: 'never',
     // Something happens on the way in, rather than the mode being a label on a
     // manner. What it does is what focus actually needs: know what is coming so
@@ -139,7 +148,11 @@ export const MODES: Mode[] = [
     what: 'Explains properly instead of being terse.',
     manner:
       'They are learning something. Explain it properly — three or four sentences is right here, and being clipped is unhelpful. Use an example. Check they followed before moving on.',
-    allow: ['mode.set', 'memory.recall', 'memory.add', 'calendar.find', 'music.play', 'doc.find', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.find', 'calendar.add'],
+    allow: [
+      'mode.set', 'memory.recall', 'memory.add', 'calendar.find', 'music.play',
+      'doc.find', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.add',
+      'mail.search', 'tasks.add', 'tasks.list', 'tasks.done', 'contact.find',
+    ],
     interrupt: 'never',
     // Study is the one mode where being asked something back is the point, so
     // entering it opens with the question rather than an announcement.
@@ -156,7 +169,13 @@ export const MODES: Mode[] = [
     what: 'Evening. Nothing that starts work.',
     manner: 'It is the end of their day. Keep it calm and short. Do not raise anything that would start them working.',
     // Nothing that opens a thread: no mail, no sending.
-    allow: ['mode.set', 'music.play', 'weather.now', 'reminders.add', 'memory.recall', 'day.brief'],
+    // Reading is fine in the evening; starting a thread is not. No sending, no
+    // replying, no calling — those are the ones that turn a wind-down into work.
+    allow: [
+      'mode.set', 'music.play', 'weather.now', 'reminders.add', 'memory.recall',
+      'memory.add', 'day.brief', 'calendar.read', 'gcal.read', 'calendar.find',
+      'mail.search', 'tasks.list',
+    ],
     interrupt: 'sparingly',
     // The evening version of a brief: what is coming tomorrow, said once, and
     // something quiet on. Nothing that opens a thread — no mail, no sending —

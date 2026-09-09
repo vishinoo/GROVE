@@ -642,6 +642,18 @@ export async function askGrove(
   // the difference between a dead end and an instruction.
   const blocked = !chosen && (acting || looking) && named && !named.wired ? named : null;
 
+  /**
+   * Wired, built, connected — and switched off by the mode you are in.
+   *
+   * This was indistinguishable from a missing feature. Asked to read mail in
+   * focus mode, Grove said "I can't do that yet", which is what it says about
+   * things nobody has built — so a setting the person turned on five minutes
+   * ago reads as a gap in the product. A restriction you chose should say so,
+   * and say how to lift it.
+   */
+  const offInThisMode =
+    !chosen && named?.wired && !available.some((a) => a.id === named.id) ? named : null;
+
   const fact = factFrom(userText) ?? undefined;
 
   /**
@@ -672,6 +684,16 @@ export async function askGrove(
       text: notedFor(persona, fact.value.replace(/^i /i, 'you ')),
       args: {},
       fact,
+    };
+  }
+
+  // Said before anything else can paper over it, because the model does not
+  // know the mode narrowed its own tool list and will happily improvise a
+  // reason it cannot help.
+  if (offInThisMode) {
+    return {
+      text: `${offInThisMode.name} is off in ${mode.label.toLowerCase()} mode. Say "back to normal" and I'll do it.`,
+      args: {},
     };
   }
 
