@@ -163,7 +163,7 @@ const BARE_YES =
  * Address forms are allowed in front of it, because people say "please" and
  * "hey Grove" and mean the imperative that follows.
  */
-const VERBS = String.raw`make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up|play|read|brief|tell me about|email|text|message|call|switch to|switch into|go into|turn on|turn off|open|handle|push|reschedule|delay|shift|dim|start|stop|queue|skip|pause|resume|let .{2,20} know|give me|reply|respond|answer|forward|let'?s go|take me|drive me|directions|navigate|which way|delete|remove|take|summari[sz]e|catch me up|recap|digest|remember|note|jot|keep in mind|don'?t let me forget`;
+const VERBS = String.raw`make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up|play|read|brief|tell me about|email|text|message|call|switch to|switch into|go into|turn on|turn off|open|handle|push|reschedule|delay|shift|dim|start|stop|queue|skip|pause|resume|let .{2,20} know|give me|reply|respond|answer|forward|let'?s go|take me|drive me|directions|navigate|which way|delete|remove|take|summari[sz]e|catch me up|recap|digest|remember|note|jot|keep in mind|don'?t let me forget|tick|mark|ring|dial|complete|finished`;
 
 /** "hey Grove, please …" — anything that can precede an instruction. */
 /**
@@ -254,7 +254,7 @@ const NOT_A_DESTINATION =
 const ELLIPTICAL_LOOKUP = /^\s*(?:anything|any (?:mail|messages|emails|news))\b/i;
 
 const LOOKUP_QUESTION =
-  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|coat|umbrella|wear|traffic|how long|how far|eta|leave for|leave by|set off|get there|get home|which way|way to|route to|far is|my day|day looking|got on|first thing|last thing|next thing|what time is|what time'?s|first class|last class|of the day|first class|class|appointment|meeting|event|events|booked|flight|this week|anything with|anything on|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|doc|docs|document|plan|notes|spreadsheet|drive|news|markets|happened|remind me (?:what|who|about)|supposed to|do i know about|did i say|what did i|anything from|say about|did .{2,20} say)\b/i;
+  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|coat|umbrella|wear|traffic|how long|how far|eta|leave for|leave by|set off|get there|get home|which way|way to|route to|far is|my day|day looking|got on|first thing|last thing|next thing|what time is|what time'?s|to-?do|task|tasks|my list|still have to do|number|phone number|contact|first class|last class|of the day|first class|class|appointment|meeting|event|events|booked|flight|this week|anything with|anything on|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|doc|docs|document|plan|notes|spreadsheet|drive|news|markets|happened|remind me (?:what|who|about)|supposed to|do i know about|did i say|what did i|anything from|say about|did .{2,20} say)\b/i;
 
 /**
  * Whether this is a question Grove should look up rather than answer offhand.

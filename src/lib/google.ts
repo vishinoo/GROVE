@@ -373,7 +373,7 @@ export async function me(): Promise<string | null> {
 
 /* ------------------------------------------------------------ contacts */
 
-export type Contact = { name: string; email: string };
+export type Contact = { name: string; email: string; phone?: string };
 
 /**
  * A name to an address.
@@ -385,17 +385,27 @@ export async function findContact(name: string): Promise<Contact[] | null> {
   const clean = name.replace(/[^\w@.\- ]/g, '').trim();
   if (!clean) return [];
   const found = await call<{
-    results?: { person?: { names?: { displayName?: string }[]; emailAddresses?: { value?: string }[] } }[];
+    results?: {
+      person?: {
+        names?: { displayName?: string }[];
+        emailAddresses?: { value?: string }[];
+        phoneNumbers?: { value?: string }[];
+      };
+    }[];
   }>(
-    `https://people.googleapis.com/v1/people:searchContacts?query=${encodeURIComponent(clean)}&readMask=names,emailAddresses`
+    `https://people.googleapis.com/v1/people:searchContacts?query=${encodeURIComponent(clean)}&readMask=names,emailAddresses,phoneNumbers`
   );
   if (found === null) return null;
   return (found.results ?? [])
     .map((r) => ({
       name: r.person?.names?.[0]?.displayName ?? clean,
       email: r.person?.emailAddresses?.[0]?.value ?? '',
+      phone: r.person?.phoneNumbers?.[0]?.value,
     }))
-    .filter((c) => c.email);
+    // A contact with only a phone number is still a contact — filtering on the
+    // address made "what is John's number" unanswerable for anyone Grove could
+    // not also email.
+    .filter((c) => c.email || c.phone);
 }
 
 /* ------------------------------------------------------------ calendar */
@@ -526,6 +536,83 @@ export async function deleteCalendarEvent(id: string): Promise<boolean> {
     lastReason = 'offline';
     return false;
   }
+}
+
+/* --------------------------------------------------------------- tasks */
+
+export type Task = { id: string; title: string; due?: string; done: boolean };
+
+/**
+ * The default task list.
+ *
+ * Tasks live in named lists like calendars do, and picking the wrong one is the
+ * reminder bug again: it saves, it reports success, and it lands somewhere the
+ * person does not look. The first list Google returns IS the default one shown
+ * in the app, which is the behaviour worth relying on here.
+ */
+async function defaultTaskList(): Promise<string | null> {
+  const lists = await call<{ items?: { id: string; title: string }[] }>(
+    'https://tasks.googleapis.com/tasks/v1/users/@me/lists?maxResults=1'
+  );
+  return lists?.items?.[0]?.id ?? null;
+}
+
+export async function addTask(title: string, due: Date | null): Promise<boolean> {
+  const list = await defaultTaskList();
+  if (!list) return false;
+  const made = await call<{ id?: string }>(
+    `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(list)}/tasks`,
+    {
+      method: 'POST',
+      body: {
+        title: title.slice(0, 200),
+        // Google Tasks stores a date, not a time — sending one is accepted and
+        // silently truncated, so the hour is dropped here rather than promised.
+        ...(due ? { due: new Date(due.getFullYear(), due.getMonth(), due.getDate()).toISOString() } : {}),
+      },
+    }
+  );
+  return made !== null;
+}
+
+export async function listTasks(): Promise<Task[] | null> {
+  const list = await defaultTaskList();
+  if (!list) return null;
+  const data = await call<{
+    items?: { id: string; title?: string; due?: string; status?: string }[];
+  }>(
+    `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(list)}/tasks?showCompleted=false&maxResults=20`
+  );
+  if (data === null) return null;
+  return (data.items ?? [])
+    .filter((t) => t.title?.trim())
+    .map((t) => ({
+      id: t.id,
+      title: t.title ?? '',
+      due: t.due,
+      done: t.status === 'completed',
+    }));
+}
+
+/** Marks the first task matching a description as done. */
+export async function completeTask(match: string): Promise<{ ok: boolean; title?: string }> {
+  const list = await defaultTaskList();
+  if (!list) return { ok: false };
+  const open = await listTasks();
+  if (!open) return { ok: false };
+
+  const needle = match.toLowerCase().trim();
+  const hit =
+    open.find((t) => t.title.toLowerCase() === needle) ??
+    open.find((t) => t.title.toLowerCase().includes(needle)) ??
+    open.find((t) => needle.split(/\s+/).some((w) => w.length > 3 && t.title.toLowerCase().includes(w)));
+  if (!hit) return { ok: false };
+
+  const done = await call<{ id?: string }>(
+    `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(list)}/tasks/${encodeURIComponent(hit.id)}`,
+    { method: 'PATCH', body: { status: 'completed' } }
+  );
+  return done !== null ? { ok: true, title: hit.title } : { ok: false };
 }
 
 /* ---------------------------------------------------------------- docs */

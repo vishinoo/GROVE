@@ -88,6 +88,21 @@ export function setCurrentAccount(uid: string): void {
   CURRENT_UID = uid || 'anon';
 }
 
+/**
+ * NOTHING HERE SPENDS MONEY, AND THAT IS A RULE RATHER THAN AN ACCIDENT.
+ *
+ * No ability buys, orders, books, or authorises a payment, and none should be
+ * added that does so without the person seeing the amount and confirming it in
+ * that moment. A misheard word costing a sentence is the trade this whole file
+ * is built around; a misheard word costing money is not the same bet, and
+ * "confirm before paying" has to be a property of the code rather than a habit
+ * of whoever is writing the prompt.
+ *
+ * The two abilities that touch the outside world irreversibly — mail.send and
+ * call.start — already work this way for the same reason: mail asks when a name
+ * is ambiguous, and iOS puts its own confirmation in front of every call.
+ */
+
 export type AbilityWhere = 'device' | 'server';
 
 /** Argument schema. Deliberately tiny — the router fills these from a sentence. */
@@ -1599,6 +1614,164 @@ const DAY: Ability = {
  * outlive the cap: an intention set months ago is exactly what you want kept,
  * and recency is the wrong measure for it.
  */
+/* ---------------------------------------------------------------- tasks */
+
+const TASK_ADD: Ability = {
+  id: 'tasks.add',
+  name: 'Tasks',
+  what: 'Puts something on your Google Tasks list.',
+  where: 'server',
+  wired: true,
+  needs: ['email'],
+  args: {
+    what: { type: 'string', what: 'the task, in their own words', required: true },
+    when: { type: 'string', what: 'when it is due, if they said' },
+  },
+  examples: [
+    'add finish the report to my tasks',
+    'put call the bank on my to-do list',
+    'add buy milk to my list',
+  ],
+  run: async (args) => {
+    const what = (args.what || '').trim();
+    if (!what) return { ok: false, spoken: 'What should I add?' };
+    const due = args.when ? readWhen(args.when) : null;
+    const saved = await google.addTask(what, due);
+    if (!saved) return { ok: false, spoken: google.explain('adding that') };
+    return {
+      ok: true,
+      spoken: due ? `Added ${what}, due ${sayWhen(due)}.` : `Added ${what} to your tasks.`,
+    };
+  },
+};
+
+const TASK_LIST: Ability = {
+  id: 'tasks.list',
+  name: 'Tasks',
+  what: 'Says what is still on your task list.',
+  where: 'server',
+  wired: true,
+  needs: ['email'],
+  reads: true,
+  args: {},
+  examples: ["what's on my to-do list", 'what are my tasks', 'what do I still have to do'],
+  run: async () => {
+    const tasks = await google.listTasks();
+    if (tasks === null) return { ok: false, spoken: google.explain('your tasks') };
+    if (tasks.length === 0) return { ok: true, spoken: 'Nothing on your list.' };
+
+    // Three and a count, like everything else spoken here: a read-out list is
+    // unusable past about that.
+    const named = tasks.slice(0, 3).map((t) => t.title).join('; ');
+    const rest = tasks.length > 3 ? `, and ${tasks.length - 3} more` : '';
+    return {
+      ok: true,
+      spoken: `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}. ${named}${rest}.`,
+      detail: tasks.map((t) => t.title).join('\n'),
+    };
+  },
+};
+
+const TASK_DONE: Ability = {
+  id: 'tasks.done',
+  name: 'Tasks',
+  what: 'Ticks something off your task list.',
+  where: 'server',
+  wired: true,
+  needs: ['email'],
+  args: { what: { type: 'string', what: 'which task', required: true } },
+  examples: ['tick off buy milk', 'mark call the bank as done', 'complete the report task'],
+  run: async (args) => {
+    const what = (args.what || '').trim();
+    if (!what) return { ok: false, spoken: 'Which one?' };
+    const done = await google.completeTask(what);
+    if (!done.ok) return { ok: false, spoken: `I could not find ${what} on your list.` };
+    return { ok: true, spoken: `Ticked off ${done.title}.` };
+  },
+};
+
+/* ------------------------------------------------------------- contacts */
+
+const CONTACT_FIND: Ability = {
+  id: 'contact.find',
+  name: 'Contacts',
+  what: "Looks up someone's number or email.",
+  where: 'server',
+  wired: true,
+  needs: ['email'],
+  reads: true,
+  args: { who: { type: 'string', what: 'the person', required: true } },
+  examples: ["what's John's number", 'what is Priya\'s email', 'find me Sam\'s number'],
+  run: async (args) => {
+    const who = (args.who || '').trim();
+    if (!who) return { ok: false, spoken: 'Who?' };
+    const found = await google.findContact(who);
+    if (found === null) return { ok: false, spoken: google.explain('your contacts') };
+    if (found.length === 0) return { ok: true, spoken: `I have no contact for ${who}.` };
+
+    const one = found[0];
+    // Numbers are read digit by digit or they are useless — "four one two" is
+    // followable, "four hundred and twelve" is not.
+    const number = one.phone ? one.phone.replace(/\D/g, '').split('').join(' ') : '';
+    const parts = [
+      number ? `${one.name}: ${number}` : '',
+      !number && one.email ? `${one.name}: ${one.email}` : '',
+    ].filter(Boolean);
+    const more = found.length > 1 ? ` And ${found.length - 1} other match.` : '';
+    return {
+      ok: true,
+      spoken: `${parts[0]}.${more}`,
+      detail: found.map((c) => `${c.name} — ${c.phone ?? c.email}`).join('\n'),
+    };
+  },
+};
+
+const CALL: Ability = {
+  id: 'call.start',
+  name: 'Call',
+  what: 'Starts a phone call to someone in your contacts.',
+  where: 'device',
+  wired: true,
+  needs: ['email'],
+  args: { who: { type: 'string', what: 'who to call', required: true } },
+  examples: ['call John', 'ring Priya', 'dial Sam'],
+  run: async (args) => {
+    const who = (args.who || '').trim();
+    if (!who) return { ok: false, spoken: 'Call who?' };
+
+    const digits = who.replace(/\D/g, '');
+    let number = digits.length >= 7 ? digits : '';
+    let name = who;
+
+    if (!number) {
+      const found = await google.findContact(who);
+      if (found === null) return { ok: false, spoken: google.explain('your contacts') };
+      const withPhone = found.filter((c) => c.phone);
+      if (withPhone.length === 0) return { ok: false, spoken: `I have no number for ${who}.` };
+      // Calling the wrong person is not undoable in the way a search is.
+      if (withPhone.length > 1) {
+        return {
+          ok: false,
+          spoken: `I have ${withPhone.length} people called ${who}. Which one?`,
+          detail: withPhone.map((c) => `${c.name} — ${c.phone}`).join('\n'),
+        };
+      }
+      number = (withPhone[0].phone ?? '').replace(/[^\d+]/g, '');
+      name = withPhone[0].name;
+    }
+
+    // iOS shows its own confirmation before dialling, which is the check that
+    // matters: Grove never places a call the person has not seen and approved.
+    const opened = await Linking.openURL(`tel:${number}`).then(
+      () => true,
+      () => false
+    );
+    return opened
+      ? { ok: true, spoken: `Calling ${name}.` }
+      : { ok: false, spoken: 'I could not start that call.' };
+  },
+};
+
 const MEMORY_ADD: Ability = {
   id: 'memory.add',
   name: 'Remember',
@@ -1784,6 +1957,11 @@ const SET_MODE: Ability = {
 };
 
 export const ABILITIES: Ability[] = [
+  TASK_ADD,
+  TASK_LIST,
+  TASK_DONE,
+  CONTACT_FIND,
+  CALL,
   MEMORY_ADD,
   MAIL_DIGEST,
   CALENDAR_ADD,

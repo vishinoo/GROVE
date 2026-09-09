@@ -154,6 +154,20 @@ due sparks when Grove is next opened.
   and edited on the Sparks screen rather than in Settings — a spark is a
   standing instruction and a fact is standing context.
 
+## Money
+
+No ability spends any. Nothing buys, orders, books, or authorises a payment, and
+nothing that does may be added without the person seeing the amount and
+confirming it in that moment — not a setting, not a standing permission, a
+confirmation at the time.
+
+The reasoning is the same one `detectActIntent` is built on, taken one step
+further: a false positive there costs an email nobody wrote, which is
+embarrassing and recoverable. A false positive on a purchase is neither. Uber,
+food delivery and shopping were asked for and are deliberately absent, because
+the useful version of each is one sentence away from spending money on a
+misheard word.
+
 ## Checks
 
 ```bash
