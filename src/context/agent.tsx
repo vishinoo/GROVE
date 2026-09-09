@@ -205,6 +205,32 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const pending = useRef<{ ability: Ability; args: Record<string, string>; gap: string } | null>(
     null
   );
+
+  /**
+   * Something irreversible, waiting on a yes.
+   *
+   * One press confirms, two cancels, silence cancels. The asymmetry is the
+   * point: doing nothing has to be safe, because the failure that matters is
+   * money spent by a hand brushing a ring in a pocket, not a purchase that
+   * needed asking for twice.
+   *
+   * It expires, and it expires into "no". A confirmation left armed is a
+   * booby trap: press the ring twenty minutes later to ask about the weather
+   * and buy something instead.
+   */
+  const awaitingYes = useRef<{
+    ability: Ability;
+    args: Record<string, string>;
+    at: number;
+  } | null>(null);
+
+  /** Set while a first press is waiting to see whether a second follows. */
+  const yesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** How long a confirmation stays live. Long enough to think, short enough to forget. */
+  const CONFIRM_WINDOW_MS = 25_000;
+  /** How long to wait for a second press before treating the first as a yes. */
+  const SECOND_PRESS_MS = 700;
   /**
    * When Grove last spoke without being asked. Feeds the mode's rate control —
    * an assistant that volunteers something every time you unlock your phone
@@ -400,6 +426,31 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       utter(holdingFor(voice));
     }, 2200);
 
+    // A spoken yes or no settles a confirmation, before anything else looks at
+    // the sentence. Someone wearing glasses will often answer out loud rather
+    // than reach for the ring, and "no" routed as an ordinary turn would be
+    // answered conversationally while the thing sat there still waiting.
+    const holding = awaitingYes.current;
+    if (holding) {
+      const fresh = Date.now() - holding.at <= CONFIRM_WINDOW_MS;
+      if (/^\s*(yes|yeah|yep|yup|go ahead|do it|send it|confirm|ok(ay)?)\s*[.!]?\s*$/i.test(asked)) {
+        clearTimeout(holdTimer);
+        awaitingYes.current = null;
+        if (fresh) await confirmNow();
+        else utter('That one timed out. Ask me again.');
+        return;
+      }
+      if (/^\s*(no|nope|cancel|stop|don'?t|forget it|never mind)\s*[.!]?\s*$/i.test(asked)) {
+        clearTimeout(holdTimer);
+        awaitingYes.current = null;
+        utter('Cancelled.');
+        return;
+      }
+      // Anything else means they moved on, and a confirmation nobody answered
+      // must not survive into a later turn.
+      awaitingYes.current = null;
+    }
+
     // An answer to Grove's own question runs the ability that asked it.
     //
     // Deliberately before the model: "Dinner with Sam" is a complete answer to
@@ -540,6 +591,17 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // screen" — which is the right thing to be able to read and the wrong
     // thing to have recited into your ear while walking. The card keeps the
     // full sentence; out loud it gets a short one.
+    // Held, not done. The ability stopped short of the irreversible part and
+    // said what it is about to do; the press decides whether it happens.
+    if (outcome.needsConfirming) {
+      awaitingYes.current = { ability, args: reply.args, at: Date.now() };
+      if (!mounted.current) return;
+      setCaption(outcome.spoken);
+      await whenQuiet();
+      if (mine()) utter(`${outcome.spoken}. Press once to send, twice to cancel.`);
+      return;
+    }
+
     rememberQuestion(ability, reply.args, outcome);
 
     const heard = outcome.ok ? outcome.spoken : shortFailure(outcome.spoken);
@@ -815,7 +877,48 @@ function shortFailure(text: string): string {
    * button, the keyboard — so all three behave identically by construction
    * rather than by three implementations agreeing with each other.
    */
+  /** Do the thing that was waiting on a yes. */
+  const confirmNow = useCallback(async () => {
+    const waiting = awaitingYes.current;
+    awaitingYes.current = null;
+    if (!waiting) return;
+    setState('working');
+    const outcome = await runAbility(waiting.ability, { ...waiting.args, confirmed: 'yes' });
+    if (!mounted.current) return;
+    setCaption(outcome.spoken);
+    await whenQuiet();
+    utter(outcome.ok ? outcome.spoken : shortFailure(outcome.spoken));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const press = useCallback(() => {
+    // A confirmation owns the next press, and only the next one.
+    const waiting = awaitingYes.current;
+    if (waiting) {
+      if (Date.now() - waiting.at > CONFIRM_WINDOW_MS) {
+        // Expired into no, which is the only safe direction for it to expire.
+        awaitingYes.current = null;
+      } else if (yesTimer.current) {
+        // A second press inside the window. That is a no, said with the hand
+        // rather than the voice, and it cancels outright.
+        clearTimeout(yesTimer.current);
+        yesTimer.current = null;
+        awaitingYes.current = null;
+        buzz();
+        utter('Cancelled.');
+        return;
+      } else {
+        // First press. Wait to see whether a second follows before acting,
+        // because acting immediately makes a double press impossible to express.
+        buzz();
+        yesTimer.current = setTimeout(() => {
+          yesTimer.current = null;
+          void confirmNow();
+        }, SECOND_PRESS_MS);
+        return;
+      }
+    }
+
     const current = stateNow.current;
 
     // The only confirmation available to someone whose phone is in a pocket
@@ -864,7 +967,9 @@ function shortFailure(text: string): string {
     }
 
     void beginListening(false);
-  }, [beginListening]);
+    // confirmNow and utter are both useCallback with no deps, so they are
+    // stable and listing them changes nothing but the lint.
+  }, [beginListening, confirmNow, utter]);
 
   const say = useCallback(
     async (text: string) => {

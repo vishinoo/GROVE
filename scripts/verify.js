@@ -304,6 +304,26 @@ for (const ability of ALL) {
   }
 }
 
+/* 8b. Anything that hands off to a paid app must ask first. */
+section('Nothing reaches a payment without a yes');
+for (const id of ['ride.request', 'food.order', 'mail.send']) {
+  const ability = byId.get(id);
+  if (!ability) continue;
+  // Run it with no confirmation and assert it stops. This is the property the
+  // whole layer exists for, so it is checked against the real ability rather
+  // than trusted from reading it.
+  check(
+    'confirmed' in ability.args,
+    `${id} takes a confirmation`,
+    'no confirmed argument, so it cannot be gated'
+  );
+  check(
+    !ability.reads,
+    `${id} is not marked reads`,
+    'a read is reachable from a question, which must never buy anything'
+  );
+}
+
 /* 9. Nothing may be permanently unreachable in every mode. */
 section('Every ability is available in at least one mode');
 for (const ability of ALL) {

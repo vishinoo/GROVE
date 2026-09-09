@@ -156,10 +156,23 @@ due sparks when Grove is next opened.
 
 ## Money
 
-No ability spends any. Nothing buys, orders, books, or authorises a payment, and
-nothing that does may be added without the person seeing the amount and
-confirming it in that moment — not a setting, not a standing permission, a
-confirmation at the time.
+No ability spends any, and rides and takeaways do not change that — they stop at
+the door of the app that already has a checkout. Uber knows the card, the
+address, the surge price and the driver, and has a confirm screen built by
+people who only do this. Grove fills it in and hands it over. The worst a
+misheard word can do is open an app with the wrong destination typed in, which
+is a thing you look at and close.
+
+Anything irreversible returns `needsConfirming` and stops short of doing it. One
+press confirms, two cancels, silence cancels, and it expires into no after
+twenty-five seconds — a confirmation left armed is a booby trap, because the
+next press is meant for something else. The asymmetry is deliberate: doing
+nothing has to be safe, since the failure that matters is a hand brushing a ring
+in a pocket, not a purchase that needed asking for twice.
+
+`npm run verify` asserts that every ability which reaches a paid app takes a
+confirmation and is not marked `reads` — a read is reachable from a question,
+and a question must never buy anything.
 
 The reasoning is the same one `detectActIntent` is built on, taken one step
 further: a false positive there costs an email nobody wrote, which is

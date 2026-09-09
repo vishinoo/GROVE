@@ -115,6 +115,21 @@ export type AbilityResult = {
   /** Anything worth showing on a screen. Optional. */
   detail?: string;
   /**
+   * This did not happen yet — it needs saying yes to first.
+   *
+   * The ability has done everything up to the irreversible part: worked out the
+   * recipient, the amount, the thing being bought, and stopped. `spoken` states
+   * what is about to happen, and the turn asks for a press. Saying yes re-runs
+   * the same ability with `confirmed` set, so the decision and the doing live in
+   * one place and there is no half-finished action parked in memory waiting for
+   * an answer that may never come.
+   *
+   * Anything that spends money must return this. See the note at the top of
+   * this file: that is a rule about the code, not a habit of whoever writes the
+   * next ability.
+   */
+  needsConfirming?: boolean;
+  /**
    * Start the music only once Grove has stopped talking.
    *
    * Playback and speech share one output, so starting a song and then
@@ -440,6 +455,7 @@ const MAIL_SEND: Ability = {
   needs: ['email'],
   args: {
     to: { type: 'string', what: 'who it goes to — a name is fine, it will be looked up', required: true },
+    confirmed: { type: 'string', what: 'never set this; the turn sets it after the person says yes' },
     subject: { type: 'string', what: 'the subject line' },
     body: { type: 'string', what: 'what it says', required: true },
   },
@@ -476,6 +492,17 @@ const MAIL_SEND: Ability = {
         };
       }
       to = matches[0].email;
+    }
+
+    // Dictated by voice, sent to a name Grove looked up, and unrecallable. One
+    // press is a small price for the one ability here that cannot be undone.
+    if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
+      return {
+        ok: false,
+        needsConfirming: true,
+        spoken: `Sending to ${asked}: ${body.slice(0, 120)}`,
+        detail: `to ${to}`,
+      };
     }
 
     const sent = await google.sendMail(to, args.subject || '', body);
@@ -1815,6 +1842,105 @@ const CALL: Ability = {
   },
 };
 
+/* ------------------------------------------------- rides and deliveries */
+
+/**
+ * GROVE DOES NOT PAY FOR ANYTHING, AND THIS IS HOW.
+ *
+ * A ride and a takeaway both end in a payment, and the safe way to reach one is
+ * not to build a checkout — it is to stop at the door of the app that already
+ * has one. Uber knows the card, the address, the surge price and the driver;
+ * it also has its own confirm screen, built by people who only do this. Grove
+ * fills that screen in and hands it over.
+ *
+ * So the worst a misheard word can do here is open an app with the wrong
+ * destination typed in, which is a thing you look at and close. There is no
+ * path from a sentence to a charge, and there is not meant to be one.
+ *
+ * The press before the hand-off is still worth having: opening Uber mid-walk
+ * because someone said "over" is its own small annoyance.
+ */
+const RIDE: Ability = {
+  id: 'ride.request',
+  name: 'Ride',
+  what: 'Opens Uber with your destination already set. You confirm and pay there.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {
+    to: { type: 'string', what: 'where they want to go', required: true },
+    confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
+  },
+  examples: ['get me an uber to campus', 'order an uber home', 'book a ride to the airport'],
+  run: async (args) => {
+    const to = (args.to || '').trim();
+    if (!to) return { ok: false, spoken: 'Where to?' };
+
+    if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
+      return {
+        ok: false,
+        needsConfirming: true,
+        spoken: `Opening Uber to ${to}`,
+        detail: 'Uber takes the payment, not Grove',
+      };
+    }
+
+    // Pickup is left as the current location rather than guessed: Uber knows
+    // where the phone is and Grove's idea of "here" is a geocoded town.
+    const url = `uber://?action=setPickup&pickup=my_location&dropoff[formatted_address]=${encodeURIComponent(to)}`;
+    const web = `https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[formatted_address]=${encodeURIComponent(to)}`;
+    const opened = (await Linking.canOpenURL(url).catch(() => false))
+      ? await Linking.openURL(url).then(() => true, () => false)
+      : await Linking.openURL(web).then(() => true, () => false);
+
+    return opened
+      ? { ok: true, spoken: `Uber is open with ${to} set. Confirm it there.` }
+      : { ok: false, spoken: 'I could not open Uber.' };
+  },
+};
+
+const DELIVERY: Ability = {
+  id: 'food.order',
+  name: 'Food',
+  what: 'Opens a delivery app, searched for what you asked for. You order and pay there.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {
+    what: { type: 'string', what: 'the food, restaurant or cuisine' },
+    confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
+  },
+  examples: ['order me some food', 'get me a pizza on uber eats', 'order thai food'],
+  run: async (args) => {
+    const what = (args.what || '').trim();
+
+    if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
+      return {
+        ok: false,
+        needsConfirming: true,
+        spoken: what ? `Opening Uber Eats for ${what}` : 'Opening Uber Eats',
+        detail: 'Uber Eats takes the payment, not Grove',
+      };
+    }
+
+    // A search, never a basket. "Order my usual" is the request people make and
+    // the one no app exposes to a third party — putting food in a basket
+    // unseen is exactly the thing this file refuses to do.
+    const web = what
+      ? `https://www.ubereats.com/search?q=${encodeURIComponent(what)}`
+      : 'https://www.ubereats.com/';
+    const opened = await Linking.openURL(web).then(() => true, () => false);
+    return opened
+      ? {
+          ok: true,
+          spoken: what
+            ? `Uber Eats is open, searching ${what}. Order it there.`
+            : 'Uber Eats is open.',
+        }
+      : { ok: false, spoken: 'I could not open Uber Eats.' };
+  },
+};
+
 const MEMORY_ADD: Ability = {
   id: 'memory.add',
   name: 'Remember',
@@ -2000,6 +2126,8 @@ const SET_MODE: Ability = {
 };
 
 export const ABILITIES: Ability[] = [
+  RIDE,
+  DELIVERY,
   TASK_ADD,
   TASK_LIST,
   TASK_DONE,
