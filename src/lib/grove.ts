@@ -214,6 +214,17 @@ const NAV_COMMAND = new RegExp(
 );
 
 /**
+ * Asking for something to be ordered, with the subject in front.
+ *
+ * Anchored and narrow: it needs the verb AND something after it, so "I want to
+ * order" on its own is not a request and "we should order sometime" is talk.
+ */
+const ORDER_COMMAND = new RegExp(
+  `^\\s*${ADDRESS}(?:i(?:'d| would)? (?:want|need|like) to |i'?m going to )(?:order|get)\\s+\\S`,
+  'i'
+);
+
+/**
  * Things that follow "go to" and are not places.
  *
  * "I want to go to bed" and "I need to get to the bottom of this" are the two
@@ -294,6 +305,10 @@ export function detectActIntent(text: string): boolean {
   // led with "I", so the imperative test refused it — and the goal extractor
   // then filed it as an ambition and said "noted".
   if (NAV_COMMAND.test(t) && !NOT_A_DESTINATION.test(t)) return true;
+  // "I want to order food" is a request with the subject in front of it, the
+  // same shape as "I want to go to the airport" — and it fell through for the
+  // same reason, since the imperative test looks for a verb at the start.
+  if (ORDER_COMMAND.test(t)) return true;
   // Addressed to Grove and carrying a verb: an instruction, question mark or
   // not. Checked before the question tests, which would otherwise refuse it.
   if (POLITE_COMMAND.test(t)) return true;

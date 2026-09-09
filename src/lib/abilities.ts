@@ -1842,6 +1842,91 @@ const CALL: Ability = {
   },
 };
 
+/* ------------------------------------------------------------- the mac */
+
+/**
+ * Handing a job to the computer.
+ *
+ * Everything else in this file is a phone doing phone things — read this, play
+ * that, put it in the calendar. This one is different in kind: it gives a
+ * spoken sentence to an agent with a shell, a filesystem and a browser, and
+ * lets it work. "Research the three best options and write it up" is a real
+ * request, a phone cannot answer it, and a laptop can.
+ *
+ * Which is why it is the most carefully fenced thing here. It needs a press
+ * before it runs, the same as spending money, because an agent acting on a
+ * misheard sentence is the same class of problem as a payment made on one. The
+ * bridge at the other end enforces the rest: one folder, a shared secret, a
+ * time limit, and a log of everything it did.
+ *
+ * Unset by default — no URL and no token means no ability. This does not
+ * quietly become available because someone is on the right network.
+ */
+const MAC_URL = (process.env.EXPO_PUBLIC_MAC_URL ?? '').trim();
+const MAC_TOKEN = (process.env.EXPO_PUBLIC_MAC_TOKEN ?? '').trim();
+
+const MAC_TASK: Ability = {
+  id: 'mac.do',
+  name: 'The Mac',
+  what: 'Gives a job to the agent on your laptop — research, writing, code.',
+  where: 'server',
+  wired: Boolean(MAC_URL && MAC_TOKEN),
+  needs: MAC_URL && MAC_TOKEN ? [] : ['the bridge running on your Mac'],
+  args: {
+    task: { type: 'string', what: 'the job, in their own words', required: true },
+    confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
+  },
+  examples: [
+    'get my laptop to research noise cancelling headphones',
+    'have my mac write up the assignment outline',
+    'ask my computer to summarise that paper',
+  ],
+  run: async (args) => {
+    const task = (args.task || '').trim();
+    if (!task) return { ok: false, spoken: 'What should it do?' };
+    if (!MAC_URL || !MAC_TOKEN) {
+      return { ok: false, spoken: 'The bridge on your Mac is not set up yet.' };
+    }
+
+    // The same gate as a payment, for the same reason: irreversible work
+    // started by a sentence, and a sentence can be misheard.
+    if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
+      return {
+        ok: false,
+        needsConfirming: true,
+        spoken: `Setting your Mac on: ${task.slice(0, 140)}`,
+        detail: 'Runs in the Grove-agent folder, and is logged',
+      };
+    }
+
+    try {
+      // Generous, because the point of this is work that takes a while. Still
+      // bounded, because an agent nobody is waiting on is one nobody is
+      // watching.
+      const response = await fetch(`${MAC_URL.replace(/\/$/, '')}/task`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${MAC_TOKEN}` },
+        body: JSON.stringify({ task }),
+        signal: AbortSignal.timeout(240_000),
+      });
+      if (response.status === 401) {
+        return { ok: false, spoken: 'The Mac refused my token. It needs setting up again.' };
+      }
+      if (!response.ok) return { ok: false, spoken: 'The Mac could not take that one.' };
+
+      const data = (await response.json()) as { ok?: boolean; text?: string };
+      const said = (data.text ?? '').trim();
+      if (!data.ok || !said) return { ok: false, spoken: 'It ran, and came back with nothing.' };
+
+      // Said short, kept whole: an agent's write-up is for reading, not for
+      // reciting into someone's ear.
+      return { ok: true, spoken: gistOf(said, 260), detail: said };
+    } catch {
+      return { ok: false, spoken: 'I could not reach your Mac.' };
+    }
+  },
+};
+
 /* ------------------------------------------------- rides and deliveries */
 
 /**
@@ -1910,7 +1995,19 @@ const DELIVERY: Ability = {
     what: { type: 'string', what: 'the food, restaurant or cuisine' },
     confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
   },
-  examples: ['order me some food', 'get me a pizza on uber eats', 'order thai food'],
+  // Named foods, because the keyword fallback matches on words and "order some
+  // sushi" shares none with a description about delivery apps. These are the
+  // things people actually say when they are hungry.
+  examples: [
+    'order me some food',
+    'get me a pizza on uber eats',
+    'order thai food',
+    'order some sushi',
+    'get me a burger',
+    'order indian food',
+    'order chinese takeaway',
+    'get me a curry on uber eats',
+  ],
   run: async (args) => {
     const what = (args.what || '').trim();
 
@@ -2126,6 +2223,7 @@ const SET_MODE: Ability = {
 };
 
 export const ABILITIES: Ability[] = [
+  MAC_TASK,
   RIDE,
   DELIVERY,
   TASK_ADD,

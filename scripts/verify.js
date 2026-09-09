@@ -306,7 +306,7 @@ for (const ability of ALL) {
 
 /* 8b. Anything that hands off to a paid app must ask first. */
 section('Nothing reaches a payment without a yes');
-for (const id of ['ride.request', 'food.order', 'mail.send']) {
+for (const id of ['ride.request', 'food.order', 'mail.send', 'mac.do']) {
   const ability = byId.get(id);
   if (!ability) continue;
   // Run it with no confirmation and assert it stops. This is the property the
