@@ -121,8 +121,12 @@ export const MODES: Mode[] = [
     label: 'Focus',
     what: 'Working. Grove stays quiet unless asked.',
     manner: 'They are concentrating. Answer in as few words as will do, and never volunteer more.',
-    allow: ['mode.set', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.find', 'calendar.add', 'weather.now', 'memory.recall', 'music.play'],
+    allow: ['mode.set', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.find', 'calendar.add', 'weather.now', 'memory.recall', 'memory.add', 'music.play'],
     interrupt: 'never',
+    // Something happens on the way in, rather than the mode being a label on a
+    // manner. What it does is what focus actually needs: know what is coming so
+    // it can stop guarding the clock, and something to work to.
+    onEnter: 'Tell me what is left on my calendar today in one sentence, then put on something instrumental to work to.',
     holding: ['Moment.', 'Checking.'],
     empty: 'Nothing useful.',
     stuck: 'No answer right now.',
@@ -135,8 +139,11 @@ export const MODES: Mode[] = [
     what: 'Explains properly instead of being terse.',
     manner:
       'They are learning something. Explain it properly — three or four sentences is right here, and being clipped is unhelpful. Use an example. Check they followed before moving on.',
-    allow: ['mode.set', 'memory.recall', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.find', 'calendar.add'],
+    allow: ['mode.set', 'memory.recall', 'memory.add', 'calendar.find', 'music.play', 'doc.find', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.find', 'calendar.add'],
     interrupt: 'never',
+    // Study is the one mode where being asked something back is the point, so
+    // entering it opens with the question rather than an announcement.
+    onEnter: 'Ask me what I am studying, then put on something instrumental without words.',
     holding: ['Let me look that up properly — one moment.', 'Good question. Give me a second to check rather than guess.'],
     empty: "I couldn't find a good source for that, so I'd rather not guess.",
     stuck: "I can't reach anything to check that with at the moment.",
@@ -151,6 +158,10 @@ export const MODES: Mode[] = [
     // Nothing that opens a thread: no mail, no sending.
     allow: ['mode.set', 'music.play', 'weather.now', 'reminders.add', 'memory.recall', 'day.brief'],
     interrupt: 'sparingly',
+    // The evening version of a brief: what is coming tomorrow, said once, and
+    // something quiet on. Nothing that opens a thread — no mail, no sending —
+    // which is what the allow list above is for.
+    onEnter: 'Tell me what is on tomorrow in one sentence, then put on something calm.',
     holding: ['One moment.', 'Just having a look.'],
     empty: 'Nothing on that one.',
     stuck: "Can't check that just now.",

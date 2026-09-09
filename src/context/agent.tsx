@@ -522,6 +522,21 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // The result of work you interrupted is not something you still want read
     // out — you have already moved on and asked something else.
     if (mine()) utter(heard);
+
+    // The song starts when the sentence ends. Anything else means a few seconds
+    // of music, an interruption, and a track that has lost its opening.
+    if (outcome.resumeMusicWhenQuiet) {
+      await whenQuiet();
+      if (mine()) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const remote = require('grove-remote') as typeof import('grove-remote');
+          await remote.controlMusic('play');
+        } catch {
+          // A build without the native half never queued anything to resume.
+        }
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

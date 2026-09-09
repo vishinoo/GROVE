@@ -36,7 +36,9 @@ import {
 import { Linking, Platform } from 'react-native';
 
 import { capabilities } from './capabilities';
-import { loadFacts, recall } from './memory';
+import { loadFacts, recall,
+  remember,
+} from './memory';
 import { MODES } from './modes';
 import * as google from './google';
 import { isGoogleConnected } from './googleAuth';
@@ -97,6 +99,15 @@ export type AbilityResult = {
   spoken: string;
   /** Anything worth showing on a screen. Optional. */
   detail?: string;
+  /**
+   * Start the music only once Grove has stopped talking.
+   *
+   * Playback and speech share one output, so starting a song and then
+   * announcing it means a few seconds of music, an interruption, and a song
+   * that has already lost its opening. The ability queues the track and leaves
+   * it paused; the turn resumes it when the last word is out.
+   */
+  resumeMusicWhenQuiet?: boolean;
 };
 
 export type Ability = {
@@ -1186,6 +1197,47 @@ const REMIND: Ability = {
  * probe in capabilities.ts is what makes that honest rather than a crash. In
  * Expo Go it says so and does not pretend.
  */
+/**
+ * Moods, as things that might actually be written in a library.
+ *
+ * iOS only lets an app match text — titles, artists, albums, playlists — so
+ * "play something sad" can never be answered by understanding the music. What
+ * it can do is try the words people name that music with: a playlist called
+ * Sad, a genre in an album title, an artist known for it. Each mood is a list
+ * of attempts rather than one guess, because which of them exists is different
+ * in every library.
+ *
+ * Deliberately shallow. This is a better-than-nothing feature and it should not
+ * pretend otherwise: if none of the words are anywhere in the library, saying so
+ * is the honest end of it.
+ */
+const MOODS: Record<string, string[]> = {
+  sad: ['sad', 'melancholy', 'blues', 'ballad', 'slow', 'acoustic', 'rain'],
+  happy: ['happy', 'feel good', 'summer', 'pop', 'dance', 'party', 'upbeat'],
+  calm: ['calm', 'chill', 'ambient', 'lo-fi', 'lofi', 'piano', 'sleep'],
+  angry: ['rage', 'metal', 'hardcore', 'punk', 'heavy'],
+  focus: ['focus', 'study', 'instrumental', 'classical', 'piano', 'ambient'],
+  hype: ['hype', 'workout', 'gym', 'rap', 'trap', 'bangers', 'pump'],
+  romantic: ['love', 'romance', 'slow jams', 'r&b', 'soul'],
+};
+
+/** The mood named in a request, if any, as the words worth trying. */
+function moodTerms(query: string): string[] {
+  const t = query.toLowerCase();
+  const named: string[] = [];
+  const say = (key: string, ...words: string[]) => {
+    if (words.some((w) => new RegExp(`\\b${w}\\b`).test(t))) named.push(...MOODS[key]);
+  };
+  say('sad', 'sad', 'melancholy', 'down', 'heartbroken', 'moody');
+  say('happy', 'happy', 'cheerful', 'upbeat', 'good mood', 'fun');
+  say('calm', 'calm', 'chill', 'relaxing', 'mellow', 'quiet', 'sleepy');
+  say('angry', 'angry', 'aggressive', 'heavy', 'rage');
+  say('focus', 'focus', 'concentrate', 'study', 'work');
+  say('hype', 'hype', 'pumped', 'energetic', 'workout', 'gym');
+  say('romantic', 'romantic', 'love songs', 'slow jams');
+  return [...new Set(named)];
+}
+
 const MUSIC: Ability = {
   id: 'music.play',
   name: 'Music',
@@ -1194,7 +1246,15 @@ const MUSIC: Ability = {
   wired: capabilities().remote,
   needs: ['music-permission'],
   args: { what: { type: 'string', what: 'song, artist, album or playlist — leave empty to shuffle' } },
-  examples: ['play my favourite song', 'put on something mellow', 'play the Sunday playlist', 'play a song'],
+  examples: [
+    'play my favourite song',
+    'put on something mellow',
+    'play the Sunday playlist',
+    'play a song',
+    'play something sad',
+    'put on something happy',
+    'play something to work out to',
+  ],
   run: async (args) => {
     // No title is not a missing argument. "Play a song", "put some music on"
     // and "play something" are whole instructions that hand Grove the choice —
@@ -1216,6 +1276,9 @@ const MUSIC: Ability = {
     //
     // Longest first, because the distinctive word is usually the long one:
     // "Carti" identifies the artist, "song" identifies nothing.
+    // The phrase, then its own words, then whatever the mood suggests. A mood
+    // only contributes when the literal request found nothing, so naming a real
+    // artist is never overridden by a word that happens to sound like a feeling.
     const attempts = wanted
       ? [
           wanted,
@@ -1223,18 +1286,30 @@ const MUSIC: Ability = {
             .split(/\s+/)
             .filter((w) => w.length > 3)
             .sort((a, b) => b.length - a.length),
+          ...moodTerms(wanted),
         ]
       : [''];
 
+    const tried = new Set<string>();
     let result = await remote.playMusic(attempts[0]);
+    tried.add(attempts[0].toLowerCase());
     for (let i = 1; i < attempts.length && !result.ok && result.reason === 'notFound'; i += 1) {
-      if (attempts[i].toLowerCase() === attempts[0].toLowerCase()) continue;
+      const next = attempts[i].toLowerCase();
+      if (tried.has(next)) continue;
+      tried.add(next);
       result = await remote.playMusic(attempts[i]);
     }
 
     if (result.ok) {
+      // Queued, not playing. Held here so the announcement lands before the
+      // song rather than across it.
+      await remote.controlMusic('pause');
       const artist = result.artist ? ` by ${result.artist}` : '';
-      return { ok: true, spoken: `Playing ${result.title}${artist}.` };
+      return {
+        ok: true,
+        spoken: `Playing ${result.title}${artist}.`,
+        resumeMusicWhenQuiet: true,
+      };
     }
     if (result.reason === 'denied') {
       return { ok: false, spoken: 'I need permission for your music library. It is in iOS Settings.' };
@@ -1463,6 +1538,69 @@ const DAY: Ability = {
  * matters more than being brief, because the whole question is "what am I
  * forgetting".
  */
+/**
+ * Being told to remember something, on purpose.
+ *
+ * Extraction from ordinary speech is deliberately narrow — it has to be, or a
+ * memory fills with misheard fragments — and the cost of that narrowness is
+ * that "add this to my goals" did nothing at all. Asking outright should always
+ * work, whatever the patterns think of the wording.
+ *
+ * Goals and facts are stored separately (see memory.ts) because a goal must
+ * outlive the cap: an intention set months ago is exactly what you want kept,
+ * and recency is the wrong measure for it.
+ */
+const MEMORY_ADD: Ability = {
+  id: 'memory.add',
+  name: 'Remember',
+  what: 'Writes something down — a fact about you, or a goal you are working towards.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {
+    what: { type: 'string', what: 'the thing to remember, in their own words', required: true },
+    kind: { type: 'string', what: '"goal" if it is something they are working towards' },
+    about: { type: 'string', what: 'who it concerns, if not themselves' },
+  },
+  examples: [
+    'add learning Spanish to my goals',
+    'remember that Sam owes me twenty quid',
+    'add this to my goals',
+    'note that the landlord visit is on Friday',
+    'keep in mind I prefer mornings',
+  ],
+  run: async (args) => {
+    const what = (args.what || '').trim();
+    if (!what) return { ok: false, spoken: 'What should I remember?' };
+
+    // A goal because they said so, or because the phrasing is unmistakable.
+    const asGoal =
+      /goal|aim|ambition|working towards|want to achieve/i.test(args.kind || '') ||
+      /\b(?:to my goals?|as a goal)\b/i.test(what);
+
+    const subject = (args.about || '').trim().toLowerCase() || 'me';
+    const value = what
+      .replace(/\b(?:to|on|in) my (?:goals?|memory|list)\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!value) return { ok: false, spoken: 'What should I remember?' };
+
+    await remember(CURRENT_UID, {
+      key: asGoal ? 'goal' : 'note',
+      value,
+      source: 'told',
+      subject,
+      ...(asGoal ? { kind: 'goal' as const } : {}),
+    });
+
+    return {
+      ok: true,
+      spoken: asGoal ? `Added to your goals: ${value}.` : `Got it — ${value}.`,
+      detail: asGoal ? 'goal' : `about ${subject}`,
+    };
+  },
+};
+
 const RECALL: Ability = {
   id: 'memory.recall',
   name: 'Memory',
@@ -1597,6 +1735,7 @@ const SET_MODE: Ability = {
 };
 
 export const ABILITIES: Ability[] = [
+  MEMORY_ADD,
   MAIL_DIGEST,
   CALENDAR_ADD,
   CALENDAR_REMOVE,
