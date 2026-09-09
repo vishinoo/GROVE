@@ -676,7 +676,12 @@ function shortFailure(text: string): string {
    */
   const rememberQuestion = useCallback(
     (ability: Ability, args: Record<string, string>, outcome: { ok: boolean; spoken: string }) => {
-      if (outcome.ok || !outcome.spoken.trim().endsWith('?')) return;
+      // A question mark anywhere, not only at the end. "Which town? Tell me
+      // once and I'll remember it." is a question with a promise after it, and
+      // requiring the mark last meant that one registered as no question at all
+      // — so the answer was routed as a fresh sentence and the weather asked
+      // where you were, again, having just offered to remember.
+      if (outcome.ok || !outcome.spoken.includes('?')) return;
       // A required argument first, then any empty one. Weather's `place` is not
       // marked required — it usually comes from memory — so when it did have to
       // ask, nothing was recorded as missing, the answer was routed as a fresh

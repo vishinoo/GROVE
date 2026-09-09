@@ -1287,7 +1287,11 @@ async function homeTown(): Promise<string | null> {
     if (!home) return null;
     // Stored as the sentence that was said — "I live in Edmonton" — so the
     // town is what follows the preposition.
-    const named = /\b(?:live in|living in|based in|from)\s+(.+)$/i.exec(home.value);
+    // Matches however the fact was phrased — "I live in Edmonton", "I'm in
+    // Edmonton", "I'm from Toronto" all store the sentence, not the town.
+    const named = /\b(?:live in|living in|based in|here in|'m in|am in|from)\s+(.+)$/i.exec(
+      home.value
+    );
     return (named?.[1] ?? home.value).replace(/[.?!]+$/, '').trim() || null;
   } catch {
     return null;

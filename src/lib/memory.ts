@@ -347,13 +347,34 @@ const FACT_PATTERNS: { key: string; test: RegExp }[] = [
     key: 'work',
     test: /^i (?:work (?:at|for)|am (?:a|an))\s+(?!bit\b|little\b|lot\b|few\b|couple\b)(.{3,60})/i,
   },
-  { key: 'home', test: /\bi live in\s+(.{2,40})/i },
+  // Case is load-bearing here: the place must be capitalised so "I am in a
+  // rush" is not a town, which rules out the /i flag — so the pronoun is
+  // spelled [Ii] rather than relying on it. Dropping the flag while leaving a
+  // lowercase i silently matched nothing at all.
+  //
+  // Where someone is, said any of the ways people say it. Only "I live in"
+  // counted before, so a person who had told Grove twice where they were still
+  // got asked which town the weather was for.
+  {
+    key: 'home',
+    test: /\b[Ii] (?:live|am living|am based|am|'m) (?:in|from)\s+([A-Z][\w' -]{1,38})/,
+  },
+  { key: 'home', test: /\b(?:[Ii]'?m|[Ww]e'?re) (?:here )?in\s+([A-Z][\w' -]{1,38})/ },
   { key: 'commute', test: /\bi (?:leave|set off)(?: for work)? at\s+(.{2,20})/i },
   { key: 'watchlist', test: /\b(?:my watchlist is|i hold|i own)\s+(.{2,80})/i },
   // Anchored to the start of the sentence: "I usually" mid-sentence is an
   // aside, not a standing preference, and storing asides is how the list fills
   // with things nobody meant to say.
   { key: 'preference', test: /^i (?:always|usually|prefer to)\s+(.{3,80})/i },
+  // The people around someone, on first mention. "My sister Sarah" is said once
+  // and then assumed forever, which is precisely the kind of thing an assistant
+  // should have caught the first time.
+  {
+    key: 'family',
+    test: /\bmy (brother|sister|mum|mom|dad|partner|wife|husband|boss|manager|roommate|flatmate)\s+(?:is\s+)?([A-Z][a-z]+)/,
+  },
+  { key: 'school', test: /\b[Ii] (?:go to|study at|attend)\s+([A-Z][\w' -]{2,40})/ },
+  { key: 'studying', test: /\bi(?:'?m| am) (?:studying|majoring in)\s+(.{3,50})/i },
 ];
 
 export type Extracted = {
