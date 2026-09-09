@@ -702,14 +702,35 @@ async function findAcrossCalendars(query: string, days = 60): Promise<Dated[] | 
 }
 
 /** Two or three events and a count — a read-out list is unusable past that. */
-function sayEvents(
-  events: { title: string; start: Date }[],
-  lead = ''
-): string {
+/** Just the clock, for events already placed on a day. */
+function clockOnly(date: Date): string {
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * A day, said the way a person would say it.
+ *
+ * "School review today at 18:30, then free time today at 19:15, and 10 more"
+ * repeats the day for every entry and buries the only number that helps — how
+ * many there are. The count leads, the day is said once, and the rest are
+ * times, which is how anyone reading a diary out loud does it.
+ */
+function sayEvents(events: { title: string; start: Date }[], lead = ''): string {
   const [first, second] = events;
+  if (!first) return `${lead}Nothing on.`;
+
+  // One event needs no count and no scaffolding.
+  if (events.length === 1) return `${lead}${first.title}, ${sayWhen(first.start)}.`;
+
+  const sameDay = !second || first.start.toDateString() === second.start.toDateString();
+  const opening = `${events.length} on. ${first.title} ${sayWhen(first.start)}`;
+  let line = opening;
+  if (second) {
+    line += sameDay
+      ? `, then ${second.title} at ${clockOnly(second.start)}`
+      : `, then ${second.title} ${sayWhen(second.start)}`;
+  }
   const rest = events.length - 2;
-  let line = `${first.title} ${sayWhen(first.start)}`;
-  if (second) line += `, then ${second.title} ${sayWhen(second.start)}`;
   if (rest > 0) line += `, and ${rest} more`;
   return `${lead}${line}.`;
 }

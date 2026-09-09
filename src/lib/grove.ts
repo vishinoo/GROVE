@@ -603,7 +603,16 @@ export async function askGrove(
   // about. mail.send, calendar.move and message.compose carry no such mark and
   // remain unreachable from any question, which is the property that has to
   // hold and still does.
-  const namedRead = allowed(named) && named?.wired && named.reads ? named : null;
+  // ...but only on something actually being asked.
+  //
+  // Trusting the model's read pick on any turn at all was too much: told
+  // "it's hooked up, Google is hooked up", the model reached for the calendar
+  // and Grove read the whole day out instead of answering. A statement is not a
+  // question, and the model reaching for a tool during conversation is it being
+  // eager, not the person asking for anything.
+  const askedSomething = QUESTION_OPENERS.test(userText) || userText.trim().endsWith('?');
+  const namedRead =
+    (askedSomething || looking) && allowed(named) && named?.wired && named.reads ? named : null;
 
   // Two gates, and the narrower one can only ever return a read. Whatever the
   // router suggested, a question cannot come out of here holding mail.send.
@@ -671,7 +680,17 @@ export async function askGrove(
     // read said "let me check" twice and, if the lookup then failed, that was
     // the entire reply — Grove announcing it was looking and never coming back.
     // Silence here, the existing timer for slowness, the result when it lands.
-    const holdForTool = Boolean(chosen?.reads);
+    // A remark survives; an invented answer does not.
+    //
+    // Silencing everything before a read stopped the model fabricating calendar
+    // entries, and threw away the lines that make Grove worth talking to along
+    // with them. The difference is testable: an answer carries specifics —
+    // times, dates, counts — and a remark carries none. So anything short and
+    // free of numbers is kept and said before the lookup, and anything that
+    // looks like it is answering is dropped in favour of the tool that
+    // actually can.
+    const looksLikeAnAnswer = /\d/.test(usable) || usable.length > 90;
+    const holdForTool = Boolean(chosen?.reads) && looksLikeAnAnswer;
 
     return {
       text:
