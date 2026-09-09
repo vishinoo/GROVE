@@ -342,19 +342,52 @@ function numberWord(n: number): string {
 
 /* ------------------------------------------------------------ reminders */
 
-export async function addReminder(title: string, due: Date | null): Promise<boolean> {
+/**
+ * Where a reminder should go.
+ *
+ * The first modifiable list is the wrong choice and looks exactly like the
+ * right one: iOS usually has a local, on-device list that nothing syncs and the
+ * Reminders app does not open on. Saving there succeeds, reports success, and
+ * produces a reminder the person cannot find — which reads as Grove lying about
+ * having saved it.
+ *
+ * iCloud first, then whatever the Reminders app itself calls default, then any
+ * modifiable list at all.
+ */
+function preferredList(
+  lists: { id: string; title?: string; allowsModifications?: boolean; source?: { type?: string; name?: string } }[]
+) {
+  const usable = lists.filter((c) => c.allowsModifications !== false);
+  const cloud = usable.find((c) =>
+    /caldav|icloud/i.test(`${c.source?.type ?? ''} ${c.source?.name ?? ''}`)
+  );
+  const named = usable.find((c) => /^reminders$/i.test(c.title ?? ''));
+  return cloud ?? named ?? usable[0] ?? lists[0];
+}
+
+/**
+ * Saves a reminder, and says which list it went into.
+ *
+ * The list name is returned so the reply can name it. "Added to your reminders"
+ * is unfalsifiable; "Added to Reminders" can be checked, and when it says
+ * something unexpected that is the bug reporting itself.
+ */
+export async function addReminder(
+  title: string,
+  due: Date | null
+): Promise<{ ok: boolean; list?: string }> {
   const m = mod();
-  if (!m || !(await ensureRemindersAccess())) return false;
+  if (!m || !(await ensureRemindersAccess())) return { ok: false };
   try {
     const lists = await m.getCalendarsAsync(m.EntityTypes.REMINDER);
-    const list = lists.find((c) => c.allowsModifications) ?? lists[0];
-    if (!list) return false;
+    const list = preferredList(lists);
+    if (!list) return { ok: false };
     await m.createReminderAsync(list.id, {
       title,
       ...(due ? { dueDate: due, startDate: due } : {}),
     });
-    return true;
+    return { ok: true, list: list.title };
   } catch {
-    return false;
+    return { ok: false };
   }
 }

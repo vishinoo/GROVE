@@ -39,7 +39,8 @@ export default function Talk() {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   const { notice, dismissNotice } = useSession();
-  const { state, caption, heard, level, armed, route, problem, activity, press, say, persona } = useAgent();
+  const { state, caption, heard, level, armed, ringSeen, route, problem, activity, press, say, persona } =
+    useAgent();
 
   const [draft, setDraft] = useState('');
   const canListen = capabilities().speech;
@@ -72,6 +73,7 @@ export default function Talk() {
       >
         <Hardware
           armed={armed}
+          ringSeen={ringSeen}
           routeName={route.name}
           external={route.isExternal}
           mic={route.hasExternalMic}
@@ -295,11 +297,13 @@ function LogLine({ label, children }: { label: string; children: string }) {
  */
 function Hardware({
   armed,
+  ringSeen,
   routeName,
   external,
   mic,
 }: {
   armed: boolean;
+  ringSeen: boolean;
   routeName: string;
   external: boolean;
   mic: boolean;
@@ -312,7 +316,18 @@ function Hardware({
         hint={external && !mic ? 'playback only' : undefined}
         tone={external ? (mic ? 'live' : 'alert') : 'off'}
       />
-      <Chip icon="ring" label={armed ? 'Ring armed' : 'Ring off'} tone={armed ? 'live' : 'off'} />
+      {/*
+        Three states, because there are three. Grove cannot see a paired ring —
+        iOS exposes no Bluetooth remote to a third-party app — so "armed" was
+        claiming knowledge it did not have, and said the same thing on a phone
+        with no ring at all. Ready means the session is held and a press would
+        arrive; armed means one actually has.
+      */}
+      <Chip
+        icon="ring"
+        label={!armed ? 'Ring off' : ringSeen ? 'Ring armed' : 'Ring ready'}
+        tone={!armed ? 'off' : ringSeen ? 'live' : 'alert'}
+      />
     </View>
   );
 }

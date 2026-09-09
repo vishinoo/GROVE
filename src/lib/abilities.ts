@@ -1185,8 +1185,15 @@ const REMIND: Ability = {
     // with no time — so this one does not refuse.
     const due = args.when ? readWhen(args.when) : null;
     const saved = await addReminder(what, due);
-    if (!saved) return { ok: false, spoken: 'Could not save that reminder.' };
-    return { ok: true, spoken: due ? `Reminder set for ${sayWhen(due)}.` : 'Added to your reminders.' };
+    if (!saved.ok) return { ok: false, spoken: 'Could not save that reminder.' };
+    // Naming the list makes the claim checkable. "Added to your reminders" is
+    // true of a reminder saved somewhere nobody looks.
+    const where = saved.list ? ` in ${saved.list}` : '';
+    return {
+      ok: true,
+      spoken: due ? `Reminder set for ${sayWhen(due)}${where}.` : `Added${where}.`,
+      detail: saved.list,
+    };
   },
 };
 
@@ -1211,6 +1218,28 @@ const REMIND: Ability = {
  * pretend otherwise: if none of the words are anywhere in the library, saying so
  * is the honest end of it.
  */
+/**
+ * Where the person lives, from memory rather than from the model.
+ *
+ * "I live in Edmonton" is stored under the key `home`, and reading it directly
+ * is a lookup; leaving it to the model to notice the line in its prompt is a
+ * hope. The weather asked where you were often enough to prove which of those
+ * you get.
+ */
+async function homeTown(): Promise<string | null> {
+  try {
+    const facts = await loadFacts(CURRENT_UID);
+    const home = facts.find((f) => f.key === 'home');
+    if (!home) return null;
+    // Stored as the sentence that was said — "I live in Edmonton" — so the
+    // town is what follows the preposition.
+    const named = /\b(?:live in|living in|based in|from)\s+(.+)$/i.exec(home.value);
+    return (named?.[1] ?? home.value).replace(/[.?!]+$/, '').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 const MOODS: Record<string, string[]> = {
   sad: ['sad', 'melancholy', 'blues', 'ballad', 'slow', 'acoustic', 'rain'],
   happy: ['happy', 'feel good', 'summer', 'pop', 'dance', 'party', 'upbeat'],
@@ -1363,9 +1392,17 @@ const WEATHER: Ability = {
   },
   examples: ["what's the weather", 'do I need a coat', 'is it going to rain today'],
   run: async (args) => {
-    const place = (args.place || '').trim();
+    // The argument, then what Grove already knows. Relying on the model to fill
+    // this from the memory block was the whole mechanism, and when it did not,
+    // Grove asked where you were — of someone who had told it months ago.
+    const asked = (args.place || '').trim();
+    let place = asked;
+    if (!place) place = (await homeTown()) ?? '';
     if (!place) {
-      return { ok: false, spoken: 'Where? I do not know where you are.' };
+      return {
+        ok: false,
+        spoken: 'Which town? Tell me once and I will remember it.',
+      };
     }
 
     try {
@@ -1385,6 +1422,18 @@ const WEATHER: Ability = {
         '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max' +
         '&forecast_days=1&timezone=auto';
       const data = await (await fetch(url, { signal: AbortSignal.timeout(8000) })).json();
+
+      // Kept only once the geocoder has confirmed it is a real place, so a
+      // misheard word never becomes where Grove thinks you live. This is what
+      // makes "tell me once" true rather than a form of words.
+      if (asked && !(await homeTown())) {
+        await remember(CURRENT_UID, {
+          key: 'home',
+          value: `I live in ${found.name}`,
+          source: 'told',
+          subject: 'me',
+        });
+      }
 
       const now = Math.round(data.current.temperature_2m);
       const sky = SKY[data.current.weather_code] ?? 'hard to say';

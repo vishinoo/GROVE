@@ -97,9 +97,28 @@ export function isSupported(): boolean {
   return isAvailable();
 }
 
-/** Whether the ring can reach Grove right now. */
+/**
+ * Whether the ring can reach Grove right now.
+ *
+ * This is the session, not the ring. iOS gives a third-party app no way to see
+ * a paired Bluetooth remote — no enumeration, no connection state, no name —
+ * so Grove cannot know a J09 is on your finger. What it can know is that it
+ * holds the audio session, which is the thing that would deliver a press.
+ */
 export function isArmed(): boolean {
   return resident && isHolding();
+}
+
+/**
+ * Whether a ring has ever actually pressed anything.
+ *
+ * The only evidence available that hardware exists. "Ring armed" claimed more
+ * than it knew — it was true of a phone with no ring paired at all — and the
+ * distinction matters when you are standing there pressing a button that is not
+ * reaching anything.
+ */
+export function hasHeardRing(): boolean {
+  return signals.length > 0;
 }
 
 /**

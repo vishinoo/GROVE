@@ -87,6 +87,8 @@ type AgentValue = {
   level: number;
   /** Whether the ring can currently reach Grove. */
   armed: boolean;
+  /** A ring has actually pressed something, so hardware is really there. */
+  ringSeen: boolean;
   /** The live audio route — the glasses, when they're on. */
   route: trigger.AudioRoute;
   /** Something the user should know about, e.g. a denied microphone. */
@@ -135,6 +137,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const [heard, setHeard] = useState('');
   const [level, setLevel] = useState(0);
   const [armed, setArmed] = useState(false);
+  /** Set once a real press arrives, which is the only proof a ring exists. */
+  const [ringSeen, setRingSeen] = useState(() => trigger.hasHeardRing());
   const [route, setRoute] = useState<trigger.AudioRoute>(() => trigger.currentRoute());
   const [problem, setProblem] = useState<string | null>(null);
   const [persona, setPersona] = useState<Persona>(DEFAULT_PERSONA);
@@ -652,9 +656,15 @@ function shortFailure(text: string): string {
   const rememberQuestion = useCallback(
     (ability: Ability, args: Record<string, string>, outcome: { ok: boolean; spoken: string }) => {
       if (outcome.ok || !outcome.spoken.trim().endsWith('?')) return;
-      const gap = Object.entries(ability.args).find(
-        ([name, spec]) => spec.required === true && !(args[name] ?? '').trim()
-      )?.[0];
+      // A required argument first, then any empty one. Weather's `place` is not
+      // marked required — it usually comes from memory — so when it did have to
+      // ask, nothing was recorded as missing, the answer was routed as a fresh
+      // sentence, and Grove asked where you were again. And again.
+      const empty = Object.entries(ability.args).filter(
+        ([name]) => !(args[name] ?? '').trim()
+      );
+      const gap =
+        empty.find(([, spec]) => spec.required === true)?.[0] ?? empty[0]?.[0];
       pending.current = gap ? { ability, args, gap } : null;
     },
     []
@@ -861,6 +871,10 @@ function shortFailure(text: string): string {
     void arm();
 
     const offTrigger = trigger.onTrigger((event) => {
+      // Proof that hardware exists. Until something presses, "armed" only ever
+      // meant Grove was ready to hear one — which is equally true of a phone
+      // with no ring paired at all.
+      setRingSeen(true);
       switch (event.kind) {
         case 'tap':
           press();
@@ -938,6 +952,7 @@ function shortFailure(text: string): string {
       heard,
       level,
       armed,
+      ringSeen,
       route,
       problem,
       persona,
@@ -962,6 +977,7 @@ function shortFailure(text: string): string {
       heard,
       level,
       armed,
+      ringSeen,
       route,
       problem,
       persona,
