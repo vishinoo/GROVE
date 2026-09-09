@@ -396,21 +396,36 @@ const MAIL_READ: Ability = {
       return { ok: true, spoken: line, detail: first.subject };
     }
 
-    const named = messages
+    // Subjects, not a headcount.
+    //
+    // Leading with "5 messages from Xbox" answers a question nobody asked: the
+    // number is the least useful thing about an inbox, and hearing it first
+    // makes the reply sound like a report rather than an answer. Asking about
+    // one sender already means you know roughly how many — what you want is
+    // what they said.
+    const asked = args.from ? saySender(args.from) : '';
+    const subjects = messages
       .slice(0, 3)
-      .map((m) => {
-        const who = saySender(m.from ?? '');
-        const what = readable(m.subject ?? '').slice(0, 60);
-        return what ? `${who} about ${what}` : who;
-      })
-      .join('; ');
-    const rest = messages.length > 3 ? `, and ${messages.length - 3} more` : '';
+      .map((m) => readable(m.subject ?? '').slice(0, 60) || saySender(m.from ?? ''))
+      .filter(Boolean);
+    const more = messages.length > 3 ? `, and ${messages.length - 3} more` : '';
+
+    // When they named the sender, saying it back on every line is noise; when
+    // they did not, it is the only thing that tells the messages apart.
+    const body = asked
+      ? `${asked}: ${subjects.join('; ')}${more}.`
+      : `${messages
+          .slice(0, 3)
+          .map((m) => {
+            const who = saySender(m.from ?? '');
+            const what = readable(m.subject ?? '').slice(0, 60);
+            return what ? `${who} about ${what}` : who;
+          })
+          .join('; ')}${more}.`;
+
     return {
       ok: true,
-      // Never a bare number. "5." opening a spoken reply is a count with no
-      // noun attached, and it lands as though Grove has answered a different
-      // question — which, when the sender filter was being dropped, it had.
-      spoken: `${messages.length} ${messages.length === 1 ? 'message' : 'messages'}${who}. ${named}${rest}. Want me to read one?`,
+      spoken: `${body} Want me to read one?`,
       detail: messages.map((m) => `${saySender(m.from ?? '')} — ${m.subject}`).join('\n'),
     };
   },
@@ -812,7 +827,10 @@ const MAIL_DIGEST: Ability = {
 
     const count = `${messages.length} message${messages.length === 1 ? '' : 's'}`;
     if (!args.send_to) {
-      return { ok: true, spoken: `${count}${scope}. ${digest}`, detail: digest };
+      // The summary is the answer; the count is bookkeeping. Leading with it
+      // made a digest sound like a report, and it is the least interesting
+      // thing said in the sentence.
+      return { ok: true, spoken: digest, detail: `${count}${scope}` };
     }
 
     // Sending it on. "me" means the account Grove is signed in as, which is the
