@@ -422,6 +422,24 @@ function fillArgs(
     }
   }
 
+  // The thing being looked for is the sentence itself.
+  //
+  // calendar.find asks "what am I looking for?" when `which` is empty, and the
+  // model leaves it empty often enough that the question became the usual
+  // answer — asked about a specific event, Grove asked which event. The whole
+  // sentence is safe to pass because cleanTerm strips the framing: the verbs,
+  // the position words, the day, and words like "what" and "find" that describe
+  // the asking rather than the thing.
+  if (chosen?.id === 'calendar.find' && !(args.which ?? '').trim()) {
+    args.which = userText;
+  }
+  if (chosen?.id === 'calendar.remove' && !(args.which ?? '').trim()) {
+    args.which = userText;
+  }
+  if (chosen?.id === 'calendar.move' && !(args.event ?? '').trim()) {
+    args.event = userText;
+  }
+
   if (chosen?.id === 'calendar.read') {
     // The position and the day are both in what was said, and both change the
     // answer completely — "my last thing" is one event, "today" is a window.
