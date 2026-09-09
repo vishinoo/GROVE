@@ -444,6 +444,10 @@ function fillArgs(
     if (!(args.when ?? '').trim() && /\b(today|yesterday|this week|this morning)\b/i.test(userText)) {
       args.when = userText;
     }
+    // The position lives in the sentence, the same as it does for the calendar.
+    if (!(args.which ?? '').trim() && POSITION_WORD.test(userText)) {
+      args.which = userText;
+    }
   }
 
   // The thing being looked for is the sentence itself.
@@ -522,6 +526,18 @@ export function senderIn(text: string): string | null {
 /** A kind of mail, when one is named. */
 const CATEGORY_IN =
   /\b(unread|important|urgent|starred|flagged|new)\b/i;
+
+/**
+ * Things Grove holds itself, so the web has nothing to add.
+ *
+ * Grounding costs a round trip to Google before a word is written, and the
+ * answer to "what is on my calendar" was never going to be out there. The
+ * router usually catches these, but only when one ability clearly wins — and a
+ * long sentence with two thoughts in it beats the router while still plainly
+ * being about the diary.
+ */
+const ANSWERED_HERE =
+  /\b(my |the )?(calendar|schedule|diary|agenda|inbox|email|emails|mail|reminder|reminders|memory|goals?|playlist|library)\b|\bweather\b|\bwhat'?s on\b|\bmy day\b/i;
 
 /** Any wording that names a position rather than a window. */
 const POSITION_WORD =
@@ -614,8 +630,17 @@ export async function askGrove(
     // If a tool here can answer it, do not search the web on the way. The one
     // exception is the briefing, which IS the web.
     grounded: (() => {
+      // The briefing IS the web, so it always searches.
       const local = pickAbility(userText);
-      return !local || local.id === 'brief.web';
+      if (local?.id === 'brief.web') return true;
+      if (local) return false;
+
+      // A rambling sentence — "what's the weather today, I want to go here and
+      // I'm not sure what it's like" — matches no ability cleanly, so the
+      // keyword router returned nothing and the turn paid for a web search
+      // before it could say anything. Naming something Grove holds locally is
+      // enough to skip it, whether or not a single ability falls out.
+      return !ANSWERED_HERE.test(userText);
     })(),
   });
 

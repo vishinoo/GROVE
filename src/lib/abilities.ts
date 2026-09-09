@@ -352,6 +352,7 @@ const MAIL_READ: Ability = {
     from: { type: 'string', what: 'who it is from, if they named someone' },
     about: { type: 'string', what: 'what it is about' },
     when: { type: 'string', what: 'a window if they named one: "today", "this week"' },
+    which: { type: 'string', what: 'a position if they named one: "last", "most recent", "first"' },
     category: {
       type: 'string',
       what: 'a kind if they named one: unread, important, starred, has attachment',
@@ -369,6 +370,8 @@ const MAIL_READ: Ability = {
     'what was my most recent email',
     'any new emails',
     'any unread emails',
+    'what was my last email from Xbox',
+    'read me the most recent one from Priya',
     'anything important in my inbox',
     'what emails did I get today',
   ],
@@ -395,6 +398,25 @@ const MAIL_READ: Ability = {
     const [first] = messages;
     const sender = saySender(first.from ?? '');
     const subject = readable(first.subject ?? '').slice(0, 90);
+
+    // "What was my last email from Xbox" names one message, not a list.
+    //
+    // Gmail returns newest first, so the newest is already in hand — the only
+    // thing missing was noticing that the question asked for one. Answering a
+    // singular question with three subjects and a count reads as not having
+    // listened.
+    const wants = positionIn(`${args.which || ''} ${args.about || ''}`);
+    if (wants && messages.length > 0) {
+      const pick = wants === 'first' ? messages[messages.length - 1] : messages[0];
+      const gist = gistOf(pick.body || pick.snippet || '');
+      const who = saySender(pick.from ?? '');
+      const what = readable(pick.subject ?? '').slice(0, 90);
+      return {
+        ok: true,
+        spoken: what ? `${who}, ${what}. ${gist}`.trim() : `${who} wrote. ${gist}`.trim(),
+        detail: pick.subject,
+      };
+    }
 
     // One message gets read; several get named.
     //
@@ -1331,6 +1353,37 @@ const REMIND: Ability = {
  * is the honest end of it.
  */
 /**
+ * Roughly where the phone is, without asking and without a permission prompt.
+ *
+ * The weather kept asking which town, which is the one question an assistant
+ * should never need to ask twice — and it asked it of people who had already
+ * answered, because the only source was a stored fact and the only way to store
+ * one was to say a particular sentence.
+ *
+ * This is the fallback beneath that: the network Grove is on knows which city
+ * it is in. Coarse by nature — it is the exit point of the connection, so a VPN
+ * or a phone network can put it a city out — which is why it sits BELOW what
+ * the person actually told us and is never written to memory. A guess is fine
+ * to answer with and wrong to remember.
+ *
+ * Cached for the session, because it does not change while you are standing
+ * still and a lookup on every question is latency for nothing.
+ */
+let guessedCity: string | null | undefined;
+
+async function cityFromNetwork(): Promise<string | null> {
+  if (guessedCity !== undefined) return guessedCity;
+  try {
+    const response = await fetch('https://ipwho.is/', { signal: AbortSignal.timeout(4000) });
+    const data = (await response.json()) as { success?: boolean; city?: string };
+    guessedCity = data.success !== false && data.city ? data.city : null;
+  } catch {
+    guessedCity = null;
+  }
+  return guessedCity;
+}
+
+/**
  * Where the person lives, from memory rather than from the model.
  *
  * "I live in Edmonton" is stored under the key `home`, and reading it directly
@@ -1512,13 +1565,14 @@ const WEATHER: Ability = {
     // this from the memory block was the whole mechanism, and when it did not,
     // Grove asked where you were — of someone who had told it months ago.
     const asked = (args.place || '').trim();
+    // What they said, then what they told us once, then where the phone is.
+    // Asking is the last resort rather than the first, which is the whole
+    // difference between an assistant and a form.
     let place = asked;
     if (!place) place = (await homeTown()) ?? '';
+    if (!place) place = (await cityFromNetwork()) ?? '';
     if (!place) {
-      return {
-        ok: false,
-        spoken: 'Which town? Tell me once and I will remember it.',
-      };
+      return { ok: false, spoken: 'Which town am I checking?' };
     }
 
     try {
