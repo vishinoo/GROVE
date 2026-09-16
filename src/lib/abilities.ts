@@ -268,6 +268,24 @@ function messageLines(messages: { from?: string; subject?: string; date?: string
     .join('\n');
 }
 
+/**
+ * Whether a From header belongs to the person someone named.
+ *
+ * Titles are dropped, because people say "Prof Chen" and headers say "Wei
+ * Chen". Any remaining word of the name appearing in the header counts — which
+ * is lenient on purpose for one name, and still refuses a message from someone
+ * who shares none of it.
+ */
+function isFrom(header: string | undefined, name: string): boolean {
+  const from = (header ?? '').toLowerCase();
+  const words = name
+    .toLowerCase()
+    .replace(/\b(?:prof(?:essor)?|dr|mr|mrs|ms|miss|sir)\.?\s+/g, '')
+    .split(/[^a-z0-9@.]+/)
+    .filter((w) => w.length > 1);
+  return words.length > 0 && words.some((w) => from.includes(w));
+}
+
 /** "Priya Sharma <p@x.com>" is not how you say a name out loud. */
 function saySender(from: string): string {
   const named = /^\s*"?([^"<]+?)"?\s*</.exec(from);
@@ -538,16 +556,28 @@ const MAIL_SEND: Ability = {
 
     // Dictated by voice, sent to a name Grove looked up, and unrecallable. One
     // press is a small price for the one ability here that cannot be undone.
+    // A subject from the message itself when none was given. "(no subject)" is
+    // the mark of mail sent by something that did not care, and the person on
+    // the other end sees it before they see a word of what was said.
+    const subject =
+      (args.subject || '').trim() ||
+      body.split(/\s+/).slice(0, 7).join(' ').replace(/[.,;:!?]+$/, '');
+
     if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
+      // Short mail is read out whole, because the words are what is being
+      // agreed to. Long mail is named by its subject instead: a body cut off
+      // at a character count ends mid-word, and "Prof. Chen grante" is not
+      // something anyone can make a decision about. The whole message is on
+      // the card either way.
+      const heard = body.length <= 110 ? body : `"${subject}"`;
       return {
         ok: false,
         needsConfirming: true,
-        spoken: `Sending to ${asked}: ${body.slice(0, 120)}`,
-        detail: `to ${to}`,
+        spoken: `Sending to ${asked}: ${heard}`,
+        detail: `To ${to}\nSubject: ${subject}\n\n${body}`,
       };
     }
-
-    const sent = await google.sendMail(to, args.subject || '', body);
+    const sent = await google.sendMail(to, subject, body);
     // The reason matters most here. "That did not send" covered an expired
     // sign-in, a missing scope and a dead network alike — and sending is the
     // one thing where knowing which is the difference between fixing it in ten
@@ -893,7 +923,13 @@ function sayEvents(events: { title: string; start: Date }[], lead = ''): string 
 const MAIL_DIGEST: Ability = {
   id: 'mail.summarise',
   name: 'Summarise mail',
-  what: 'Summarises your recent email, and can send that summary on.',
+  // Read-only for real. It used to take `send_to` and email the summary
+  // itself, while marked `reads` — and a read runs without asking, so the model
+  // could send mail on someone's behalf with no press at all. Sending a
+  // summary is now two steps the tool loop does in one turn: summarise here,
+  // then mail.send with the summary as its body, which stops at a confirmation
+  // like every other email.
+  what: 'Recaps recent email: who wrote, what they want, what needs a reply. To send a recap to someone, use this first and then send its result with the send-email tool.',
   where: 'server',
   wired: true,
   needs: ['email'],
@@ -902,13 +938,12 @@ const MAIL_DIGEST: Ability = {
     from: { type: 'string', what: 'only mail from this person, if they named one' },
     about: { type: 'string', what: 'only mail about this, if they named a topic' },
     when: { type: 'string', what: 'the window, e.g. "this morning", "today", "this week"' },
-    send_to: { type: 'string', what: 'who to send the summary to — "me" for themselves' },
   },
   examples: [
     'summarise my emails from this morning',
     'summarise everything from Priya',
     'catch me up on my email',
-    'summarise my email and send it to me',
+    'recap my inbox today',
   ],
   run: async (args) => {
     const messages = await google.searchMail({
@@ -933,49 +968,14 @@ const MAIL_DIGEST: Ability = {
       })),
       [args.from, args.about, args.when].filter(Boolean).join(' ')
     );
+
+    // The full messages go back either way, so the model can recap from them
+    // itself if the digest step failed — or answer "what did Priya say" next.
+    const detail = messageLines(messages);
     if (!digest) {
-      // The mail arrived; the model failed to condense it. Saying so beats a
-      // line that reads as though the mail could not be fetched.
-      return {
-        ok: false,
-        spoken: `I got ${messages.length} but could not summarise them just now.`,
-      };
+      return { ok: true, spoken: `${messages.length} messages${scope}.`, detail };
     }
-
-    const count = `${messages.length} message${messages.length === 1 ? '' : 's'}`;
-    if (!args.send_to) {
-      // The summary is the answer; the count is bookkeeping. Leading with it
-      // made a digest sound like a report, and it is the least interesting
-      // thing said in the sentence.
-      return { ok: true, spoken: digest, detail: `${count}${scope}` };
-    }
-
-    // Sending it on. "me" means the account Grove is signed in as, which is the
-    // one case where no lookup is needed and guessing is safe.
-    const wanted = args.send_to.trim();
-    let to = wanted;
-    if (/^(me|myself|my ?self)$/i.test(wanted)) {
-      to = (await google.me()) ?? '';
-      if (!to) return { ok: false, spoken: 'I could not work out your own address.' };
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(wanted)) {
-      const matches = await google.findContact(wanted);
-      if (!matches || matches.length === 0) {
-        return { ok: false, spoken: `I have no address for ${wanted}.` };
-      }
-      if (matches.length > 1) {
-        return {
-          ok: false,
-          spoken: `I have ${matches.length} people called ${wanted}. Which one?`,
-          detail: matches.map((m) => `${m.name} — ${m.email}`).join('\n'),
-        };
-      }
-      to = matches[0].email;
-    }
-
-    const sent = await google.sendMail(to, `Your email${scope}`, digest);
-    return sent
-      ? { ok: true, spoken: `${count}${scope}. Summary sent to ${wanted}.`, detail: digest }
-      : { ok: false, spoken: `I summarised it, but ${google.explain('sending it').replace(/^./, (c) => c.toLowerCase())}` };
+    return { ok: true, spoken: digest, detail };
   },
 };
 
@@ -1022,7 +1022,18 @@ const MAIL_REPLY: Ability = {
       };
     }
 
-    const target = found[0];
+    // The message has to be from the person named, not merely the first result.
+    //
+    // "Reply to Prof Chen" chose Priya's email and would have sent the reply to
+    // her: the search is a relevance match, and its first result is whatever
+    // Gmail ranked highest, not a guarantee about the sender. When a name was
+    // given, only a message actually from that person qualifies, and none is
+    // an answer rather than a reason to fall back to the top of the list.
+    const named = (args.to || '').trim();
+    const target = named ? found.find((m) => isFrom(m.from, named)) : found[0];
+    if (!target) {
+      return { ok: false, spoken: `I couldn't find a message from ${named} to reply to.` };
+    }
 
     // A reply is sent mail, and sent mail is not taken back. mail.send always
     // asked; this did not, which was survivable while a keyword gate stood in

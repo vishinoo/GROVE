@@ -381,6 +381,25 @@ section('The model can never confirm on your behalf');
   }
 }
 
+/* A read-only tool must not be able to do anything. */
+section('Read-only tools cannot send, change or delete');
+{
+  // Reads run inside the tool loop without asking, so this is the property the
+  // whole confirmation model rests on. It failed once: mail.summarise was marked
+  // `reads` and could email the summary on, which meant the model could send
+  // mail with no press. Checked against the source, since a read that only
+  // sends on one argument would never show up in a run with the others.
+  const source = fs.readFileSync(path.join(ROOT, 'src/lib/abilities.ts'), 'utf8');
+  const WRITES = /\b(sendMail|replyTo|deleteCalendarEvent|moveCalendarEvent|createCalendarEvent|createEvent|removeEvent|moveEvent|addReminder|Linking\.openURL|playMusic)\s*\(/;
+  const decls = [...source.matchAll(/const (\w+): Ability = \{\s*\n\s*id: '([\w.]+)'/g)];
+  decls.forEach((m, i) => {
+    const body = source.slice(m.index, decls[i + 1] ? decls[i + 1].index : undefined);
+    if (!/\n\s*reads: true/.test(body)) return;
+    const hit = WRITES.exec(body);
+    check(!hit, `${m[2]} is read-only and does nothing irreversible`, hit ? `calls ${hit[1]}` : '');
+  });
+}
+
 /* Voice notes start and stop on the right words, and only those. */
 section('Voice notes start and stop on purpose');
 {

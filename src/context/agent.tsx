@@ -650,7 +650,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       // "Send" was right for mail and wrong for everything added since —
       // deleting an event, moving one, ordering food. The instruction has to
       // match the thing being decided, or the press means something else.
-      if (mine()) utter(`${outcome.spoken}. Press once to go ahead, twice to cancel.`);
+      if (mine()) utter(`${outcome.spoken.replace(/[.!?\s]+$/, '')}. Press once to go ahead, twice to cancel.`);
       return;
     }
 
