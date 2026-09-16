@@ -57,6 +57,7 @@ const CAPTION: Record<AgentState, string> = {
   thinking: 'Thinking',
   speaking: 'Speaking',
   working: 'Working',
+  noting: 'Taking notes',
 };
 
 type Lobe = {
@@ -125,7 +126,7 @@ export function Orb({
   }, [drift]);
 
   useEffect(() => {
-    if (state === 'listening') {
+    if (state === 'listening' || state === 'noting') {
       // The orb IS the microphone. Driven by level, not animated on a loop.
       swell.value = withTiming(level, { duration: 90, easing: Easing.out(Easing.quad) });
       return;
@@ -165,7 +166,9 @@ export function Orb({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={
-            state === 'listening'
+            state === 'noting'
+              ? 'Finish the note'
+              : state === 'listening'
               ? 'Stop listening'
               : state === 'speaking'
                 ? 'Interrupt Grove'

@@ -52,7 +52,9 @@ import {
   type Persona,
 } from '@/lib/persona';
 import { isSpeaking, speak, stopSpeaking } from '@/lib/speak';
+import { lightNotes } from '@/lib/lightModel';
 import * as memory from '@/lib/memory';
+import * as notesStore from '@/lib/notes';
 import * as sparks from '@/lib/sparks';
 import * as transcript from '@/lib/transcript';
 import * as trigger from '@/lib/trigger';
@@ -75,7 +77,9 @@ export type AgentState =
   | 'listening'
   | 'thinking'
   | 'speaking'
-  | 'working';
+  | 'working'
+  /** Taking a voice note: listening at length, and not replying to any of it. */
+  | 'noting';
 
 type AgentValue = {
   state: AgentState;
@@ -114,6 +118,10 @@ type AgentValue = {
   setSparkEnabled: (id: string, enabled: boolean) => Promise<void>;
   editSpark: (id: string, patch: Parameters<typeof sparks.editSpark>[2]) => Promise<void>;
   deleteSpark: (id: string) => Promise<void>;
+
+  /** Voice notes, newest first. */
+  notes: notesStore.Note[];
+  forgetNote: (id: string) => Promise<void>;
 
   /** The trigger, however it was pressed — ring, screen or keyboard. */
   press: () => void;
@@ -165,6 +173,25 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const [persona, setPersona] = useState<Persona>(DEFAULT_PERSONA);
   const [activity, setActivity] = useState<transcript.Entry[]>([]);
   const [facts, setFacts] = useState<memory.Fact[]>([]);
+  const [noteList, setNoteList] = useState<notesStore.Note[]>([]);
+
+  /**
+   * The voice note being taken, if one is.
+   *
+   * Speech arrives in sessions, because iOS ends a recognition task on its own
+   * schedule however long someone is still talking. `committed` is every
+   * session that has ended; `buffer` is the one still running. A note is both,
+   * joined — which is what lets a five-minute ramble survive the recogniser
+   * restarting under it three times.
+   */
+  const memo = useRef<{
+    committed: string[];
+    buffer: string;
+    startedAt: number;
+    finishing: boolean;
+    endTimer: ReturnType<typeof setTimeout> | null;
+    quietTimer: ReturnType<typeof setTimeout> | null;
+  } | null>(null);
   const [sparkList, setSparkList] = useState<sparks.Spark[]>([]);
 
   /**
@@ -311,6 +338,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     void memory.loadFacts(uid).then((f) => {
       if (mounted.current) setFacts(f);
     });
+    void notesStore.loadNotes(uid).then((n) => {
+      if (mounted.current) setNoteList(n);
+    });
     void sparks.loadSparks(uid).then((s) => {
       if (mounted.current) setSparkList(s);
       // Opening the app is the only reliable moment a device-side spark gets.
@@ -390,6 +420,15 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     const text = said.trim();
     if (!text) {
       setState(restingState());
+      return;
+    }
+
+    // "Listen to this" is decided here, before the model, because people start
+    // talking the instant they have said it. A round trip first would reopen
+    // the microphone after the opening sentence of the note — usually the one
+    // saying what it is about.
+    if (notesStore.isStartingNote(text)) {
+      startNote();
       return;
     }
 
@@ -771,6 +810,198 @@ function shortFailure(text: string): string {
     []
   );
 
+  /* --------------------------------------------------------- voice notes */
+
+  /** Everything heard so far in the note, in order. */
+  const noteText = (): string => {
+    const m = memo.current;
+    if (!m) return '';
+    return [...m.committed, m.buffer]
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(' ');
+  };
+
+  /**
+   * Take in a new transcript for the running session.
+   *
+   * On iOS each result is the whole session so far, not the latest words, so a
+   * result replaces the buffer rather than adding to it. The exception is a
+   * result that is suddenly much shorter than the buffer: a transcript does not
+   * shrink by half as it grows, so that is a new session starting, and the old
+   * one is kept before it is overwritten. Comparing lengths rather than opening
+   * words matters, because the recogniser revises its first few words as it
+   * hears more, and treating a revision as a new session duplicated them.
+   */
+  const absorb = (text: string) => {
+    const m = memo.current;
+    const said = text.trim();
+    if (!m || !said) return;
+    if (m.buffer && said.length < m.buffer.length * 0.5) m.committed.push(m.buffer);
+    m.buffer = said;
+    if (mounted.current) setHeard(noteText().slice(-220));
+  };
+
+  /**
+   * A note ends after two minutes of nobody saying anything.
+   *
+   * Long enough for thinking, pausing, reading something off a page. Short
+   * enough that a note left running by accident does not record the rest of
+   * the afternoon.
+   */
+  const armNoteQuiet = () => {
+    const m = memo.current;
+    if (!m) return;
+    if (m.quietTimer) clearTimeout(m.quietTimer);
+    m.quietTimer = setTimeout(() => void finishNote(), 120_000);
+  };
+
+  /**
+   * "That's it" ends a note — once it has stayed the last thing said.
+   *
+   * Checked on partial results, because on iOS a continuous session only
+   * delivers a final one when it stops. The short wait is what keeps "that's
+   * it, the whole plan hinges on Friday" from ending the note at the comma.
+   */
+  const watchForEnd = () => {
+    const m = memo.current;
+    if (!m) return;
+    if (m.endTimer) clearTimeout(m.endTimer);
+    if (!notesStore.endsNote(noteText()).ended) return;
+    m.endTimer = setTimeout(() => {
+      if (memo.current && notesStore.endsNote(noteText()).ended) void finishNote();
+    }, 2500);
+  };
+
+  const listenForNote = async () => {
+    const m = memo.current;
+    if (!m || m.finishing) return;
+
+    // The same preparation beginListening does out of the foreground: pocketed,
+    // the audio session has lapsed and must be taken back before recording.
+    if (AppState.currentState !== 'active') {
+      try {
+        await trigger.reactivate();
+        await trigger.setKeepAlive(false);
+      } catch {
+        // Recording may still start; if it does not, the note ends below.
+      }
+    }
+    trigger.suppressVolumeTriggers();
+
+    const started = startListening(
+      {
+        onPartial: (text) => {
+          absorb(text);
+          armNoteQuiet();
+          watchForEnd();
+        },
+        onFinal: (text) => {
+          absorb(text);
+          watchForEnd();
+        },
+        onLevel: (value) => {
+          if (mounted.current) setLevel(value);
+        },
+        onError: (message) => {
+          console.log('[grove:note] recogniser error', message);
+        },
+        onEnd: () => {
+          const current = memo.current;
+          if (!current || current.finishing) return;
+          // iOS ended the session, not the person. Keep what it heard and start
+          // another, so a long note is several sessions rather than a lost one.
+          if (current.buffer) current.committed.push(current.buffer);
+          current.buffer = '';
+          setTimeout(() => void listenForNote(), 250);
+        },
+      },
+      { continuous: true, preferOnDevice: live.current.persona.preferOnDevice }
+    );
+
+    if (!started) void finishNote();
+  };
+
+  const startNote = () => {
+    stopSpeaking();
+    // A buzz, not a sentence. Anything spoken now plays into the glasses while
+    // the microphone opens, and gets written into the note as its first line.
+    buzz();
+    memo.current = {
+      committed: [],
+      buffer: '',
+      startedAt: Date.now(),
+      finishing: false,
+      endTimer: null,
+      quietTimer: null,
+    };
+    setHeard('');
+    setCaption('Taking notes. Press when you are done.');
+    setState('noting');
+    armNoteQuiet();
+    void listenForNote();
+  };
+
+  const finishNote = async () => {
+    const m = memo.current;
+    if (!m || m.finishing) return;
+    m.finishing = true;
+    if (m.endTimer) clearTimeout(m.endTimer);
+    if (m.quietTimer) clearTimeout(m.quietTimer);
+
+    // Ask for the final transcript and give it a moment to arrive: the last
+    // few words are exactly the ones still being recognised when the press
+    // lands, and they are often the conclusion.
+    stopListening();
+    await new Promise((done) => setTimeout(done, 700));
+
+    const said = notesStore.endsNote(noteText()).kept;
+    const seconds = Math.max(1, Math.round((Date.now() - m.startedAt) / 1000));
+    memo.current = null;
+    void trigger.setKeepAlive(true).catch(() => undefined);
+    buzz();
+    if (!mounted.current) return;
+    setLevel(0);
+    setHeard('');
+
+    if (said.split(/\s+/).filter(Boolean).length < 3) {
+      utter("I didn't catch anything, so there's no note.");
+      return;
+    }
+
+    setState('thinking');
+    setCaption('Writing up your note…');
+
+    const shape = await lightNotes(said);
+    // Saved whether or not the write-up worked. The recording is the thing that
+    // cannot be got back; a summary can be made again.
+    const note = shape ?? {
+      title: said.split(/\s+/).slice(0, 6).join(' '),
+      summary: '',
+      points: [],
+      actions: [],
+    };
+    const next = await notesStore.saveNote(live.current.uid, {
+      ...note,
+      transcript: said,
+      createdAt: new Date().toISOString(),
+      seconds,
+    });
+    if (!mounted.current) return;
+    setNoteList(next);
+
+    const todo = note.actions.length;
+    utter(
+      shape
+        ? `Saved: ${note.title}.${todo > 0 ? ` ${todo === 1 ? 'One thing' : `${todo} things`} to do in there.` : ''}`
+        : "Saved the recording, but I couldn't write it up just now. It's all in your notes."
+    );
+  };
+
+  const forgetNote = useCallback(async (id: string) => {
+    setNoteList(await notesStore.deleteNote(live.current.uid, id));
+  }, []);
+
   const clearSilence = useCallback(() => {
     if (silence.current) {
       clearTimeout(silence.current);
@@ -905,6 +1136,13 @@ function shortFailure(text: string): string {
   }, []);
 
   const press = useCallback(() => {
+    // While a note is being taken, the press is how it ends. Nothing else a
+    // press could mean is more likely than "I'm done".
+    if (memo.current) {
+      void finishNote();
+      return;
+    }
+
     // A confirmation owns the next press, and only the next one.
     const waiting = awaitingYes.current;
     if (waiting) {
@@ -981,7 +1219,11 @@ function shortFailure(text: string): string {
 
     void beginListening(false);
     // confirmNow and utter are both useCallback with no deps, so they are
-    // stable and listing them changes nothing but the lint.
+    // stable and listing them changes nothing but the lint. finishNote is left
+    // out on purpose: it is rebuilt each render but reads only refs and stable
+    // setters, so any render's copy behaves identically, and listing it would
+    // rebuild `press` — and resubscribe the ring — on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [beginListening, confirmNow, utter]);
 
   const say = useCallback(
@@ -1024,11 +1266,16 @@ function shortFailure(text: string): string {
           press();
           break;
         case 'hold-start':
+          if (memo.current) {
+            void finishNote();
+            break;
+          }
           // A held button means "I am still talking" — keep the recogniser
           // open rather than letting it endpoint at the first pause.
           if (stateNow.current !== 'listening') void beginListening(true);
           break;
         case 'hold-end':
+          if (memo.current) break;
           if (stateNow.current === 'listening') stopListening();
           break;
       }
@@ -1055,6 +1302,8 @@ function shortFailure(text: string): string {
       offRoute();
       appSub.remove();
     };
+    // finishNote reads only refs and stable setters; see the note on `press`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, press, beginListening, catchUp, setState]);
 
   /**
@@ -1112,6 +1361,8 @@ function shortFailure(text: string): string {
       setSparkEnabled,
       editSpark,
       deleteSpark,
+      notes: noteList,
+      forgetNote,
       press,
       say,
     }),
@@ -1137,6 +1388,8 @@ function shortFailure(text: string): string {
       setSparkEnabled,
       editSpark,
       deleteSpark,
+      noteList,
+      forgetNote,
       press,
       say,
     ]

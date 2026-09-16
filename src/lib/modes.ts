@@ -126,7 +126,7 @@ export const MODES: Mode[] = [
     // actually protects concentration. Sending stays off: composing mail is the
     // thing that pulls someone out of what they were doing.
     allow: [
-      'mode.set', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.find',
+      'mode.set', 'notes.search', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.find',
       'calendar.add', 'weather.now', 'memory.recall', 'memory.add', 'music.play',
       'mail.search', 'mail.summarise', 'contact.find',
     ],
@@ -148,7 +148,7 @@ export const MODES: Mode[] = [
     manner:
       'They are learning something. Explain it properly — three or four sentences is right here, and being clipped is unhelpful. Use an example. Check they followed before moving on.',
     allow: [
-      'mode.set', 'memory.recall', 'memory.add', 'calendar.find', 'music.play',
+      'mode.set', 'notes.search', 'memory.recall', 'memory.add', 'calendar.find', 'music.play',
       'doc.find', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.add',
       'mail.search', 'contact.find',
       'weather.now', 'maps.eta',
@@ -172,7 +172,7 @@ export const MODES: Mode[] = [
     // Reading is fine in the evening; starting a thread is not. No sending, no
     // replying, no calling — those are the ones that turn a wind-down into work.
     allow: [
-      'mode.set', 'music.play', 'weather.now', 'reminders.add', 'memory.recall',
+      'mode.set', 'notes.search', 'music.play', 'weather.now', 'reminders.add', 'memory.recall',
       'memory.add', 'day.brief', 'calendar.read', 'gcal.read', 'calendar.find',
       'mail.search', ],
     interrupt: 'sparingly',

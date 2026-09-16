@@ -55,7 +55,14 @@ export default function Talk() {
 
   // While listening, the caption shows what's being heard rather than the last
   // thing said — otherwise the screen looks frozen exactly when it isn't.
-  const shown = state === 'listening' ? heard || 'Go ahead.' : caption;
+  // While a note is being taken the live words are the point — they show what
+  // is being caught, so a mishearing can be said again before it is written up.
+  const shown =
+    state === 'listening'
+      ? heard || 'Go ahead.'
+      : state === 'noting'
+        ? heard || caption
+        : caption;
 
   return (
     <KeyboardAvoidingView
@@ -104,7 +111,7 @@ export default function Talk() {
             style={[
               Type.caption,
               {
-                color: state === 'listening' ? palette.inkSoft : palette.ink,
+                color: state === 'listening' || state === 'noting' ? palette.inkSoft : palette.ink,
                 textAlign: 'center',
                 marginTop: 18,
               },

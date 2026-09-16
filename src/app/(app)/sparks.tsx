@@ -31,10 +31,11 @@ import { abilityById, type Ability } from '@/lib/abilities';
 import { describeTrigger, parseSchedule, phraseTrigger, type Spark } from '@/lib/sparks';
 import { MODES, loadOverrides, setOnEnter, type Mode } from '@/lib/modes';
 import { VALUE_MAX } from '@/lib/memory';
+import type { Note as NoteItem } from '@/lib/notes';
 
 export default function Sparks() {
   const palette = usePalette();
-  const { sparks, setSparkEnabled, editSpark, deleteSpark, facts, editFact, forgetFact, forgetEverything, persona, updatePersona } =
+  const { sparks, setSparkEnabled, editSpark, deleteSpark, facts, editFact, forgetFact, forgetEverything, notes, forgetNote, persona, updatePersona } =
     useAgent();
   // Goals and facts are shown apart because they are read differently: a goal
   // is something you check on, a fact is something you correct.
@@ -116,6 +117,25 @@ export default function Sparks() {
               onSave={(value) => void editFact(fact.id, value)}
               onForget={() => void forgetFact(fact.id)}
             />
+          ))
+        )}
+      </Section>
+
+      {/*
+        Notes above memory, because they are what you made on purpose. Memory is
+        what Grove picked up along the way.
+      */}
+      <Section label="Notes">
+        {notes.length === 0 ? (
+          <Card>
+            <Text style={[Type.bodySm, { color: palette.muted }]}>
+              Say &ldquo;listen to this&rdquo; and talk. Press when you are done, and it turns into
+              a note here — summary, points and anything you need to do.
+            </Text>
+          </Card>
+        ) : (
+          notes.slice(0, 20).map((note) => (
+            <NoteCard key={note.id} note={note} onForget={() => void forgetNote(note.id)} />
           ))
         )}
       </Section>
@@ -613,6 +633,98 @@ function Field({
         <Text style={[Type.bodySm, { color: palette.muted, marginTop: 5 }]}>{help}</Text>
       ) : null}
     </View>
+  );
+}
+
+/**
+ * A voice note, closed to its title and opened to everything.
+ *
+ * Closed, a list of titles and dates is the archive. Open, the summary and the
+ * actions come first because they are what the note is for, and the transcript
+ * last because it is only needed when the summary is wrong.
+ */
+function NoteCard({ note, onForget }: { note: NoteItem; onForget: () => void }) {
+  const palette = usePalette();
+  const [open, setOpen] = useState(false);
+  const when = new Date(note.createdAt).toLocaleDateString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  });
+  const length = note.seconds >= 60 ? `${Math.round(note.seconds / 60)} min` : `${note.seconds}s`;
+
+  return (
+    <Card style={{ marginBottom: 8, paddingHorizontal: 0, paddingVertical: 0 }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${note.title}, ${when}. Tap to ${open ? 'close' : 'open'}.`}
+        onPress={() => setOpen((was) => !was)}
+        style={({ pressed }) => ({ padding: 13, opacity: pressed ? 0.7 : 1 })}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={[Type.cardTitle, { color: palette.ink }]} numberOfLines={open ? undefined : 1}>
+              {note.title}
+            </Text>
+            <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
+              {when} · {length}
+              {note.actions.length > 0
+                ? ` · ${note.actions.length} to do`
+                : ''}
+            </Text>
+          </View>
+          <Icon name={open ? 'down' : 'chevron'} size={13} color={palette.muted} />
+        </View>
+      </Pressable>
+
+      {open ? (
+        <View style={{ paddingHorizontal: 13, paddingBottom: 13, gap: 10, borderTopWidth: 1, borderTopColor: palette.line }}>
+          {note.summary ? (
+            <Text style={[Type.body, { color: palette.ink, marginTop: 10 }]}>{note.summary}</Text>
+          ) : null}
+
+          {note.actions.length > 0 ? (
+            <View style={{ gap: 4 }}>
+              <Text style={[Type.bodySm, { color: palette.muted }]}>To do</Text>
+              {note.actions.map((action, i) => (
+                <Text key={i} style={[Type.body, { color: palette.ink }]}>
+                  {`\u2022 ${action}`}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+
+          {note.points.length > 0 ? (
+            <View style={{ gap: 4 }}>
+              <Text style={[Type.bodySm, { color: palette.muted }]}>Points</Text>
+              {note.points.map((point, i) => (
+                <Text key={i} style={[Type.bodySm, { color: palette.inkSoft }]}>
+                  {`\u2022 ${point}`}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+
+          <View style={{ gap: 4 }}>
+            <Text style={[Type.bodySm, { color: palette.muted }]}>What you said</Text>
+            <Text selectable style={[Type.bodySm, { color: palette.inkSoft }]}>
+              {note.transcript}
+            </Text>
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Delete the note ${note.title}`}
+            onPress={onForget}
+            hitSlop={6}
+            style={({ pressed }) => ({ paddingVertical: 6, opacity: pressed ? 0.5 : 1 })}
+          >
+            <Text style={[Type.bodySm, { color: palette.alert }]}>Delete note</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </Card>
   );
 }
 

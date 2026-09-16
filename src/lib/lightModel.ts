@@ -889,3 +889,57 @@ export function asToolResults(results: { name: string; result: unknown }[]): unk
     parts: results.map((r) => ({ functionResponse: { name: r.name, response: r.result } })),
   };
 }
+
+/* ---------------------------------------------------------------- notes */
+
+export type NoteShape = { title: string; summary: string; points: string[]; actions: string[] };
+
+/**
+ * Turns a spoken note into something worth reading back.
+ *
+ * Speech is not prose: it repeats itself, doubles back, trails off and says
+ * "um, anyway" in the middle of the point. What someone wants later is the
+ * point, the reasoning, and anything they committed to — so that is what is
+ * asked for, and the transcript is kept alongside it in case the summary got
+ * something wrong.
+ *
+ * Returns null rather than a guess when the model does not answer. The caller
+ * saves the transcript either way, so a failed summary never loses the note.
+ */
+export async function lightNotes(transcript: string): Promise<NoteShape | null> {
+  const text = transcript.trim();
+  if (!text) return null;
+
+  const raw = await complete(
+    `You turn someone's spoken note into a clean written note. They were talking, not writing, so ignore filler, false starts and repetition, but keep every real idea, name, number, date and decision.
+
+Return JSON with exactly these keys:
+- "title": 2 to 6 words naming what the note is about, like a file name a person would choose. No quotes, no trailing punctuation.
+- "summary": 1 to 3 sentences on what this is about and what was concluded.
+- "points": an array of the distinct ideas or facts, each one short sentence, in the order they came up. Up to 12.
+- "actions": an array of things someone said they or another person need to do, each starting with a verb, including who and when if stated. Empty array if none.
+
+Never invent anything that was not said.`,
+    [{ role: 'user', content: text.slice(0, 24_000) }],
+    true,
+    false,
+    false
+  );
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, '')) as Partial<NoteShape>;
+    const list = (v: unknown) =>
+      Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean).slice(0, 12) : [];
+    const title = String(parsed.title ?? '').trim().slice(0, 60);
+    if (!title) return null;
+    return {
+      title,
+      summary: String(parsed.summary ?? '').trim().slice(0, 600),
+      points: list(parsed.points),
+      actions: list(parsed.actions),
+    };
+  } catch {
+    return null;
+  }
+}

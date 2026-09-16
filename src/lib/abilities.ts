@@ -39,6 +39,7 @@ import { capabilities } from './capabilities';
 import { loadFacts, recall,
   remember,
 } from './memory';
+import { loadNotes, searchNotes } from './notes';
 import { MODES } from './modes';
 import * as google from './google';
 import { isGoogleConnected } from './googleAuth';
@@ -1929,6 +1930,68 @@ const CALL: Ability = {
   },
 };
 
+/* ---------------------------------------------------------------- notes */
+
+/**
+ * Finding what was said in a voice note.
+ *
+ * Notes are too long to live in every prompt the way facts do, so they are
+ * searched when something asks about them. The spoken line is the best match's
+ * title and summary; the detail carries the full note — points, actions and
+ * transcript — because "what were the action items" and "what exactly did I say
+ * about the budget" can only be answered from the whole thing.
+ */
+const NOTES_SEARCH: Ability = {
+  id: 'notes.search',
+  name: 'Notes',
+  what: 'Finds what they said in their voice notes and answers from it.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  reads: true,
+  args: {
+    about: { type: 'string', what: 'what they want to find, in their own words', required: true },
+  },
+  examples: [
+    "what did I say about Jason's demo",
+    'find my note about the budget',
+    'what were the action items in my last note',
+    'read me my latest note',
+  ],
+  run: async (args) => {
+    const all = await loadNotes(CURRENT_UID);
+    if (all.length === 0) {
+      return { ok: true, spoken: 'You have no notes yet. Say "listen to this" to start one.' };
+    }
+
+    const about = (args.about || '').trim();
+    // "My last note" names a position, not a subject — searching its words
+    // would match whichever note happened to use the word "last".
+    const newest = /\b(last|latest|most recent|newest|previous)\b/i.test(about);
+    const found = newest ? [all[0]] : searchNotes(all, about);
+    if (found.length === 0) return { ok: true, spoken: `Nothing in your notes about ${about}.` };
+
+    const top = found[0];
+    return {
+      ok: true,
+      spoken: top.summary ? `${top.title}. ${top.summary}` : top.title,
+      detail: found
+        .map((n) =>
+          [
+            `NOTE "${n.title}" — ${new Date(n.createdAt).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}`,
+            n.summary && `Summary: ${n.summary}`,
+            n.points.length > 0 && `Points: ${n.points.join(' | ')}`,
+            n.actions.length > 0 && `To do: ${n.actions.join(' | ')}`,
+            `Transcript: ${n.transcript.slice(0, 1800)}`,
+          ]
+            .filter(Boolean)
+            .join('\n')
+        )
+        .join('\n\n'),
+    };
+  },
+};
+
 /* ------------------------------------------------------------- the mac */
 
 /**
@@ -2310,6 +2373,7 @@ const SET_MODE: Ability = {
 };
 
 export const ABILITIES: Ability[] = [
+  NOTES_SEARCH,
   MAC_TASK,
   RIDE,
   DELIVERY,

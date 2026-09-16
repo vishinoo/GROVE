@@ -167,6 +167,30 @@ due sparks when Grove is next opened.
   and edited on the Sparks screen rather than in Settings — a spark is a
   standing instruction and a fact is standing context.
 
+## Voice notes
+
+"Listen to this" starts a note: Grove stops replying and listens at length
+until a press, or "that's it" / "stop listening" held as the last thing said.
+The transcript is written up by the model into a title, summary, points and
+actions, and stored on the phone in `src/lib/notes.ts`. `notes.search` finds
+them again.
+
+Three things are deliberate:
+
+- **Starting is decided on the phone, not by the model.** People talk the
+  instant they have said "listen to this"; a model round trip first loses the
+  opening sentence, which is usually the one saying what the note is about.
+- **iOS ends recognition sessions on its own schedule**, so a note is a series
+  of sessions. Results within a session are cumulative and replace the buffer;
+  when a session ends the buffer is kept and a new one starts. A result much
+  shorter than the buffer is treated as a new session rather than a revision.
+- **The transcript is saved even when the write-up fails.** A summary can be
+  made again; a recording cannot.
+
+Notes are not memory. Facts are one sentence and go into every prompt; notes are
+long and are searched when asked about. A memory server was considered and not
+used, because it would bring back the backend Grove was made standalone to shed.
+
 ## Money
 
 No ability spends any, and rides and takeaways do not change that — they stop at

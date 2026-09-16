@@ -381,6 +381,27 @@ section('The model can never confirm on your behalf');
   }
 }
 
+/* Voice notes start and stop on the right words, and only those. */
+section('Voice notes start and stop on purpose');
+{
+  const notes = require(path.join(OUT, 'lib/notes.js'));
+  for (const said of ['listen to this', 'Buddy, listen to this', 'take a note', 'start a memo', 'write this down']) {
+    check(notes.isStartingNote(said), `"${said}" starts a note`);
+  }
+  // A note that starts by accident records whatever comes next, which is the
+  // expensive direction to be wrong in.
+  for (const said of ['I need to listen to this podcast later', 'can you listen to this song and tell me what it is', 'take notes on the lecture tomorrow']) {
+    check(!notes.isStartingNote(said), `"${said}" does not start a note`);
+  }
+  for (const said of ["okay that's it", 'stop listening', 'call Maya. end note']) {
+    check(notes.endsNote(said).ended, `"${said}" ends a note`);
+  }
+  // Ending early loses the rest of what someone was saying.
+  for (const said of ['and then the report is done', "that's it, the whole plan hinges on Friday", 'we are done for today']) {
+    check(!notes.endsNote(said).ended, `"${said}" does not end a note`);
+  }
+}
+
 /* 11. Spoken output is spoken, not printed. */
 section('Nothing speaks markdown, JSON or a URL');
 const source = fs.readFileSync(path.join(ROOT, 'src/lib/abilities.ts'), 'utf8');

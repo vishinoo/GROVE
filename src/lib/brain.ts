@@ -117,6 +117,18 @@ function historyFor(history: Turn[]): ToolHistory {
   }));
 }
 
+/**
+ * Each result said once.
+ *
+ * The model sometimes calls the same tool twice in one turn — searching notes,
+ * finding nothing, searching again with different words — and when it then
+ * gives up, reading back every result said "you have no notes yet" twice in a
+ * row. Same sentence, same turn, once is enough.
+ */
+function unique(line: string, index: number, all: string[]): boolean {
+  return all.indexOf(line) === index;
+}
+
 /** Why the model came back with nothing, said as a person would say it. */
 function troubleLine(context: GroveContext): string {
   switch (lastModelTrouble()) {
@@ -170,7 +182,7 @@ export async function askWithTools(
     if (turn.kind === 'nothing') {
       // Anything that did run is still worth saying — the weather came back
       // even if the follow-up call to the model did not.
-      const already = ran.filter((r) => r.ok).map((r) => r.spoken).join(' ');
+      const already = ran.filter((r) => r.ok).map((r) => r.spoken).filter(unique).join(' ');
       return { text: already || troubleLine(context), args: {}, fact, ran };
     }
 
@@ -199,7 +211,7 @@ export async function askWithTools(
       // "what's the weather and text Sam I'm late" answers the weather and then
       // asks about the text.
       if (!ability.reads) {
-        const said = ran.filter((r) => r.ok).map((r) => r.spoken).join(' ');
+        const said = ran.filter((r) => r.ok).map((r) => r.spoken).filter(unique).join(' ');
         return {
           text: said,
           ability,
@@ -220,6 +232,6 @@ export async function askWithTools(
 
   // Ran out of rounds with tools still being called. What did come back is
   // real, so say that rather than nothing.
-  const said = ran.filter((r) => r.ok).map((r) => r.spoken).join(' ');
+  const said = ran.filter((r) => r.ok).map((r) => r.spoken).filter(unique).join(' ');
   return { text: said || troubleLine(context), args: {}, fact, ran };
 }
