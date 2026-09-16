@@ -303,7 +303,7 @@ for (const ability of ALL) {
 
 /* 8b. Anything that hands off to a paid app must ask first. */
 section('Nothing reaches a payment without a yes');
-for (const id of ['ride.request', 'food.order', 'mail.send', 'mac.do']) {
+for (const id of ['ride.request', 'food.order', 'mail.send', 'mail.reply', 'calendar.remove', 'calendar.move', 'mac.do']) {
   const ability = byId.get(id);
   if (!ability) continue;
   // Run it with no confirmation and assert it stops. This is the property the
@@ -354,6 +354,31 @@ for (const [said, id, argName] of BACKFILLED) {
     `"${said}" fills ${id}.${argName}`,
     'nothing was recovered from the sentence, so the ability will ask'
   );
+}
+
+/* The model chooses what runs, so it must never be able to say yes for you. */
+section('The model can never confirm on your behalf');
+{
+  const tools = require(path.join(OUT, 'lib/tools.js'));
+  const declared = tools.declarationsFor(ALL);
+  // Not offered: a model that is never told the argument exists cannot fill it.
+  for (const d of declared) {
+    check(
+      !('confirmed' in d.parameters.properties),
+      `${d.name} does not expose "confirmed"`,
+      'the model could confirm its own irreversible action'
+    );
+  }
+  // And stripped if it appears anyway, because a model can invent arguments.
+  const forged = tools.argsFromCall({ to: 'Priya', body: 'hi', confirmed: 'yes' });
+  check(!('confirmed' in forged), 'a forged "confirmed" from the model is dropped');
+  // Names survive the round trip, or a call reaches the wrong ability.
+  for (const a of ALL) {
+    check(
+      tools.abilityIdFor(tools.toolNameFor(a.id)) === a.id,
+      `${a.id} survives the tool-name round trip`
+    );
+  }
 }
 
 /* 11. Spoken output is spoken, not printed. */

@@ -523,7 +523,17 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     const entries = await transcript.record(account, {
       said: text,
       replied: reply.text,
-      tool: reply.ability ? { name: reply.ability.name, state: 'running' } : undefined,
+      // A pending ability is still to run; reads that already ran inside the
+      // model's turn are finished, and the card says which way they went.
+      tool: reply.ability
+        ? { name: reply.ability.name, state: 'running' }
+        : reply.ran && reply.ran.length > 0
+          ? {
+              name: reply.ran.map((r) => r.ability.name).join(' + '),
+              state: reply.ran.every((r) => r.ok) ? 'done' : 'failed',
+              detail: reply.ran.map((r) => r.spoken).join('\n'),
+            }
+          : undefined,
     });
     if (!mine()) return;
     setActivity(entries);
@@ -598,7 +608,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       if (!mounted.current) return;
       setCaption(outcome.spoken);
       await whenQuiet();
-      if (mine()) utter(`${outcome.spoken}. Press once to send, twice to cancel.`);
+      // "Send" was right for mail and wrong for everything added since —
+      // deleting an event, moving one, ordering food. The instruction has to
+      // match the thing being decided, or the press means something else.
+      if (mine()) utter(`${outcome.spoken}. Press once to go ahead, twice to cancel.`);
       return;
     }
 

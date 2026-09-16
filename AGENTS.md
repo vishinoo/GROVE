@@ -116,18 +116,31 @@ due sparks when Grove is next opened.
 
 ## Where the rules live
 
-- `src/lib/grove.ts` — two gates, and the difference between them is the whole
-  safety story. `detectActIntent` decides whether a sentence causes something to
-  happen; it refuses every question, is deliberately keyword-based, and is
-  biased toward "no". A false negative costs a sentence; a false positive sends
-  an email. `detectLookupIntent` is the narrower second gate: it admits
-  questions that name something lookable, and abilities marked `reads` are the
-  only ones it can ever run. It exists because refusing every question meant
-  "what's on my calendar" was answered from the model's own head, which produced
-  "nothing on" for a full calendar — a confident, specific lie, which is worse
-  than any amount of hedging. **Never delegate either of these to a model.**
-  When adding an ability, leave `reads` unset unless running it truly only
-  reads: the default is the safe direction to be wrong in.
+- `src/lib/brain.ts` and `src/lib/tools.ts` — how an ordinary turn works. The
+  model is given every ability as a typed function and chooses what to call,
+  several at once if the sentence asks for several things. **The model proposes;
+  code decides what happens.** Abilities marked `reads` run inside the loop and
+  the model answers from what they returned. Anything else is handed back to
+  the turn unrun, and anything irreversible returns `needsConfirming` and stops
+  short until the person presses.
+
+  This replaced a keyword gate (`detectActIntent` / `detectLookupIntent`), a
+  parser for `ABILITY:` markers in the model's prose, and a growing set of
+  regexes recovering arguments the model had dropped. Each fix covered one
+  phrasing; the inconsistency was the design, not a bug in it. The rule that
+  gate existed for — *a misheard sentence must never send, book, buy or delete
+  anything* — is now enforced by the confirmation in code, and the harness
+  proves the model cannot supply a confirmation itself: `confirmed` is never
+  declared to it and is stripped if it appears anyway.
+
+  When adding an ability: leave `reads` unset unless running it truly only
+  reads, and give anything irreversible a `needsConfirming` branch. Put the full
+  data in `detail`. `spoken` is shortened for an ear; the model answers from
+  `detail`, and handing it the shortened line is how "what's my first thing
+  tomorrow" was answered from two events out of four.
+- `src/lib/grove.ts` — standing jobs only now: schedules and phrase triggers,
+  which save a spark rather than doing something this turn. The keyword gates
+  still live here for that path and for the harness.
 - `src/lib/sparks.ts` — `parseSchedule` decides whether something keeps
   happening. Same rule, same reason: a false positive here wakes you at seven
   every morning for something you asked once. Its clock parser is written for

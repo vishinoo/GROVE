@@ -250,6 +250,23 @@ function gistOf(text: string, max = 220): string {
   return (stop > 60 ? cut.slice(0, stop + 1) : cut).trim();
 }
 
+/**
+ * The messages as the model's working copy: who, when, what, and the gist.
+ *
+ * Spoken replies are shaped for an ear, so they drop dates and bodies. The model
+ * answers follow-ups — "what did Priya actually say", "when did that arrive" —
+ * and can only do that from what it was given.
+ */
+function messageLines(messages: { from?: string; subject?: string; date?: string; snippet?: string; body?: string }[]): string {
+  return messages
+    .slice(0, 8)
+    .map((m) => {
+      const gist = gistOf(m.body || m.snippet || '', 200);
+      return `From ${saySender(m.from ?? '')} — "${readable(m.subject ?? '')}"${m.date ? ` — ${m.date}` : ''}${gist ? ` — ${gist}` : ''}`;
+    })
+    .join('\n');
+}
+
 /** "Priya Sharma <p@x.com>" is not how you say a name out loud. */
 function saySender(from: string): string {
   const named = /^\s*"?([^"<]+?)"?\s*</.exec(from);
@@ -414,7 +431,7 @@ const MAIL_READ: Ability = {
       return {
         ok: true,
         spoken: what ? `${who}, ${what}. ${gist}`.trim() : `${who} wrote. ${gist}`.trim(),
-        detail: pick.subject,
+        detail: messageLines([pick]),
       };
     }
 
@@ -430,7 +447,7 @@ const MAIL_READ: Ability = {
       if (gist && !subject.toLowerCase().includes(gist.slice(0, 24).toLowerCase())) {
         line += ` ${gist}`;
       }
-      return { ok: true, spoken: line, detail: first.subject };
+      return { ok: true, spoken: line, detail: messageLines([first]) };
     }
 
     // Subjects, not a headcount.
@@ -465,7 +482,7 @@ const MAIL_READ: Ability = {
     return {
       ok: true,
       spoken: `${body} Want me to read one?`,
-      detail: messages.map((m) => `${saySender(m.from ?? '')} — ${m.subject}`).join('\n'),
+      detail: messageLines(messages),
     };
   },
 };
@@ -567,7 +584,11 @@ async function readGoogleCalendar(days: number): Promise<Dated[] | null> {
       start: new Date(e.start),
       source: 'google' as const,
     }))
-    .filter((e) => !Number.isNaN(e.start.getTime()));
+    .filter((e) => !Number.isNaN(e.start.getTime()))
+    // Sorted here rather than trusted. "My first thing" is only as right as the
+    // order of this list, and an order that depends on how a request happened
+    // to be phrased upstream is not an order to build an answer on.
+    .sort((a, b) => a.start.getTime() - b.start.getTime());
 }
 
 /**
@@ -796,6 +817,21 @@ function saidCount(n: number): string {
   return SPOKEN_NUMBER[n] ?? String(n);
 }
 
+/**
+ * Every event, as the model's working copy.
+ *
+ * The spoken line is cut to two events because that is what an ear can hold.
+ * The model was being handed that cut line as the whole answer, so asked for
+ * the first thing tomorrow it picked from two entries it happened to be shown
+ * and said the school review — when the gym was at seven. Speech is shortened
+ * for people; the model gets everything.
+ */
+function eventLines(events: { title: string; start: Date }[]): string {
+  return events
+    .map((e) => `${e.title} — ${e.start.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })} at ${clockOnly(e.start)}`)
+    .join('\n');
+}
+
 /** Two or three events and a count — a read-out list is unusable past that. */
 /** Just the clock, for events already placed on a day. */
 function clockOnly(date: Date): string {
@@ -953,6 +989,7 @@ const MAIL_REPLY: Ability = {
     to: { type: 'string', what: 'who the message was from' },
     about: { type: 'string', what: 'what the message was about' },
     body: { type: 'string', what: 'what the reply says', required: true },
+    confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
   },
   examples: [
     'reply to Priya saying that works for me',
@@ -985,6 +1022,19 @@ const MAIL_REPLY: Ability = {
     }
 
     const target = found[0];
+
+    // A reply is sent mail, and sent mail is not taken back. mail.send always
+    // asked; this did not, which was survivable while a keyword gate stood in
+    // front of it and is not now that the model chooses what runs.
+    if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
+      return {
+        ok: false,
+        needsConfirming: true,
+        spoken: `Replying to ${saySender(target.from)}: ${body.slice(0, 120)}`,
+        detail: target.subject,
+      };
+    }
+
     const sent = await google.replyTo(target, body);
     return sent
       ? { ok: true, spoken: `Replied to ${saySender(target.from)}.`, detail: target.subject }
@@ -1064,7 +1114,10 @@ const CALENDAR_REMOVE: Ability = {
   where: 'device',
   wired: true,
   needs: ['calendar-permission'],
-  args: { which: { type: 'string', what: 'which event', required: true } },
+  args: {
+    which: { type: 'string', what: 'which event', required: true },
+    confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
+  },
   examples: [
     'cancel my dentist appointment',
     'delete the gym event tomorrow',
@@ -1075,6 +1128,17 @@ const CALENDAR_REMOVE: Ability = {
     if (!which) return { ok: false, spoken: 'Which event?' };
     const picked = await oneEvent(which);
     if ('problem' in picked) return { ok: false, spoken: picked.problem };
+
+    // Named in the question so the press is a decision about THIS event. A
+    // deleted appointment does not come back, and the wrong match is exactly
+    // the mistake a confirmation exists to catch.
+    if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
+      return {
+        ok: false,
+        needsConfirming: true,
+        spoken: `Removing ${picked.event.title}, ${sayWhen(picked.event.start)}`,
+      };
+    }
 
     const gone =
       picked.event.source === 'google'
@@ -1137,23 +1201,23 @@ const CALENDAR_FIND: Ability = {
       return {
         ok: true,
         spoken: sayOne(found[found.length - 1], position),
-        detail: `${found.length} matching "${which}"`,
+        detail: eventLines(found),
       };
     }
     if (position === 'first') {
-      return { ok: true, spoken: sayOne(found[0], 'first'), detail: `${found.length} matching` };
+      return { ok: true, spoken: sayOne(found[0], 'first'), detail: eventLines(found) };
     }
     if (position === 'next') {
       const now = Date.now();
       const upcoming = found.find((e) => e.start.getTime() > now) ?? found[0];
-      return { ok: true, spoken: sayOne(upcoming, 'next'), detail: `${found.length} matching` };
+      return { ok: true, spoken: sayOne(upcoming, 'next'), detail: eventLines(found) };
     }
 
     const [first, second] = found;
     let line = `${first.title} ${sayWhen(first.start)}`;
     if (second) line += `, then ${second.title} ${sayWhen(second.start)}`;
     if (found.length > 2) line += `, and ${saidCount(found.length - 2)} more`;
-    return { ok: true, spoken: `${line}.`, detail: `${found.length} matching "${which}"` };
+    return { ok: true, spoken: `${line}.`, detail: eventLines(found) };
   },
 };
 
@@ -1238,16 +1302,16 @@ const CALENDAR_READ: Ability = {
       // A named position gets one event, not a list. "What is my first class"
       // was answered with the whole day and a count, which is the question
       // restated rather than answered.
-      if (position === 'first') return { ok: true, spoken: sayOne(events[0], 'first') };
+      if (position === 'first') return { ok: true, spoken: sayOne(events[0], 'first'), detail: eventLines(events) };
       if (position === 'last') {
-        return { ok: true, spoken: sayOne(events[events.length - 1], 'last') };
+        return { ok: true, spoken: sayOne(events[events.length - 1], 'last'), detail: eventLines(events) };
       }
       if (position === 'next') {
         const now = Date.now();
         const upcoming = events.find((e) => e.start.getTime() > now) ?? events[0];
-        return { ok: true, spoken: sayOne(upcoming, 'next') };
+        return { ok: true, spoken: sayOne(upcoming, 'next'), detail: eventLines(events) };
       }
-      return { ok: true, spoken: sayEvents(events), detail: `${events.length} events` };
+      return { ok: true, spoken: sayEvents(events), detail: eventLines(events) };
     }
 
     // Empty in the window asked about is rarely the answer wanted: look further
@@ -1255,7 +1319,7 @@ const CALENDAR_READ: Ability = {
     const ahead = (await readGoogleCalendar(14)) ?? [];
     if (ahead.length > 0) {
       const when = days > 1 ? 'this week' : 'left today';
-      return { ok: true, spoken: `Nothing ${when}. ${sayOne(ahead[0], 'next')}` };
+      return { ok: true, spoken: `Nothing ${when}. ${sayOne(ahead[0], 'next')}`, detail: eventLines(ahead) };
     }
     return { ok: true, spoken: days > 1 ? 'Nothing this week.' : 'Nothing on.' };
   },
@@ -1271,6 +1335,7 @@ const CALENDAR_MOVE: Ability = {
   args: {
     event: { type: 'string', what: 'which event', required: true },
     to: { type: 'string', what: 'the new time', required: true },
+    confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
   },
   examples: ['move my two o’clock to Thursday', 'push the dentist back an hour'],
   run: async (args) => {
@@ -1285,6 +1350,16 @@ const CALENDAR_MOVE: Ability = {
     // nothing and reported the event missing — one turn after reading it out.
     const picked = await oneEvent(which);
     if ('problem' in picked) return { ok: false, spoken: picked.problem };
+
+    // Both halves are spoken — which event and to when — because either one
+    // misheard moves a real appointment somewhere nobody chose.
+    if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
+      return {
+        ok: false,
+        needsConfirming: true,
+        spoken: `Moving ${picked.event.title} to ${sayWhen(when)}`,
+      };
+    }
 
     const moved =
       picked.event.source === 'google'

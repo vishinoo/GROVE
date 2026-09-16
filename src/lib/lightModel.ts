@@ -500,7 +500,7 @@ export function needsDepth(text: string): boolean {
  * an app about AI agents will describe AI agents unless told, in as many
  * words, not to.
  */
-const HOUSE_RULES = `How to talk:
+export const HOUSE_RULES = `How to talk:
 - You are SPOKEN ALOUD through someone's glasses. No markdown, no lists, no headings, no URLs, no emoji, no bullet points, no parentheses.
 - Talk like a person texting a friend, not like an assistant. Contractions. Plain words. Start with the answer.
 - NEVER open with a pleasantry, an acknowledgement, or a restatement of what they asked. Not "Sure!", not "Of course", not "Great question", not "I can help with that", not "Let me check", not "Absolutely". Just say the thing.
@@ -762,4 +762,130 @@ export async function lightSummarise(
   );
 
   return text?.replace(/^["']|["']$/g, '').trim() || null;
+}
+
+/* ------------------------------------------------------------ tool calls */
+
+/**
+ * One exchange with the model when it can call Grove's abilities directly.
+ *
+ * The older path asked for prose with `ABILITY:` markers on the end and parsed
+ * them back out. That worked until it did not: markers went missing, arguments
+ * were left empty, and only one ability could ever be named because there was
+ * only one line to name it on. This asks the provider for what it actually
+ * supports — typed calls, several at a time — and returns them without
+ * interpretation.
+ *
+ * Deliberately does no executing. The caller decides what may run, which is
+ * where the confirmation lives, and a model that could run things from in here
+ * would be a model that had been handed the decision.
+ */
+export type ToolCall = { name: string; args: Record<string, unknown> };
+
+export type ToolTurn =
+  | { kind: 'calls'; calls: ToolCall[]; raw: unknown }
+  | { kind: 'text'; text: string; raw: unknown }
+  | { kind: 'nothing' };
+
+/**
+ * A turn in the provider's own shape.
+ *
+ * Kept opaque on purpose: the caller passes it back unchanged on the next
+ * round, so a tool result lands in the same conversation the call came from.
+ * Nothing outside this file should read it.
+ */
+export type ToolHistory = unknown[];
+
+const TOOL_TIMEOUT_MS = 20_000;
+
+export async function toolTurn(
+  system: string,
+  contents: ToolHistory,
+  declarations: unknown[]
+): Promise<ToolTurn> {
+  const key = await loadOwnKey();
+  if (!key) {
+    modelTrouble = 'no-key';
+    return { kind: 'nothing' };
+  }
+
+  try {
+    const response = await withTimeout(TOOL_TIMEOUT_MS, (signal) =>
+      fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+          DIRECT_MODEL
+        )}:generateContent`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+          signal,
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: system }] },
+            contents,
+            ...(declarations.length > 0
+              ? { tools: [{ functionDeclarations: declarations }] }
+              : {}),
+            // Low, because this turn is a routing decision and an answer read
+            // off real data. Neither wants invention.
+            generationConfig: { temperature: 0.3, maxOutputTokens: 700 },
+          }),
+        }
+      )
+    );
+
+    if (!response.ok) {
+      if ((response.status === 429 || response.status >= 500)) {
+        modelTrouble = response.status === 429 ? 'rate-limited' : 'refused';
+      } else {
+        modelTrouble = response.status === 404 ? 'no-model' : 'refused';
+      }
+      return { kind: 'nothing' };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: { content?: { parts?: { text?: string; functionCall?: ToolCall }[] } }[];
+    };
+    const content = data.candidates?.[0]?.content;
+    const parts = content?.parts ?? [];
+
+    const calls = parts
+      .map((p) => p.functionCall)
+      .filter((c): c is ToolCall => Boolean(c?.name));
+    if (calls.length > 0) {
+      modelTrouble = 'none';
+      return { kind: 'calls', calls, raw: content };
+    }
+
+    const text = parts.map((p) => p.text ?? '').join('').trim();
+    if (text) {
+      modelTrouble = 'none';
+      return { kind: 'text', text, raw: content };
+    }
+
+    modelTrouble = 'refused';
+    return { kind: 'nothing' };
+  } catch (problem) {
+    modelTrouble =
+      problem instanceof Error && problem.name === 'AbortError' ? 'timeout' : 'offline';
+    return { kind: 'nothing' };
+  }
+}
+
+/** A user's sentence, in the shape a tool conversation expects. */
+export function asUserTurn(text: string): unknown {
+  return { role: 'user', parts: [{ text }] };
+}
+
+/**
+ * Everything the tools returned, as one turn.
+ *
+ * All of it together, not a turn each: the model issued its calls in one breath
+ * and expects the answers the same way. Split across turns, a two-part question
+ * gets answered as though only the first part had come back.
+ */
+export function asToolResults(results: { name: string; result: unknown }[]): unknown {
+  return {
+    role: 'user',
+    parts: results.map((r) => ({ functionResponse: { name: r.name, response: r.result } })),
+  };
 }

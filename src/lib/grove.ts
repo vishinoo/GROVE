@@ -26,6 +26,7 @@
  */
 
 import { ABILITIES, abilityById, isSchedulable, usableAbilities, type Ability } from './abilities';
+import { askWithTools, type RanTool } from './brain';
 import { abilitiesFor, modeById, type Mode } from './modes';
 import { asPromptBlock, factFrom, type Extracted, type Fact } from './memory';
 import {
@@ -88,6 +89,13 @@ export type GroveReply = {
    * second holding line or the model guessing at data it has not seen.
    */
   holdForTool?: boolean;
+  /**
+   * Reads that already ran while the model was working out its answer.
+   *
+   * Recorded so the Talk screen can show what was looked up — the answer is
+   * spoken from these, and a card that says nothing ran would be untrue.
+   */
+  ran?: RanTool[];
 };
 
 export function newTurn(role: Turn['role'], text: string, extra: Partial<Turn> = {}): Turn {
@@ -603,6 +611,20 @@ export async function askGrove(
   context: GroveContext
 ): Promise<GroveReply> {
   const { persona, facts } = context;
+
+  // Ordinary turns go to the model with tools. Only standing jobs stay here.
+  //
+  // A schedule or a phrase trigger saves a spark rather than doing something
+  // now, and that path has its own gate and its own reply. Everything else —
+  // which is nearly everything — is a question or a request the model can
+  // route better than any keyword list could, and did, in testing.
+  //
+  // Detected without the action gate on purpose: "every morning at seven brief
+  // me" puts no verb first, so gating detection on it sent standing jobs to a
+  // tool loop that has no way to save one.
+  if (!parseSchedule(userText) && !phraseTrigger(userText)) {
+    return askWithTools(history, userText, context);
+  }
 
   // Tier 0. Whether anything is allowed to run, and whether it recurs.
   const acting = detectActIntent(userText);
