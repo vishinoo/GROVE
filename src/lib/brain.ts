@@ -67,6 +67,13 @@ const TOOL_RULES = `How to use your tools:
 - To recap mail and then send that recap to someone, first get the recap, then send its text with the send-email tool.
 - For sending, booking, ordering, calling or messaging, just call the tool. The app asks the person to confirm before anything happens, so do not ask them yourself.
 - For current events, prices, news or anything on the web, use the briefing tool.
+- To go somewhere — "take me", "navigate", "directions to" — use navigate. Use the ride tool only when they say Uber, a ride, a taxi or a cab. For "home" pass "home"; the app knows the address.
+- For a place mentioned in an email, note or event, look that up first and pass the actual street address.
+- For a text, pass the person's name as they said it; the app finds the number.
+- For what to wear or bring (a jacket, an umbrella, sunscreen), check the weather and today's calendar together, then answer yes or no with the reason — for example it gets cold before their evening plans.
+- For music "like" what they played before, check recently played first, then play something in that vein — the same artist or a similar one — rather than the exact song again. Never play an empty request in place of that.
+- A reminder about something you looked up says what it is about, not where it came from: "Demo with Jason, 10250 102 Ave, Friday 2pm — bring pricing slides", never "Jason's email".
+- If an email, note or event you just read has a clear deadline or to-do, you may offer once to set a reminder. Never set one they did not ask for.
 
 How to answer once tools return:
 - Answer from what came back and nothing else. If it came back empty, say so plainly.
@@ -114,7 +121,9 @@ function systemFor(context: GroveContext, available: Ability[]): string {
 
 /** The conversation so far, in the shape a tool conversation expects. */
 function historyFor(history: Turn[]): ToolHistory {
-  return history.slice(-10).map((turn) => ({
+  // An empty turn is not a turn. The model reads one as a request that was
+  // never answered, and answers it again.
+  return history.filter((turn) => turn.text.trim()).slice(-10).map((turn) => ({
     role: turn.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: turn.text.slice(0, 2000) }],
   }));
@@ -130,6 +139,28 @@ function historyFor(history: Turn[]): ToolHistory {
  */
 function unique(line: string, index: number, all: string[]): boolean {
   return all.indexOf(line) === index;
+}
+
+/**
+ * Whether a lookup only happened to fill in the action that follows it.
+ *
+ * "Navigate to the place from Jason's email" reads the email to find the
+ * address, and reading that whole email aloud before opening Maps is noise —
+ * the person asked to go somewhere, not to hear their mail. When a value the
+ * action is about to use came out of the lookup, the lookup was a step, not an
+ * answer. "What's the weather and text Sam I'm late" still says the weather,
+ * because nothing in the text came from it.
+ */
+function fedInto(read: RanTool, args: Record<string, string>): boolean {
+  const found = `${read.spoken}\n${read.detail ?? ''}`.toLowerCase();
+  const values = Object.values(args).map((value) => value.trim().toLowerCase());
+  if (values.some((v) => v.length >= 6 && found.includes(v))) return true;
+
+  // The other direction: a reminder that carries most of what the email said.
+  const spokenWords = [...new Set(read.spoken.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [])];
+  if (spokenWords.length < 4) return false;
+  const used = values.join(' ');
+  return spokenWords.filter((w) => used.includes(w)).length / spokenWords.length >= 0.6;
 }
 
 /** Why the model came back with nothing, said as a person would say it. */
@@ -214,7 +245,11 @@ export async function askWithTools(
       // "what's the weather and text Sam I'm late" answers the weather and then
       // asks about the text.
       if (!ability.reads) {
-        const said = ran.filter((r) => r.ok).map((r) => r.spoken).filter(unique).join(' ');
+        const said = ran
+          .filter((r) => r.ok && !fedInto(r, args))
+          .map((r) => r.spoken)
+          .filter(unique)
+          .join(' ');
         return {
           text: said,
           ability,

@@ -506,6 +506,11 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       const answered = await runAbility(waiting.ability, filled);
       running.current = false;
       if (!mine()) return;
+      history.current = [
+        ...history.current,
+        newTurn('user', text),
+        newTurn('assistant', answered.spoken),
+      ].slice(-24);
       setCaption(answered.spoken);
       rememberQuestion(waiting.ability, filled, answered);
       await whenQuiet();
@@ -614,6 +619,17 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     const outcome = await runAbility(ability, reply.args);
     running.current = false;
     if (!mine()) return;
+
+    // What happened goes into the conversation, not only onto the screen. The
+    // reply that handed this over is usually empty, so the model was left
+    // seeing a request with no answer after it — and took the next sentence as
+    // another go at the last one, saving "remember this" twice instead of
+    // setting the reminder it was asked for.
+    history.current = history.current.map((turn, i, all) =>
+      i === all.length - 1 && turn.role === 'assistant'
+        ? { ...turn, text: [turn.text, outcome.spoken].filter(Boolean).join(' ') }
+        : turn
+    );
 
     const record: TurnTool = {
       name: ability.name,
@@ -1129,6 +1145,9 @@ function shortFailure(text: string): string {
     setState('working');
     const outcome = await runAbility(waiting.ability, { ...waiting.args, confirmed: 'yes' });
     if (!mounted.current) return;
+    // Otherwise the conversation ends at "press once to go ahead", and "did
+    // that send?" is asked of a model that never heard the answer.
+    history.current = [...history.current, newTurn('assistant', outcome.spoken)].slice(-24);
     setCaption(outcome.spoken);
     await whenQuiet();
     utter(outcome.ok ? outcome.spoken : shortFailure(outcome.spoken));

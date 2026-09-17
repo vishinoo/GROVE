@@ -125,9 +125,15 @@ async function withTimeout<T>(
   const timer = setTimeout(() => controller.abort(), ms);
   try {
     return await run(controller.signal);
-  } finally {
+  } catch (error) {
     clearTimeout(timer);
+    throw error;
   }
+  // Not cleared on success. `fetch` resolves when the headers arrive, and the
+  // body is read afterwards — clearing the timer there left `response.json()`
+  // unbounded, so a connection that stalled mid-reply held a turn silent for
+  // ten minutes. Left armed, the same deadline covers the body too, and an
+  // abort after the body is read does nothing.
 }
 
 /**

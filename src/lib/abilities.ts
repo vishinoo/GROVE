@@ -40,6 +40,7 @@ import { loadFacts, recall,
   remember,
 } from './memory';
 import { loadNotes, searchNotes } from './notes';
+import { loadPlayed, playedLines, recordPlayed } from './listening';
 import { MODES } from './modes';
 import * as google from './google';
 import { isGoogleConnected } from './googleAuth';
@@ -1589,6 +1590,7 @@ const MUSIC: Ability = {
       // Queued, not playing. Held here so the announcement lands before the
       // song rather than across it.
       await remote.controlMusic('pause');
+      if (result.title) await recordPlayed(CURRENT_UID, result.title, result.artist);
       const artist = result.artist ? ` by ${result.artist}` : '';
       return {
         ok: true,
@@ -1624,6 +1626,41 @@ const MUSIC: Ability = {
 };
 
 /**
+ * "Play something like what I listened to yesterday."
+ *
+ * A read, so the model can look before it chooses: it gets the dated list, picks
+ * an artist or mood from it, and calls music.play with that. Only songs Grove
+ * put on are here — the spoken line says so when the list is empty, rather than
+ * pretending there was nothing played at all.
+ */
+const MUSIC_RECENT: Ability = {
+  id: 'music.recent',
+  name: 'Recently played',
+  what: 'Lists the songs Grove has played for them, with dates. Use before playing "something like" what they listened to before.',
+  where: 'device',
+  wired: capabilities().remote,
+  needs: ['music-permission'],
+  reads: true,
+  args: {},
+  examples: ['what did I listen to yesterday', 'play something like what I listened to yesterday'],
+  run: async () => {
+    const played = await loadPlayed(CURRENT_UID);
+    if (played.length === 0) {
+      return {
+        ok: true,
+        spoken: "I haven't played anything for you yet, so I've got nothing to go on. Name an artist or a mood.",
+      };
+    }
+    const latest = played[0];
+    return {
+      ok: true,
+      spoken: `Last thing I played was ${latest.title}${latest.artist ? ` by ${latest.artist}` : ''}.`,
+      detail: `Only songs Grove played, newest first:\n${playedLines(played.slice(0, 60))}`,
+    };
+  },
+};
+
+/**
  * Weather, and the first thing here that actually works end to end.
  *
  * Open-Meteo needs no key, no account and no server of ours, which makes it the
@@ -1638,7 +1675,7 @@ const MUSIC: Ability = {
 const WEATHER: Ability = {
   id: 'weather.now',
   name: 'Weather',
-  what: 'Says what it is doing outside, and whether to take a coat.',
+  what: 'Says what it is doing outside today. For whether to take a jacket, umbrella or sunscreen, also check today\'s calendar in the same turn, so the answer covers when they will be out.',
   where: 'server',
   wired: true,
   needs: [],
@@ -1724,13 +1761,14 @@ const WEATHER: Ability = {
 const DIRECTIONS: Ability = {
   id: 'maps.eta',
   name: 'Maps',
-  what: 'Says how long to somewhere, and when to leave.',
+  what: 'Says how long it takes to get somewhere. Only for "how long" and "how far" — to go somewhere, use navigate.',
   where: 'device',
   wired: capabilities().remote,
   needs: ['location-permission'],
   reads: true,
   args: {
-    to: { type: 'string', what: 'where to — use what you know of where they live or work', required: true },
+    to: { type: 'string', what: 'a street address or place name; "home" for their home', required: true },
+    home_address: { type: 'string', what: 'only when they have just told you their home address' },
     how: { type: 'string', what: '"walking" if they said so, otherwise driving' },
   },
   // These are the words people actually use to ask for a route. Without them
@@ -1740,16 +1778,21 @@ const DIRECTIONS: Ability = {
     'how long to get home',
     'when should I leave for the office',
     'how far is the station',
-    "let's go to the University of Alberta campus",
-    'take me to the airport',
-    'directions to the station',
-    'which way to campus',
-    'navigate to work',
-    'I want to go to the gym',
-    'how do I get to the mall',
+    'how long will it take to walk to the gym',
+    'how far away is the mall',
   ],
   run: async (args) => {
-    const to = (args.to || '').trim();
+    let to = (args.to || '').trim();
+    // "How long to get home" is a route to an address, not to the word "home".
+    const told = realAddress(args.home_address);
+    if (told) {
+      await remember(CURRENT_UID, { key: 'home-address', value: `My home address is ${told}`, source: 'told', subject: 'me' });
+    }
+    if (HOME.test(to) || (!to && told)) {
+      const address = told || (await homeAddress());
+      if (!address) return { ok: false, spoken: "What's your home address? I'll keep it for next time." };
+      to = address;
+    }
     if (!to) return { ok: false, spoken: 'Where to?' };
 
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -1777,6 +1820,109 @@ const DIRECTIONS: Ability = {
       spoken: `${mins} minutes${how} to ${result.name ?? to}.`,
       detail: `${km.toFixed(1)} km`,
     };
+  },
+};
+
+/**
+ * Where "home" actually is, as an address rather than a town.
+ *
+ * Kept apart from the `home` fact on purpose. That one is "I live in Edmonton",
+ * which is exactly right for the weather and useless for a route: Apple Maps
+ * given "Edmonton" drives you to the middle of the city.
+ */
+async function homeAddress(): Promise<string | null> {
+  try {
+    const facts = await loadFacts(CURRENT_UID);
+    const found = facts.find((f) => f.key === 'home-address' && f.subject === 'me');
+    if (!found) return null;
+    return found.value.replace(/^my home address is\s+/i, '').replace(/[.]+$/, '').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+const HOME = /^(?:my\s+)?(?:home|house|place|apartment|flat)$/i;
+
+/**
+ * An address someone actually told Grove, or nothing.
+ *
+ * The model fills `home_address` with "home" often enough to matter, and saving
+ * that would send every later trip home to a pin labelled Home somewhere in the
+ * world. A real address has a number or at least a few words in it.
+ */
+function realAddress(value: string | undefined): string {
+  const told = (value || '').trim();
+  if (!told || HOME.test(told)) return '';
+  return /\d/.test(told) || told.split(/\s+/).length >= 3 ? told : '';
+}
+
+/**
+ * "Take me home." Opens Apple Maps with the route started.
+ *
+ * Not a confirmation: opening Maps with the wrong destination is something you
+ * look at and close, and nothing has been sent, spent or booked. Driving
+ * directions are what "take me" means; a ride only happens when someone says
+ * Uber, which is a different tool that does ask first.
+ */
+const NAVIGATE: Ability = {
+  id: 'maps.go',
+  name: 'Navigate',
+  what: 'Opens Apple Maps with directions to somewhere, ready to go. For "take me", "navigate", "directions to".',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {
+    to: {
+      type: 'string',
+      what: 'a street address or place name. Use "home" for their home — never a town name in place of an address',
+      required: true,
+    },
+    // Listed before `how` so that when Grove asks for the address, the answer
+    // lands here and not in the travel mode.
+    home_address: { type: 'string', what: 'only when they have just told you their home address' },
+    how: { type: 'string', what: '"walking" or "transit" if they said so, otherwise driving' },
+  },
+  examples: [
+    'take me home',
+    'navigate to work',
+    'directions to the airport',
+    'take me to the place from that email',
+    'get me to West Edmonton Mall',
+  ],
+  run: async (args) => {
+    let to = (args.to || '').trim();
+    const told = realAddress(args.home_address);
+
+    if (told) {
+      await remember(CURRENT_UID, {
+        key: 'home-address',
+        value: `My home address is ${told}`,
+        source: 'told',
+        subject: 'me',
+      });
+    }
+
+    const wantsHome = HOME.test(to) || (!to && !!told);
+    if (wantsHome) {
+      const address = told || (await homeAddress());
+      if (!address) {
+        return { ok: false, spoken: "What's your home address? I'll keep it for next time." };
+      }
+      to = address;
+    }
+    if (!to) return { ok: false, spoken: 'Where to?' };
+
+    const flag = /walk|foot/i.test(args.how || '') ? 'w' : /transit|bus|train/i.test(args.how || '') ? 'r' : 'd';
+    const url = `maps://?daddr=${encodeURIComponent(to)}&dirflg=${flag}`;
+    const web = `https://maps.apple.com/?daddr=${encodeURIComponent(to)}&dirflg=${flag}`;
+    const opened = await Linking.openURL(url).then(
+      () => true,
+      () => Linking.openURL(web).then(() => true, () => false)
+    );
+
+    return opened
+      ? { ok: true, spoken: wantsHome ? 'Maps is taking you home.' : `Maps is open with directions to ${to}.` }
+      : { ok: false, spoken: 'I could not open Maps.' };
   },
 };
 
@@ -2109,7 +2255,7 @@ const MAC_TASK: Ability = {
 const RIDE: Ability = {
   id: 'ride.request',
   name: 'Ride',
-  what: 'Opens Uber with your destination already set. You confirm and pay there.',
+  what: 'Opens Uber with your destination already set. Only when they ask for an Uber, a ride or a cab. You confirm and pay there.',
   where: 'device',
   wired: true,
   needs: [],
@@ -2119,8 +2265,15 @@ const RIDE: Ability = {
   },
   examples: ['get me an uber to campus', 'order an uber home', 'book a ride to the airport'],
   run: async (args) => {
-    const to = (args.to || '').trim();
+    let to = (args.to || '').trim();
     if (!to) return { ok: false, spoken: 'Where to?' };
+    if (HOME.test(to)) {
+      const address = await homeAddress();
+      if (!address) {
+        return { ok: false, spoken: "I don't have your home address yet. Say take me home and I'll ask for it." };
+      }
+      to = address;
+    }
 
     if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
       return {
@@ -2319,11 +2472,27 @@ const MESSAGE: Ability = {
     if (!body) return { ok: false, spoken: 'Saying what?' };
 
     const to = (args.to || '').trim();
-    // A number can be dialled straight into the sheet; a name cannot, and iOS
-    // gives no way to resolve one, so the sheet opens with the body ready and
-    // the person picks the recipient.
+    // A number goes straight in. A name is looked up in Google Contacts, which
+    // is the one address book Grove can read — iOS keeps its own to itself.
+    // When the lookup cannot settle on one number the sheet still opens with
+    // the words ready, and says so, because naming a recipient that is not
+    // filled in is how someone sends "running late" to nobody.
     const digits = to.replace(/[^\d+]/g, '');
-    const target = digits.length >= 7 ? digits : '';
+    let target = digits.length >= 7 ? digits : '';
+    let named = '';
+    let unsure = '';
+    if (!target && to) {
+      const found = await google.findContact(to).catch(() => null);
+      const withPhone = (found ?? []).filter((c) => c.phone);
+      if (withPhone.length === 1) {
+        target = (withPhone[0].phone ?? '').replace(/[^\d+]/g, '');
+        named = withPhone[0].name;
+      } else if (withPhone.length > 1) {
+        unsure = `I found ${withPhone.length} people called ${to}, so pick which one`;
+      } else {
+        unsure = `I have no number for ${to}, so pick them`;
+      }
+    }
     const url = `sms:${target}${Platform.OS === 'ios' ? '&' : '?'}body=${encodeURIComponent(body)}`;
 
     const opened = await Linking.canOpenURL(url)
@@ -2334,9 +2503,11 @@ const MESSAGE: Ability = {
     // Said plainly, because the one thing worse than a tap is thinking it sent.
     return {
       ok: true,
-      spoken: to
-        ? `Written to ${to}. Tap send — iOS won't let me send it for you.`
-        : "It's ready in Messages. Pick who, and tap send.",
+      spoken: target
+        ? `Written to ${named || to}. Tap send — iOS won't let me send it for you.`
+        : unsure
+          ? `It's written. ${unsure}, then tap send.`
+          : "It's ready in Messages. Pick who, and tap send.",
     };
   },
 };
@@ -2404,6 +2575,7 @@ export const ABILITIES: Ability[] = [
   DAY,
   WEATHER,
   DIRECTIONS,
+  NAVIGATE,
   MAIL_READ,
   MAIL_SEND,
   BRIEF,
@@ -2411,6 +2583,7 @@ export const ABILITIES: Ability[] = [
   CALENDAR_MOVE,
   REMIND,
   MUSIC,
+  MUSIC_RECENT,
 ];
 
 /* ------------------------------------------------------------- lookups */

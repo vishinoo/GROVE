@@ -127,7 +127,7 @@ export const MODES: Mode[] = [
     // thing that pulls someone out of what they were doing.
     allow: [
       'mode.set', 'notes.search', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.find',
-      'calendar.add', 'weather.now', 'memory.recall', 'memory.add', 'music.play',
+      'calendar.add', 'weather.now', 'memory.recall', 'memory.add', 'music.play', 'music.recent',
       'mail.search', 'mail.summarise', 'contact.find',
     ],
     interrupt: 'never',
@@ -151,7 +151,7 @@ export const MODES: Mode[] = [
       'mode.set', 'notes.search', 'memory.recall', 'memory.add', 'calendar.find', 'music.play',
       'doc.find', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.add',
       'mail.search', 'contact.find',
-      'weather.now', 'maps.eta',
+      'weather.now', 'maps.eta', 'maps.go', 'music.recent',
     ],
     interrupt: 'never',
     // Study is the one mode where being asked something back is the point, so
@@ -172,7 +172,7 @@ export const MODES: Mode[] = [
     // Reading is fine in the evening; starting a thread is not. No sending, no
     // replying, no calling — those are the ones that turn a wind-down into work.
     allow: [
-      'mode.set', 'notes.search', 'music.play', 'weather.now', 'reminders.add', 'memory.recall',
+      'mode.set', 'notes.search', 'music.play', 'music.recent', 'weather.now', 'reminders.add', 'memory.recall',
       'memory.add', 'day.brief', 'calendar.read', 'gcal.read', 'calendar.find',
       'mail.search', ],
     interrupt: 'sparingly',
