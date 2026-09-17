@@ -62,7 +62,8 @@ const TOOL_RULES = `How to use your tools:
 - Fill in arguments from what they said and from what you know about them. Only ask a question when something you truly need is missing and cannot be reasonably inferred.
 - For calendar questions, pass what they are looking for and any day or position they named ("first", "last", "next", "tomorrow").
 - For email, write the search the way Gmail understands it when that helps: from:xbox, newer_than:7d, is:unread.
-- When sending an email, always write a short, natural subject line of your own — a few words saying what it is about, like "Running late" or "Slides for Thursday". Write the body as the person would, in first person, and do not sign it.
+- When sending an email or message, the body must be what they actually said. Tidy it into first person, but never add content they did not give you — no greetings, no check-ins, nothing you made up. If they did not say what it should say, do NOT call the tool; ask them what to say.
+- Always give an email a short, natural subject line of your own — a few words saying what it is about, like "Running late" or "Slides for Thursday". Do not sign the body.
 - To recap mail and then send that recap to someone, first get the recap, then send its text with the send-email tool.
 - For sending, booking, ordering, calling or messaging, just call the tool. The app asks the person to confirm before anything happens, so do not ask them yourself.
 - For current events, prices, news or anything on the web, use the briefing tool.
