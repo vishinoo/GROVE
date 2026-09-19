@@ -66,6 +66,10 @@ const TOOL_RULES = `How to use your tools:
 - Always give an email a short, natural subject line of your own — a few words saying what it is about, like "Running late" or "Slides for Thursday". Do not sign the body.
 - To recap mail and then send that recap to someone, first get the recap, then send its text with the send-email tool.
 - For sending, booking, ordering, calling or messaging, just call the tool. The app asks the person to confirm before anything happens, so do not ask them yourself.
+- To write something they will read — an assignment, a report, a reading list, a summary — use the document tool. Pass what they want in as much detail as they gave you.
+- If they point at work they already have ("the assignment on here", "that brief"), find and read that document first and pass its text as the source, so what you write answers their actual question.
+- Set research on a document when it needs facts from the world — companies, prices, news, anything you would otherwise be guessing at.
+- A document takes half a minute to write. Do not promise one and stop; call the tool.
 - For current events, prices, news or anything on the web, use the briefing tool.
 - To go somewhere — "take me", "navigate", "directions to" — use navigate. Use the ride tool only when they say Uber, a ride, a taxi or a cab. For "home" pass "home"; the app knows the address.
 - For a place mentioned in an email, note or event, look that up first and pass the actual street address.

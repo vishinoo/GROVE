@@ -56,13 +56,35 @@ export const SCOPES = [
   // address, and has to ask for something you obviously know.
   'https://www.googleapis.com/auth/contacts.readonly',
   'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/documents.readonly',
+  // Writing, not just reading: Grove drafts documents into your Drive. The
+  // read-only pair above stays, because `drive.file` only ever sees files
+  // Grove itself made and finding an existing document needs more than that.
+  'https://www.googleapis.com/auth/documents',
+  'https://www.googleapis.com/auth/drive.file',
 ];
+
+/**
+ * The scopes a job needs, so a failure can name the job rather than a URL.
+ *
+ * Checked before the call rather than after it. A token granted before a scope
+ * was added keeps working for everything it already covered, so Grove could
+ * read mail perfectly and discover it could not send only at the moment someone
+ * asked it to — after the confirmation, which is the worst possible time.
+ */
+export const SCOPE_FOR: Record<string, string[]> = {
+  'sending mail': ['https://mail.google.com/'],
+  'your calendar': ['https://www.googleapis.com/auth/calendar'],
+  'writing documents': [
+    'https://www.googleapis.com/auth/documents',
+    'https://www.googleapis.com/auth/drive.file',
+  ],
+};
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const STORE_REFRESH = 'grove.google.refresh';
 const STORE_ACCESS = 'grove.google.access';
 const STORE_EXPIRY = 'grove.google.expiry';
+const STORE_SCOPES = 'grove.google.scopes';
 
 /**
  * Where Google sends the browser back to.
@@ -158,14 +180,20 @@ export async function connectGoogle(): Promise<boolean> {
     access_token?: string;
     refresh_token?: string;
     expires_in?: number;
+    scope?: string;
   };
   if (!tokens.access_token) return false;
 
-  await store(tokens.access_token, tokens.expires_in ?? 3600, tokens.refresh_token);
+  await store(tokens.access_token, tokens.expires_in ?? 3600, tokens.refresh_token, tokens.scope);
   return true;
 }
 
-async function store(access: string, expiresIn: number, refresh?: string): Promise<void> {
+async function store(
+  access: string,
+  expiresIn: number,
+  refresh?: string,
+  scope?: string
+): Promise<void> {
   // Sixty seconds of margin: a token that expires while the request is in
   // flight fails in someone's ear, and refreshing early costs nothing.
   const expiry = Date.now() + Math.max(expiresIn - 60, 0) * 1000;
@@ -174,6 +202,43 @@ async function store(access: string, expiresIn: number, refresh?: string): Promi
   // Google only returns a refresh token on the first consent, so an absent one
   // here must not wipe the one already held.
   if (refresh) await SecureStore.setItemAsync(STORE_REFRESH, refresh);
+  // What Google actually granted, which is not always what was asked for: a
+  // consent screen can be half-ticked, and a refresh token minted before a
+  // scope existed never gains it.
+  if (scope) await SecureStore.setItemAsync(STORE_SCOPES, scope);
+}
+
+/**
+ * Which of the scopes a job needs are missing, or null when it cannot be told.
+ *
+ * Null is not "fine" — it is "no idea", which happens on a connection made
+ * before this was recorded. Callers treat it as permission to try, because
+ * refusing on an unknown is how a working setup gets declared broken.
+ */
+export async function missingScopes(job: string): Promise<string[] | null> {
+  const wanted = SCOPE_FOR[job];
+  if (!wanted) return null;
+  try {
+    let granted = await SecureStore.getItemAsync(STORE_SCOPES);
+    if (!granted) {
+      // An older connection never stored them. Google will say, given the
+      // token it issued.
+      const token = await googleToken();
+      if (!token) return null;
+      const response = await fetch(
+        `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`,
+        { signal: AbortSignal.timeout(8000) }
+      );
+      if (!response.ok) return null;
+      granted = ((await response.json()) as { scope?: string }).scope ?? '';
+      if (granted) await SecureStore.setItemAsync(STORE_SCOPES, granted);
+    }
+    if (!granted) return null;
+    const held = new Set(granted.split(/\s+/).filter(Boolean));
+    return wanted.filter((scope) => !held.has(scope));
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -202,9 +267,13 @@ export async function googleToken(): Promise<string | null> {
     });
     if (!response.ok) return null;
 
-    const tokens = (await response.json()) as { access_token?: string; expires_in?: number };
+    const tokens = (await response.json()) as {
+      access_token?: string;
+      expires_in?: number;
+      scope?: string;
+    };
     if (!tokens.access_token) return null;
-    await store(tokens.access_token, tokens.expires_in ?? 3600);
+    await store(tokens.access_token, tokens.expires_in ?? 3600, undefined, tokens.scope);
     return tokens.access_token;
   } catch {
     return null;
@@ -220,7 +289,7 @@ export async function isGoogleConnected(): Promise<boolean> {
 }
 
 export async function disconnectGoogle(): Promise<void> {
-  for (const key of [STORE_ACCESS, STORE_EXPIRY, STORE_REFRESH]) {
+  for (const key of [STORE_ACCESS, STORE_EXPIRY, STORE_REFRESH, STORE_SCOPES]) {
     try {
       await SecureStore.deleteItemAsync(key);
     } catch {

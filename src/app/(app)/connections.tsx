@@ -11,7 +11,7 @@
  * that leads nowhere.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, Text, View } from 'react-native';
 
 import { AppIcon } from '@/components/app-icon';
@@ -22,6 +22,7 @@ import { usePalette } from '@/hooks/use-palette';
 import { ABILITIES, abilityById } from '@/lib/abilities';
 import { CONNECTIONS, providerFor, type Connection } from '@/lib/connections';
 import { grantMessage, type GrantOutcome } from '@/lib/devicePermissions';
+import { missingScopes } from '@/lib/googleAuth';
 
 export default function Connections() {
   const palette = usePalette();
@@ -32,12 +33,43 @@ export default function Connections() {
   /** Set when the fix is in iOS Settings, so the notice can go straight there. */
   const [needsSettings, setNeedsSettings] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  /**
+   * Jobs the Google sign-in was never given permission for.
+   *
+   * A token keeps working for everything it already covered, so a connection
+   * made before sending existed reads mail perfectly and refuses to send — and
+   * the only way anyone found out was by dictating a message and watching it
+   * fail. Said here instead, where the fix is one button away.
+   */
+  const [ungranted, setUngranted] = useState<string[]>([]);
 
   /** Only what is actually built — a list of things that do not work is noise. */
   const wired = ABILITIES.filter((a) => a.wired);
 
   const live = new Set(connections);
   const connected = CONNECTIONS.filter((c) => live.has(c.key));
+
+  const googleLive = live.has('email');
+  useEffect(() => {
+    let current = true;
+    void (async () => {
+      if (!googleLive) {
+        if (current) setUngranted([]);
+        return;
+      }
+      const jobs = ['sending mail', 'writing documents', 'your calendar'];
+      const short: string[] = [];
+      for (const job of jobs) {
+        const missing = await missingScopes(job);
+        if (missing && missing.length > 0) short.push(job);
+      }
+      if (current) setUngranted(short);
+    })();
+    return () => {
+      current = false;
+    };
+  }, [googleLive, working]);
+
   const rest = CONNECTIONS.filter((c) => !live.has(c.key));
 
   const act = async (item: Connection) => {
@@ -95,6 +127,12 @@ export default function Connections() {
             </Pressable>
           ) : null}
         </View>
+      ) : null}
+
+      {ungranted.length > 0 ? (
+        <Notice
+          text={`Your Google sign-in does not cover ${ungranted.join(' or ')}. Tap Google Workspace below to disconnect, then connect again and allow everything on the consent screen.`}
+        />
       ) : null}
 
       {connected.length > 0 ? (

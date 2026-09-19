@@ -167,6 +167,38 @@ due sparks when Grove is next opened.
   and edited on the Sparks screen rather than in Settings — a spark is a
   standing instruction and a fact is standing context.
 
+## Documents, and why a scope change needs a reconnect
+
+`doc.create` writes a new Google Doc and never touches one you already have.
+`doc.append` adds to an existing one and takes a confirmation, because that
+changes work you wrote. The assignment case — "I have an assignment due on
+here, can you do it for me" — is the model calling `doc.find` first and passing
+what it read as `source`, so the writing answers the real question.
+
+Writing is the one job here that is not written for an ear: `lightDocument`
+runs with a 3000-token budget, search behind it when the subject is out in the
+world, and a 75-second deadline, and its ability is marked `slow` so
+`runAbility` gives it ninety seconds instead of twenty. `gemini-flash-latest`
+was tried for this and hangs on our key — several minutes, then a timeout — so
+documents use the same lite model as everything else, which writes 500 to 750
+grounded words in under ten seconds.
+
+**A token keeps the scopes it was granted, forever.** Adding a scope to
+`SCOPES` does nothing for anyone already signed in: the refresh token silently
+keeps working for everything it already covered and refuses the new thing. That
+is how "it still won't send emails" survived a release that added sending.
+
+So the grant is now recorded rather than assumed. `store()` keeps the `scope`
+string Google returns, `missingScopes(job)` compares it against `SCOPE_FOR`,
+and `google.allowed(job)` is called **before** the work — including before the
+confirmation, so nobody presses yes on a message that was never going to send.
+Connections says outright which jobs the current sign-in does not cover. Null
+from `missingScopes` means "cannot tell", and is treated as permission to try;
+refusing on an unknown is how a working setup gets declared broken.
+
+**If you change `SCOPES`, say in the release notes that Google must be
+disconnected and reconnected.** Nothing else can fix it.
+
 ## Voice notes
 
 "Listen to this" starts a note: Grove stops replying and listens at length

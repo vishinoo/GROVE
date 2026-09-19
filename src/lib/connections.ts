@@ -90,6 +90,8 @@ export const CONNECTIONS: Connection[] = [
       'mail.summarise',
       'gcal.read',
       'doc.find',
+      'doc.create',
+      'doc.append',
       'calendar.read',
       'calendar.move',
       'calendar.add',

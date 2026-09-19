@@ -14,7 +14,7 @@
  * connect Google — rather than reporting a failure the person cannot act on.
  */
 
-import { googleToken } from './googleAuth';
+import { googleToken, missingScopes } from './googleAuth';
 
 /* ------------------------------------------------------------ base64url */
 
@@ -298,7 +298,23 @@ export async function searchMail(
   return full.filter((m): m is MailMessage => m !== null);
 }
 
+/**
+ * Whether the sign-in Grove holds is allowed to do a job at all.
+ *
+ * Asked before the work, so a permission that was never granted is a sentence
+ * about reconnecting rather than a message that looked sent and was not.
+ */
+export async function allowed(job: string): Promise<boolean> {
+  const missing = await missingScopes(job);
+  if (missing && missing.length > 0) {
+    lastReason = 'missing-scope';
+    return false;
+  }
+  return true;
+}
+
 export async function sendMail(to: string, subject: string, body: string): Promise<boolean> {
+  if (!(await allowed('sending mail'))) return false;
   const raw = toBase64Url(
     [
       `To: ${to}`,
@@ -316,6 +332,55 @@ export async function sendMail(to: string, subject: string, body: string): Promi
 }
 
 /**
+ * Makes a Google Doc and puts text in it.
+ *
+ * Two calls rather than one: the Docs API creates an empty document, then
+ * inserts the text. Drive's upload endpoint could do it in one, but it needs a
+ * hand-built multipart body, and this path uses the same JSON call as
+ * everything else here — which is the difference between one code path to keep
+ * right and two.
+ *
+ * Returns the document's id and a link, so the answer can be "it's in your
+ * Drive" rather than "done".
+ */
+export async function createDoc(
+  title: string,
+  text: string
+): Promise<{ id: string; url: string } | null> {
+  if (!(await allowed('writing documents'))) return null;
+
+  const made = await call<{ documentId?: string }>('https://docs.googleapis.com/v1/documents', {
+    method: 'POST',
+    body: { title: title.slice(0, 120) || 'Untitled' },
+  });
+  const id = made?.documentId;
+  if (!id) return null;
+
+  // Index 1 is the start of the body — index 0 is before it and is rejected.
+  await call<unknown>(`https://docs.googleapis.com/v1/documents/${id}:batchUpdate`, {
+    method: 'POST',
+    timeoutMs: 20_000,
+    body: { requests: [{ insertText: { location: { index: 1 }, text } }] },
+  });
+  // Returned even if the insert failed: the document exists, and pointing at an
+  // empty one someone can see beats reporting nothing happened when it did.
+  return { id, url: `https://docs.google.com/document/d/${id}/edit` };
+}
+
+/** Adds text to the end of a document that already exists. */
+export async function appendDoc(id: string, text: string): Promise<boolean> {
+  if (!(await allowed('writing documents'))) return false;
+  const done = await call<unknown>(`https://docs.googleapis.com/v1/documents/${id}:batchUpdate`, {
+    method: 'POST',
+    timeoutMs: 20_000,
+    body: {
+      requests: [{ insertText: { endOfSegmentLocation: { segmentId: '' }, text: `\n${text}` } }],
+    },
+  });
+  return done !== null;
+}
+
+/**
  * Replies to a message, in its own thread.
  *
  * Three things have to line up or Gmail files it as a new conversation: the
@@ -327,6 +392,7 @@ export async function sendMail(to: string, subject: string, body: string): Promi
 export async function replyTo(message: MailMessage, body: string): Promise<boolean> {
   const to = message.from;
   if (!to) return false;
+  if (!(await allowed('sending mail'))) return false;
 
   const subject = /^re:/i.test(message.subject)
     ? message.subject

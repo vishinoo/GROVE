@@ -194,6 +194,10 @@ const IMPERATIVE = new RegExp(`^\\s*${ADDRESS}(?:${VERBS})\\b`, 'i');
  * "can YOU send it" is addressed to Grove, "should I send it" is asking for
  * advice about something the person will do themselves.
  */
+/** "Can you do it for me", and nothing looser than that. */
+const DO_IT_FOR_ME =
+  /\bcan you (?:please )?(?:just )?do (?:it|this|that|the \w[\w '-]{0,30}) for me\b/i;
+
 const POLITE_COMMAND = new RegExp(
   `^\\s*${ADDRESS}(?:can|could|will|would)\\s+you\\s+(?:please\\s+)?(?:${VERBS})\\b`,
   'i'
@@ -317,6 +321,11 @@ export function detectActIntent(text: string): boolean {
   // same shape as "I want to go to the airport" — and it fell through for the
   // same reason, since the imperative test looks for a verb at the start.
   if (ORDER_COMMAND.test(t)) return true;
+  // "I have an assignment due, can you do it for me" — an instruction with no
+  // verb the gate knows, because the verb is "do". Matched as the whole phrase
+  // rather than by adding "do" to the verb list, which would admit "can you do
+  // that?" and half of ordinary conversation with it.
+  if (DO_IT_FOR_ME.test(t)) return true;
   // Addressed to Grove and carrying a verb: an instruction, question mark or
   // not. Checked before the question tests, which would otherwise refuse it.
   if (POLITE_COMMAND.test(t)) return true;

@@ -259,7 +259,9 @@ const NEEDED = {
   'mail.search': 'https://mail.google.com/',
   'mail.send': 'https://mail.google.com/',
   'gcal.read': 'https://www.googleapis.com/auth/calendar',
-  'doc.find': 'https://www.googleapis.com/auth/documents.readonly',
+  'doc.find': 'https://www.googleapis.com/auth/documents',
+  'doc.create': 'https://www.googleapis.com/auth/documents',
+  'doc.append': 'https://www.googleapis.com/auth/documents',
   // Writing a calendar needs the full scope, not calendar.readonly — a read
   // scope accepts the request and refuses the write, which surfaces as a 403
   // long after the consent screen said yes.
@@ -303,7 +305,7 @@ for (const ability of ALL) {
 
 /* 8b. Anything that hands off to a paid app must ask first. */
 section('Nothing reaches a payment without a yes');
-for (const id of ['ride.request', 'food.order', 'mail.send', 'mail.reply', 'calendar.remove', 'calendar.move', 'mac.do']) {
+for (const id of ['ride.request', 'food.order', 'mail.send', 'mail.reply', 'calendar.remove', 'calendar.move', 'mac.do', 'doc.append']) {
   const ability = byId.get(id);
   if (!ability) continue;
   // Run it with no confirmation and assert it stops. This is the property the

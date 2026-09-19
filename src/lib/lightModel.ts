@@ -75,6 +75,9 @@ const SEARCH_TIMEOUT_MS = 22_000;
  * no longer answered by the same number.
  */
 const DIRECT_TIMEOUT_MS = 16_000;
+
+/** Writing a document, which nobody is waiting on mid-sentence. */
+const WRITE_TIMEOUT_MS = 75_000;
 const PROBE_TIMEOUT_MS = 1_500;
 
 export type LightMessage = { role: 'user' | 'assistant'; content: string };
@@ -293,7 +296,8 @@ async function askDirect(
   messages: LightMessage[],
   json: boolean,
   search = true,
-  attempt = 0
+  attempt = 0,
+  tokens = 600
 ): Promise<string | null> {
   const key = await loadOwnKey();
   if (!key) {
@@ -302,7 +306,12 @@ async function askDirect(
   }
 
   try {
-    const response = await withTimeout(search && !json ? SEARCH_TIMEOUT_MS : DIRECT_TIMEOUT_MS, (signal) =>
+    // A document is a page of writing, sometimes with a web search in front of
+    // it: twenty-two seconds is right for a sentence read aloud and cuts off a
+    // write that was going to land. Measured at about 25 seconds with search.
+    const deadline =
+      tokens >= 2000 ? WRITE_TIMEOUT_MS : search && !json ? SEARCH_TIMEOUT_MS : DIRECT_TIMEOUT_MS;
+    const response = await withTimeout(deadline, (signal) =>
       fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
           DIRECT_MODEL
@@ -318,7 +327,7 @@ async function askDirect(
               parts: [{ text: m.content }],
             })),
             generationConfig: {
-              maxOutputTokens: 600,
+              maxOutputTokens: tokens,
               temperature: 0.7,
               ...(json ? { responseMimeType: 'application/json' } : {}),
             },
@@ -338,7 +347,7 @@ async function askDirect(
       // front of someone waiting for an answer is its own kind of broken.
       if ((response.status === 429 || response.status >= 500) && attempt === 0) {
         await new Promise((done) => setTimeout(done, 1200));
-        return askDirect(system, messages, json, search, 1);
+        return askDirect(system, messages, json, search, 1, tokens);
       }
       // A 404 here means the configured model no longer exists, which is its own
       // failure and not a network one. Google retires pinned versions without
@@ -379,6 +388,7 @@ async function askDirect(
 const DIRECT_MODEL =
   (process.env.EXPO_PUBLIC_GEMINI_MODEL ?? '').trim() || 'gemini-flash-lite-latest';
 
+
 async function askServer(
   system: string,
   messages: LightMessage[],
@@ -401,7 +411,10 @@ async function complete(
   messages: LightMessage[],
   json = false,
   deep = false,
-  search = true
+  search = true,
+  // Everything spoken is short by design; a document is the one thing here that
+  // is meant to be read, and 600 tokens stops it mid-sentence on page one.
+  tokens = 600
 ): Promise<string | null> {
   // Free and local first, then the server that holds the shared key, then the
   // device's own key. Three paths so that no single thing going down takes
@@ -417,7 +430,7 @@ async function complete(
   // turn paid its timeout before falling through — ten seconds of silence, on a
   // deployment that need not exist at all. Grove answers from the device and
   // treats a backend as an optional extra rather than the path of first resort.
-  const direct = await askDirect(system, messages, json, search);
+  const direct = await askDirect(system, messages, json, search, 0, tokens);
   if (direct !== null) return direct;
 
   // Only if one is actually configured. An unset URL is not a failure to
@@ -912,6 +925,54 @@ export type NoteShape = { title: string; summary: string; points: string[]; acti
  * Returns null rather than a guess when the model does not answer. The caller
  * saves the transcript either way, so a failed summary never loses the note.
  */
+/**
+ * A document, written to be read rather than heard.
+ *
+ * Everything else here is written for an ear and cut to a sentence or two. This
+ * is the opposite job: headings, paragraphs, and enough of them to be worth
+ * opening. Grounded in search when the subject is something happening in the
+ * world, because a document of "interesting thermal stocks" written from
+ * memory is a list of plausible companies, which is worse than no document.
+ *
+ * Plain text, because a Google Doc built from inserted text shows markdown
+ * asterisks as asterisks.
+ */
+export async function lightDocument(
+  brief: string,
+  source: string,
+  search: boolean
+): Promise<string | null> {
+  const text = await complete(
+    `You write documents someone will open and read on a screen.
+
+- Plain text only. No markdown, no asterisks, no hashes, no bullet characters. A heading is a short line on its own; a list item is a line starting with a dash and a space.
+- Open with one short paragraph saying what this is. Then the substance, under headings.
+- Be specific. Names, numbers, dates, real detail. Never pad, never repeat the brief back, never write "in conclusion".
+- Long enough to be worth opening: 700 to 1200 words unless the brief asks for something shorter or longer. Anything you name gets its own short section — what it is, the numbers that matter, and why it is worth their attention. Depth, not padding — more real detail per section, never more sections saying less.
+- If you are working from material they gave you, follow its instructions exactly — its questions, its length, its format. Those instructions beat the length guidance above.
+- When the subject has risk or uncertainty in it, end with a short plain section on what to watch or what could go wrong.
+- If something is uncertain or you could not check it, say so in the document in a plain sentence rather than inventing it.
+- Do not write a title line; the document already has a title.`,
+    [
+      {
+        role: 'user',
+        content: source
+          ? `Write this document: ${brief}
+
+Work from this material:
+${source.slice(0, 12_000)}`
+          : `Write this document: ${brief}`,
+      },
+    ],
+    false,
+    false,
+    search,
+    3000
+  );
+  const clean = (text ?? '').trim();
+  return clean ? clean.replace(/^#+\s*/gm, '').replace(/\*\*?/g, '') : null;
+}
+
 export async function lightNotes(transcript: string): Promise<NoteShape | null> {
   const text = transcript.trim();
   if (!text) return null;

@@ -44,7 +44,7 @@ import { loadPlayed, playedLines, recordPlayed } from './listening';
 import { MODES } from './modes';
 import * as google from './google';
 import { isGoogleConnected } from './googleAuth';
-import { lightBrief, lightDigest } from './lightModel';
+import { lightBrief, lightDigest, lightDocument } from './lightModel';
 
 /**
  * Weather codes as a person would say them, not as WMO defines them.
@@ -175,6 +175,15 @@ export type Ability = {
    * someone says otherwise, which is the safe direction to be wrong in.
    */
   reads?: boolean;
+  /**
+   * Writing takes longer than looking up.
+   *
+   * Everything else here answers inside the twenty seconds `runAbility` allows,
+   * because it is one API call. Writing a document is a model composing several
+   * pages, sometimes with a web search first, and cutting that off at twenty
+   * seconds fails a job that was about to succeed.
+   */
+  slow?: boolean;
   /** Sentences that should land here. Used for routing and for onboarding copy. */
   examples: string[];
   run: (args: Record<string, string>) => Promise<AbilityResult>;
@@ -377,6 +386,119 @@ const DOC_FIND: Ability = {
   },
 };
 
+/**
+ * "Write me a document about X", and "do this assignment for me".
+ *
+ * A new document every time. Grove never writes into something you already
+ * have, because the failure mode there is losing work you cannot get back —
+ * and a draft beside the original is what you wanted anyway.
+ *
+ * The model writes the body with a real token budget and, when the subject is
+ * something happening in the world, with search behind it. `source` is how the
+ * assignment case works: the instructions are read out of your own document
+ * first and handed here, so what comes back answers the actual question rather
+ * than the model's idea of it.
+ */
+const DOC_CREATE: Ability = {
+  id: 'doc.create',
+  name: 'Write a document',
+  what: 'Writes a document and puts it in your Google Drive. Use for "write me a document", "make me a doc", or doing written work.',
+  where: 'server',
+  wired: true,
+  needs: ['email'],
+  slow: true,
+  args: {
+    title: { type: 'string', what: 'what to call it, a few words', required: true },
+    about: {
+      type: 'string',
+      what: 'what it should cover, in as much detail as they gave you — the question to answer, the angle, the length',
+      required: true,
+    },
+    source: {
+      type: 'string',
+      what: 'material to work from, if you looked any up — assignment instructions, an email, notes',
+    },
+    research: { type: 'string', what: '"yes" when it needs current facts from the web, like companies, prices or news' },
+  },
+  examples: [
+    'write me a document about interesting thermal stocks',
+    'make me a doc on the housing market',
+    'I have an assignment due, can you do it for me',
+    'write up my notes into a document',
+  ],
+  run: async (args) => {
+    const title = (args.title || '').trim();
+    const about = (args.about || '').trim();
+    if (!about) return { ok: false, spoken: 'What should the document be about?' };
+    if (!(await google.allowed('writing documents'))) {
+      return { ok: false, spoken: google.explain('writing documents') };
+    }
+
+    const text = await lightDocument(about, (args.source || '').trim(), /yes|true/i.test(args.research || ''));
+    if (!text) return { ok: false, spoken: 'I could not get that written just then.' };
+
+    const made = await google.createDoc(title || about.split(/\s+/).slice(0, 6).join(' '), text);
+    if (!made) return { ok: false, spoken: google.explain('writing that document') };
+
+    const words = text.split(/\s+/).filter(Boolean).length;
+    return {
+      ok: true,
+      // No URL out loud — it is unusable in an ear. The card carries the link.
+      spoken: `Written. ${title || 'It'} is in your Drive, about ${Math.round(words / 50) * 50} words.`,
+      detail: `${made.url}\n\n${text.slice(0, 2000)}`,
+    };
+  },
+};
+
+/**
+ * Adding to a document that already exists.
+ *
+ * Confirmed, unlike making a new one: this changes something you wrote, and a
+ * misheard sentence appended to the wrong document is work to undo rather than
+ * a file to delete.
+ */
+const DOC_APPEND: Ability = {
+  id: 'doc.append',
+  name: 'Add to a document',
+  what: 'Adds to the end of a Google Doc you already have.',
+  where: 'server',
+  wired: true,
+  needs: ['email'],
+  slow: true,
+  args: {
+    which: { type: 'string', what: 'the document, by name', required: true },
+    text: { type: 'string', what: 'what to add, in their words', required: true },
+    confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
+  },
+  examples: ['add this to my reading list doc', 'put that at the end of the project brief'],
+  run: async (args) => {
+    const which = (args.which || '').trim();
+    const text = (args.text || '').trim();
+    if (!which || !text) return { ok: false, spoken: 'Add what, and to which document?' };
+    if (!(await google.allowed('writing documents'))) {
+      return { ok: false, spoken: google.explain('writing documents') };
+    }
+
+    const found = await google.findDoc(which);
+    if (!found) return { ok: false, spoken: google.explain('that document') };
+    if (!found.match) return { ok: false, spoken: `I could not find a document called ${which}.` };
+
+    if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
+      return {
+        ok: false,
+        needsConfirming: true,
+        spoken: `Adding that to ${found.match.name}`,
+        detail: `${found.match.name}\n\n${text}`,
+      };
+    }
+
+    const done = await google.appendDoc(found.match.id, text);
+    return done
+      ? { ok: true, spoken: `Added to ${found.match.name}.` }
+      : { ok: false, spoken: google.explain('that document') };
+  },
+};
+
 const MAIL_READ: Ability = {
   id: 'mail.search',
   name: 'Mail',
@@ -563,6 +685,13 @@ const MAIL_SEND: Ability = {
     const subject =
       (args.subject || '').trim() ||
       body.split(/\s+/).slice(0, 7).join(' ').replace(/[.,;:!?]+$/, '');
+
+    // Asked before the press, not after it. Discovering the permission is
+    // missing once someone has already confirmed is the shape this failed in:
+    // a message they thought was gone, and a fix they were told about too late.
+    if (!(await google.allowed('sending mail'))) {
+      return { ok: false, spoken: google.explain('sending mail') };
+    }
 
     if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
       // Short mail is read out whole, because the words are what is being
@@ -1001,6 +1130,9 @@ const MAIL_REPLY: Ability = {
   run: async (args) => {
     const body = (args.body || '').trim();
     if (!body) return { ok: false, spoken: 'What should the reply say?' };
+    if (!(await google.allowed('sending mail'))) {
+      return { ok: false, spoken: google.explain('sending mail') };
+    }
 
     const found = await google.searchMail({ from: args.to, about: args.about, limit: 3 });
     if (found === null) {
@@ -2569,6 +2701,8 @@ export const ABILITIES: Ability[] = [
   MAIL_REPLY,
   GCAL_READ,
   DOC_FIND,
+  DOC_CREATE,
+  DOC_APPEND,
   SET_MODE,
   RECALL,
   MESSAGE,
@@ -2595,6 +2729,9 @@ export const ABILITIES: Ability[] = [
  * seconds is fine. What is not fine is never coming back at all.
  */
 const RUN_TIMEOUT_MS = 20_000;
+
+/** For abilities that write rather than look up. See `slow` on Ability. */
+const SLOW_RUN_TIMEOUT_MS = 90_000;
 
 /**
  * Runs an ability and guarantees an answer.
@@ -2624,7 +2761,7 @@ export async function runAbility(
               ok: false,
               spoken: `${ability.name} took too long. Ask me again in a moment.`,
             }),
-          RUN_TIMEOUT_MS
+          ability.slow ? SLOW_RUN_TIMEOUT_MS : RUN_TIMEOUT_MS
         )
       ),
     ]);
