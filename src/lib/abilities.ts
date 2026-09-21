@@ -199,6 +199,14 @@ export type Ability = {
    * seconds fails a job that was about to succeed.
    */
   slow?: boolean;
+  /**
+   * Its own time limit, when the default twenty seconds is wrong for it.
+   *
+   * A web search is given longer than an API lookup and far less than writing
+   * a document. Its own deadline was twenty-two seconds while every tool was
+   * cut off at twenty, so a search about to succeed was thrown away.
+   */
+  timeoutMs?: number;
   /** Sentences that should land here. Used for routing and for onboarding copy. */
   examples: string[];
   run: (args: Record<string, string>) => Promise<AbilityResult>;
@@ -216,21 +224,30 @@ export type Ability = {
  */
 const BRIEF: Ability = {
   id: 'brief.web',
-  name: 'Briefing',
-  what: 'Reads out what moved — stocks, news, or the weather.',
+  name: 'Web search',
+  what: 'Searches the web and answers. For anything current or checkable you are not certain of: news, markets, scores, prices, opening hours, where to find or buy something, whether something is free, facts that may have changed.',
   // On the device, like everything else now: the model call goes straight to
   // the provider, so there is no server left for this to run on.
   where: 'device',
   wired: true,
   needs: [],
   reads: true,
+  // Searching takes longer than an API lookup; see `timeoutMs` on Ability.
+  timeoutMs: 30_000,
   args: {
-    topic: { type: 'string', what: 'what to brief on, e.g. "my watchlist" or "the news"', required: true },
+    topic: {
+      type: 'string',
+      what: 'the question to look up, written out in full with whatever context the conversation gave it — "where to find Murphy\'s Probabilistic Machine Learning book and whether it is free online", not "the book"',
+      required: true,
+    },
   },
   examples: [
     'what happened in the markets today',
     'give me the news',
     'brief me on my watchlist',
+    'how did the Oilers do last night',
+    'is that book free online',
+    'what time does the library close',
   ],
   run: async (args) => {
     const topic = (args.topic || '').trim();
@@ -3272,7 +3289,7 @@ export async function runAbility(
               ok: false,
               spoken: `${ability.name} took too long. Ask me again in a moment.`,
             }),
-          ability.slow ? SLOW_RUN_TIMEOUT_MS : RUN_TIMEOUT_MS
+          ability.timeoutMs ?? (ability.slow ? SLOW_RUN_TIMEOUT_MS : RUN_TIMEOUT_MS)
         )
       ),
     ]);

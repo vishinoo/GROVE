@@ -1,0 +1,114 @@
+/**
+ * Arithmetic, done exactly.
+ *
+ * The model is a language model: asked "what's 15 percent of 240" it said
+ * thirty, having said thirty-six the day before. A wrong number said with
+ * confidence is the worst kind of answer, and arithmetic is the one kind of
+ * question where being right is free — so the sum is worked out here and
+ * handed to the model as a fact, and the model's job is only to say it.
+ *
+ * Deliberately small: percentages and the four operations, with brackets and
+ * powers, in digits or spoken words. Anything it cannot parse it leaves alone.
+ */
+
+const WORDS: [RegExp, string][] = [
+  [/\bper ?cent\b/gi, '%'],
+  [/\b(?:multiplied by|times)\b/gi, '*'],
+  [/(\d)\s*x\s*(\d)/gi, '$1*$2'],
+  [/\b(?:divided by|over)\b/gi, '/'],
+  [/\bplus\b/gi, '+'],
+  [/\bminus\b/gi, '-'],
+  [/\bsquared\b/gi, '^2'],
+  [/\bcubed\b/gi, '^3'],
+  [/\bto the power of\b/gi, '^'],
+];
+
+function num(s: string): number {
+  return Number(s.replace(/,/g, ''));
+}
+
+function format(n: number): string {
+  if (!Number.isFinite(n)) return String(n);
+  const rounded = Math.round(n * 1e6) / 1e6;
+  return rounded.toLocaleString('en-US', { maximumFractionDigits: 6 });
+}
+
+/** Evaluates + - * / ^ and brackets. Throws on anything else. */
+function evaluate(expr: string): number {
+  const tokens = expr.match(/\d+(?:\.\d+)?|[-+*/^()]/g) ?? [];
+  let i = 0;
+  const peek = () => tokens[i];
+  const next = () => tokens[i++];
+
+  const primary = (): number => {
+    const t = next();
+    if (t === '(') {
+      const v = sum();
+      if (next() !== ')') throw new Error('bracket');
+      return v;
+    }
+    if (t === '-') return -primary();
+    if (t === undefined || !/^\d/.test(t)) throw new Error('number');
+    return Number(t);
+  };
+  const power = (): number => {
+    const base = primary();
+    if (peek() === '^') {
+      next();
+      return base ** power();
+    }
+    return base;
+  };
+  const product = (): number => {
+    let v = power();
+    while (peek() === '*' || peek() === '/') {
+      const op = next();
+      const r = power();
+      v = op === '*' ? v * r : v / r;
+    }
+    return v;
+  };
+  const sum = (): number => {
+    let v = product();
+    while (peek() === '+' || peek() === '-') {
+      const op = next();
+      const r = product();
+      v = op === '+' ? v + r : v - r;
+    }
+    return v;
+  };
+
+  const value = sum();
+  if (i !== tokens.length) throw new Error('trailing');
+  return value;
+}
+
+/**
+ * The exact answer to any arithmetic in a sentence, as a line for the model,
+ * or null when there is none.
+ */
+export function calculate(text: string): string | null {
+  let t = text;
+  for (const [pattern, to] of WORDS) t = t.replace(pattern, to);
+
+  // "15% of 240", "15 % of 240".
+  const pct = /(-?\d[\d,]*(?:\.\d+)?)\s*%\s*of\s*(-?\d[\d,]*(?:\.\d+)?)/i.exec(t);
+  if (pct) {
+    const value = (num(pct[1]) / 100) * num(pct[2]);
+    return `${pct[1]}% of ${pct[2]} = ${format(value)}`;
+  }
+
+  // The longest run of numbers and operators with at least one operator in it.
+  const runs = t.match(/[\d.,()\s]*\d[\d.,()\s]*(?:[-+*/^][\d.,()\s]*\d[\d.,()\s]*)+/g) ?? [];
+  const run = runs.sort((a, b) => b.length - a.length)[0];
+  if (!run) return null;
+  const expr = run.replace(/,(?=\d{3}\b)/g, '').replace(/\s+/g, '');
+  // A date or a phone number is not a sum.
+  if (!/[-+*/^]/.test(expr) || /^\d+-\d+(-\d+)?$/.test(expr)) return null;
+  try {
+    const value = evaluate(expr);
+    return Number.isFinite(value) ? `${expr} = ${format(value)}` : null;
+  } catch {
+    return null;
+  }
+}

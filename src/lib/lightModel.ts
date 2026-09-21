@@ -59,7 +59,7 @@ const TIMEOUT_MS = 8_000;
  * timing out. The cost of the longer wait is covered by saying something while
  * it happens, rather than by sitting silent for twice as long.
  */
-const SEARCH_TIMEOUT_MS = 22_000;
+const SEARCH_TIMEOUT_MS = 28_000;
 
 /**
  * How long a call straight to the provider gets.
@@ -716,13 +716,26 @@ TITLE: <two or three words, only for a standing job>`;
  */
 export async function lightBrief(topic: string): Promise<string | null> {
   const text = await complete(
-    'You brief someone out loud, in two or three sentences. Lead with what actually changed or happened, with numbers where there are numbers. Spoken aloud, so no markdown, no URLs, no bullet points, no preamble. If you genuinely cannot find anything current, say so plainly rather than guessing.',
-    [{ role: 'user', content: `Brief me on: ${topic}` }],
+    // A question, not only a briefing. Written for "what happened in the
+    // markets", this prompt answered "where can I get this book, is it free"
+    // with a summary of news about the book — the search was right and the
+    // answer was to a different question.
+    'You answer a question out loud, using web search. Answer exactly what was asked, in one to three sentences, leading with the answer: the specific names, numbers, places, prices, dates, or where to get something and whether it is free. For news or markets, lead with what changed, with numbers. Spoken aloud, so no markdown, no URLs, no bullet points, no preamble. If search genuinely finds nothing, say so plainly rather than guessing.',
+    [{ role: 'user', content: topic }],
     false,
     false,
     true
   );
-  return text?.trim() || null;
+  // This line can be spoken as it is, when the model is too slow to rephrase
+  // it — so it leaves here already fit to be heard: no asterisks, no code
+  // formatting, no bare web addresses read out character by character.
+  const clean = (text ?? '')
+    .replace(/[*`]+/g, '')
+    .replace(/\bhttps?:\/\/\S+/g, '')
+    .replace(/\b[\w-]+(?:\.[\w-]+)+\/[\w./-]*/g, 'their website')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return clean || null;
 }
 
 /**
@@ -833,19 +846,22 @@ const TOOL_TIMEOUT_MS = 20_000;
 export async function toolTurn(
   system: string,
   contents: ToolHistory,
-  declarations: unknown[]
+  declarations: unknown[],
+  options: { timeoutMs?: number; retry?: boolean } = {}
 ): Promise<ToolTurn> {
-  const first = await toolTurnOnce(system, contents, declarations);
-  if (first.kind !== 'nothing') return first;
+  const timeoutMs = options.timeoutMs ?? TOOL_TIMEOUT_MS;
+  const first = await toolTurnOnce(system, contents, declarations, timeoutMs);
+  if (first.kind !== 'nothing' || options.retry === false) return first;
   if (!['timeout', 'offline', 'rate-limited', 'server'].includes(modelTrouble)) return first;
   await new Promise((done) => setTimeout(done, modelTrouble === 'rate-limited' ? 1500 : 600));
-  return toolTurnOnce(system, contents, declarations);
+  return toolTurnOnce(system, contents, declarations, timeoutMs);
 }
 
 async function toolTurnOnce(
   system: string,
   contents: ToolHistory,
-  declarations: unknown[]
+  declarations: unknown[],
+  timeoutMs: number
 ): Promise<ToolTurn> {
   const key = await loadOwnKey();
   if (!key) {
@@ -854,7 +870,7 @@ async function toolTurnOnce(
   }
 
   try {
-    const response = await withTimeout(TOOL_TIMEOUT_MS, (signal) =>
+    const response = await withTimeout(timeoutMs, (signal) =>
       fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
           DIRECT_MODEL

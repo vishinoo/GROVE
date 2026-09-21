@@ -381,6 +381,21 @@ section('The model can never confirm on your behalf');
       `${a.id} survives the tool-name round trip`
     );
   }
+  // And however the model spells it. Declared as `brief__web`, it was called
+  // back as `brief_web` often enough that every search failed, and the model
+  // explained the failure as the internet "sulking".
+  const ids = ALL.map((a) => a.id);
+  for (const a of ALL) {
+    const [head, tail] = a.id.split('.');
+    const camel = head + tail.charAt(0).toUpperCase() + tail.slice(1);
+    for (const spelling of [`${head}_${tail}`, `${head}__${tail}`, camel]) {
+      check(
+        tools.abilityIdFor(spelling, ids) === a.id,
+        `"${spelling}" reaches ${a.id}`,
+        'a model spelling of the tool name matched nothing'
+      );
+    }
+  }
 }
 
 /* A read-only tool must not be able to do anything. */

@@ -260,6 +260,23 @@ older binary is silent rather than broken.
   back to a plain answer with the conversation and search (`lightFallback`),
   which is told to answer public questions and to say plainly when it could not
   reach their own data rather than guess.
+- **Tool names are matched however the model spells them.** Declared as
+  `brief__web`, the model called back `brief_web` often enough that every
+  search failed as "not available" — and the model explained it to the person
+  as the internet sulking. Names now use one underscore, `abilityIdFor` ignores
+  separators, and the harness checks three spellings of every tool.
+- **Questions about now are looked up, in code.** Told to search, the model
+  still answered "how did the Oilers do" from training. `needsFreshFacts` sends
+  a question about scores, markets, prices, hours or news through web search
+  when the model tried to answer without it.
+- **Sums are done in `calc.ts`**, not by the model, which said 15% of 240 was
+  thirty. The exact answer is handed over as a fact.
+- **The phrasing step is bounded.** Once a tool has answered, the model gets
+  eight seconds and no retry to phrase it; past that, the tool's own answer is
+  said. Gemini sometimes took twelve seconds just to reword a search result.
+- **Testing on a laptop on battery:** macOS sleeps a test run mid-flight, and
+  every timer in it then fires minutes late. Run live tests under
+  `caffeinate -i` or the timings mean nothing.
 - **Model markdown is stripped** from every reply in `plainSpeech()` — told not
   to, it still wraps titles in asterisks, which showed on screen and could be
   read aloud.

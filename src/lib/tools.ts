@@ -56,11 +56,31 @@ export type FunctionDeclaration = {
  * wire format would be the wire format deciding the domain model.
  */
 export function toolNameFor(abilityId: string): string {
-  return abilityId.replace(/\./g, '__');
+  // One underscore, not two. Declared as `brief__web`, the model called
+  // `brief_web` back often enough to matter — three times out of three on
+  // "any big news today" — which matched nothing, was answered "not
+  // available", and was then explained to the person as the internet
+  // "sulking". No ability id contains an underscore, so one is unambiguous.
+  return abilityId.replace(/\./g, '_');
 }
 
-export function abilityIdFor(toolName: string): string {
-  return toolName.replace(/__/g, '.');
+/** Letters and digits only, so every spelling of a name compares equal. */
+function squash(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * The ability a tool call meant, however the model spelled it.
+ *
+ * Exact first, then with separators ignored — `brief_web`, `brief__web`,
+ * `briefWeb` and `brief.web` are all one tool. A name that matches nothing even
+ * then really is unknown.
+ */
+export function abilityIdFor(toolName: string, ids: string[] = []): string {
+  const dotted = toolName.replace(/__?/g, '.');
+  if (ids.length === 0 || ids.includes(dotted)) return dotted;
+  const wanted = squash(toolName);
+  return ids.find((id) => squash(id) === wanted) ?? dotted;
 }
 
 /**

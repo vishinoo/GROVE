@@ -39,6 +39,7 @@ import {
 } from './lightModel';
 import { asPromptBlock, factFrom } from './memory';
 import { loadLife, whoIsWho } from './life';
+import { calculate } from './calc';
 import { abilitiesFor, modeById } from './modes';
 import { ABILITIES } from './abilities';
 import { activePreset, fallback, mannerDirective } from './persona';
@@ -81,7 +82,7 @@ const TOOL_RULES = `How to use your tools:
 - Small talk is just talk. "How's it going", "hey", "thanks", "you there?" get a reply in character and no tool — they are not questions about their day.
 - Anything about their calendar, email, weather, music, directions, contacts, messages, reminders or what you remember about them: call a tool. Never answer those from your own head — you do not have that information until a tool returns it.
 - Never say what is or is not in their calendar, inbox, music library or contacts unless a tool just told you. "That isn't in your library" without having searched is a lie, however likely it sounds.
-- If no tool covers what they asked, say plainly that you cannot do that right now. Do not invent a reason.
+- Answer anything. A question no tool covers — general knowledge, advice, explanations, maths, recommendations, opinions — is answered from what you know, properly and specifically. Only say you can't when they ask you to DO something you have no tool for (read their texts, pay for something), and then say so plainly without inventing a reason.
 - A sentence with several requests in it gets several tool calls, all at once.
 - Fill in arguments from what they said and from what you know about them. Never ask for something you could reasonably infer.
 - Asking back is how you do a good job on open-ended requests. Call ask_back, with ONE question in your own voice and personality, when the right answer depends on something only they know:
@@ -107,7 +108,7 @@ const TOOL_RULES = `How to use your tools:
 - "Brief me on someone" or "who is X": use the person tool. Never assemble a person from memory of this conversation.
 - "Anything important" about mail: use the tool that filters it. Name who and what they want, not how many are unread.
 - A question about when something happened, or about something from a named stretch of time, goes to the long-memory search with that time passed as the when argument.
-- For current events, prices, news or anything on the web, use the briefing tool.
+- Use web search whenever the answer is current, local or checkable and you are not certain: news, scores, prices, opening hours, where to find or buy something, whether something is free, anything that may have changed since you learned it. Write the search as the full question with its context from the conversation, never "it" or "the book". Better to search than to guess a fact.
 - To go somewhere — "take me", "navigate", "directions to" — use navigate. Use the ride tool only when they say Uber, a ride, a taxi or a cab. For "home" pass "home"; the app knows the address.
 - For a place mentioned in an email, note or event, look that up first and pass the actual street address.
 - For a text, pass the person's name as they said it; the app finds the number.
@@ -122,7 +123,7 @@ How to answer once tools return:
 - Say the useful thing first. Keep your personality — a wry line is welcome — but the answer comes before the joke, never instead of it.
 - Jokes go around the facts, never into them. Never embellish what an email, event, note or person actually said — "Jason wants the build by Friday" is the fact; "Jason is threatening to cancel your licence" is an invention they might believe.
 - Never repeat the question back, never open with "Sure" or "Let me check".
-- If a tool failed, say what failed in one short sentence, in your own voice.`;
+- If a tool failed, say what failed in one short sentence, in your own voice. Never say a search or tool failed, or is being difficult, unless one actually ran and failed this turn.`;
 
 function systemFor(context: GroveContext, available: Ability[]): string {
   const { persona, facts } = context;
@@ -217,6 +218,38 @@ function fedInto(read: RanTool, args: Record<string, string>): boolean {
 }
 
 /**
+ * Whether a question is about the world as it is right now.
+ *
+ * Deliberately about the question's shape, not its subject: scores, markets,
+ * prices, opening hours, news, "today", "last night". Those have answers that
+ * change, and a model answering them from training is guessing with
+ * confidence. Personal data is not here — the calendar and inbox have their
+ * own tools, and a question about them has already called one.
+ */
+const FRESH =
+  /\b(?:today|tonight|yesterday|last night|this (?:week|weekend|morning|evening)|latest|recent(?:ly)?|currently|right now|at the moment|score|scores|won|win|beat|lose|lost|last game|next game|game|match|playoffs?|standings|markets?|stocks?|shares|price|prices|how much (?:is|are|does)|cost|open|opens|close|closes|opening hours|hours|news|headlines?|happened|release date|come out|coming out|election|results?)\b/i;
+
+const PERSONAL = /\b(?:my (?:calendar|schedule|inbox|email|emails|mail|reminders|notes|contacts|day|week)|remind me|what(?:'s| is) on)\b/i;
+
+export function needsFreshFacts(text: string): boolean {
+  return FRESH.test(text) && !PERSONAL.test(text);
+}
+
+/**
+ * The question as a search should see it, with the conversation it came from.
+ *
+ * "Is it free online" searched on its own finds nothing, because "it" was two
+ * turns ago. The last exchange rides along so the search knows what "it" is.
+ */
+function searchQuestion(history: Turn[], userText: string): string {
+  const last = history.filter((t) => t.text.trim()).slice(-2);
+  if (last.length === 0) return userText;
+  return `${userText}\n\n(For context, the conversation just before: ${last
+    .map((t) => `${t.role === 'assistant' ? 'Assistant' : 'Them'}: ${t.text.slice(0, 300)}`)
+    .join(' ')})`;
+}
+
+/**
  * Text as it is heard and shown, with the model's markdown taken out.
  *
  * Told not to use markdown, it still wraps titles in it — "*Deep Learning*",
@@ -287,17 +320,32 @@ export async function askWithTools(
   const system = [systemFor(context, available), roster].filter(Boolean).join('\n\n');
   const fact = factFrom(userText) ?? undefined;
 
-  const contents: unknown[] = [...(historyFor(history) as unknown[]), asUserTurn(userText)];
+  // Sums are worked out exactly and handed over as a fact; see calc.ts.
+  const sum = calculate(userText);
+  const contents: unknown[] = [
+    ...(historyFor(history) as unknown[]),
+    asUserTurn(sum ? `${userText}\n\n[Worked out exactly: ${sum}. Use this number.]` : userText),
+  ];
   const ran: RanTool[] = [];
 
   for (let round = 0; round < MAX_ROUNDS; round += 1) {
-    const turn = await toolTurn(system, contents, declarations);
+    // Once something has come back, the model is only phrasing an answer that
+    // already exists — and Gemini sometimes takes twelve seconds, or times out
+    // and retries, to do it. The book question took 87 seconds that way, with
+    // the search itself done in two. So that step gets eight seconds and no
+    // retry; past that, what the tools returned is said as it is.
+    const turn = await toolTurn(
+      system,
+      contents,
+      declarations,
+      ran.some((r) => r.ok) ? { timeoutMs: 8_000, retry: false } : {}
+    );
 
     if (turn.kind === 'nothing') {
       // Anything that did run is still worth saying — the weather came back
       // even if the follow-up call to the model did not.
       const already = ran.filter((r) => r.ok).map((r) => r.spoken).filter(unique).join(' ');
-      if (already) return { text: already, args: {}, fact, ran };
+      if (already) return { text: plainSpeech(already), args: {}, fact, ran };
       // Nothing to say yet: try the plain path before admitting defeat. A
       // missing key or a retired model will fail there too, so skip it.
       const trouble = lastModelTrouble();
@@ -315,6 +363,23 @@ export async function askWithTools(
     }
 
     if (turn.kind === 'text') {
+      // Answered from memory something that only a search can know. Told in
+      // the prompt to search for anything current, the model still answered
+      // "how did the Oilers do" with "they haven't started yet" — the day after
+      // a 5-2 win — and once invented a search failure for a search it never
+      // ran. So the check is here, in code: a question about now gets looked
+      // up, once, and the model answers again from what came back.
+      const search = available.find((a) => a.id === 'brief.web');
+      if (round === 0 && ran.length === 0 && search && needsFreshFacts(userText)) {
+        const outcome = await runAbility(search, { topic: searchQuestion(history, userText) });
+        ran.push({ ability: search, ok: outcome.ok, spoken: outcome.spoken, detail: outcome.detail });
+        if (outcome.ok) {
+          contents[contents.length - 1] = asUserTurn(
+            `${userText}\n\n[A web search for this, done just now: ${outcome.spoken}]\nAnswer from that search, in your own voice. Do not contradict it.`
+          );
+          continue;
+        }
+      }
       return { text: plainSpeech(turn.text), args: {}, fact, ran };
     }
 
@@ -324,7 +389,7 @@ export async function askWithTools(
     for (const call of turn.calls) {
       // Asking back ends the turn: the question is the reply, and the answer
       // arrives as the next sentence with this one in the history.
-      if (call.name === ASK_BACK.name) {
+      if (call.name.toLowerCase().replace(/[^a-z]/g, '') === 'askback') {
         const question = String((call.args as Record<string, unknown> | undefined)?.question ?? '').trim();
         if (question) {
           // The question stands on its own. Anything looked up first went to
@@ -335,7 +400,7 @@ export async function askWithTools(
         continue;
       }
 
-      const ability = abilityById(abilityIdFor(call.name));
+      const ability = abilityById(abilityIdFor(call.name, available.map((a) => a.id)));
 
       // The model can only see tools the mode allows, so this is a model
       // inventing a name — answered, not trusted.
@@ -358,7 +423,7 @@ export async function askWithTools(
           .filter(unique)
           .join(' ');
         return {
-          text: said,
+          text: plainSpeech(said),
           ability,
           args,
           fact,
@@ -378,5 +443,5 @@ export async function askWithTools(
   // Ran out of rounds with tools still being called. What did come back is
   // real, so say that rather than nothing.
   const said = ran.filter((r) => r.ok).map((r) => r.spoken).filter(unique).join(' ');
-  return { text: said || troubleLine(context), args: {}, fact, ran };
+  return { text: plainSpeech(said) || troubleLine(context), args: {}, fact, ran };
 }
