@@ -54,7 +54,7 @@ import { shortDate, windowFor, within as inWindow } from './when';
 import { MODES } from './modes';
 import * as google from './google';
 import { isGoogleConnected } from './googleAuth';
-import { lightBrief, lightDigest, lightDocument, lightPlan, lightResearch } from './lightModel';
+import { lightBrief, lightDigest, lightDocument, lightEmail, lightPlan, lightResearch } from './lightModel';
 
 /**
  * Weather codes as a person would say them, not as WMO defines them.
@@ -146,6 +146,15 @@ export type AbilityResult = {
    * next ability.
    */
   needsConfirming?: boolean;
+  /**
+   * The arguments the confirmation should re-run with, when they differ from
+   * the ones the turn started with.
+   *
+   * An email written by Grove is drafted before the press and read aloud; the
+   * press must send that draft, not a new one written a second time. The draft
+   * travels here so "yes" means yes to the words that were heard.
+   */
+  confirmArgs?: Record<string, string>;
   /**
    * Start the music only once Grove has stopped talking.
    *
@@ -724,6 +733,45 @@ const MAIL_READ: Ability = {
   },
 };
 
+/**
+ * An email body with their sign-off on it.
+ *
+ * Added here rather than written by the model, because the model does not
+ * reliably know their name and invents one when it doesn't — and a reply
+ * signed "Alex" from someone called something else is worse than unsigned.
+ * Left alone when the body already ends with a sign-off.
+ */
+async function signed(body: string): Promise<string> {
+  const text = body.trim();
+  if (/\n\s*(?:best|thanks|thank you|cheers|regards|kind regards|sincerely|all the best)[,!.]?\s*\n?\s*[A-Z][\w'-]*\s*$/i.test(text)) {
+    return text;
+  }
+  // A sign-off is a nicety; it must never be the reason an email did not go.
+  let name: string | null = null;
+  try {
+    name = await google.myFirstName();
+  } catch {
+    name = null;
+  }
+  return name ? `${text}\n\nBest,\n${name}` : text;
+}
+
+/**
+ * The draft, as it is read back before the press.
+ *
+ * Read whole when it is short enough to hear — which a concise email is — so
+ * the thing being agreed to is the thing that will be sent. The words are
+ * Grove's now, not theirs, and a confirmation of words you have not heard is
+ * not a confirmation. A long one is named by its opening instead, cut at a
+ * sentence rather than mid-word.
+ */
+function readBack(body: string): string {
+  const text = body.replace(/\s+/g, ' ').trim();
+  if (text.length <= 420) return `"${text}"`;
+  const sentences = text.match(/[^.!?]+[.!?]+/g) ?? [text];
+  return `"${sentences.slice(0, 2).join(' ').trim()}" — and a bit more, on the card`;
+}
+
 const MAIL_SEND: Ability = {
   id: 'mail.send',
   name: 'Send mail',
@@ -735,7 +783,11 @@ const MAIL_SEND: Ability = {
     to: { type: 'string', what: 'who it goes to — a name is fine, it will be looked up', required: true },
     confirmed: { type: 'string', what: 'never set this; the turn sets it after the person says yes' },
     subject: { type: 'string', what: 'the subject line' },
-    body: { type: 'string', what: 'what it says', required: true },
+    body: {
+      type: 'string',
+      what: 'what they want to say, in their own words — the app writes it up as a proper email',
+      required: true,
+    },
   },
   examples: ['email Priya to say I am running late', 'email Sam the address'],
   run: async (args) => {
@@ -750,7 +802,8 @@ const MAIL_SEND: Ability = {
     // "Send it to me" is the one address that needs no lookup and cannot be
     // guessed wrong. mail.summarise already understood it; sending did not, so
     // the same words worked in one place and failed in the other.
-    if (/^(me|myself|my ?self|my own|my email|my inbox)$/i.test(asked)) {
+    const toSelf = /^(me|myself|my ?self|my own|my email|my inbox)$/i.test(asked);
+    if (toSelf) {
       const own = await google.me();
       if (!own) return { ok: false, spoken: 'I could not work out your own address.' };
       to = own;
@@ -759,7 +812,32 @@ const MAIL_SEND: Ability = {
       if (matches === null) {
         return { ok: false, spoken: google.explain('sending that') };
       }
-      if (matches.length === 0) return { ok: false, spoken: `I have no address for ${asked}.` };
+      if (matches.length === 0) {
+        // Not in contacts is not the same as unknown. Someone who emailed you
+        // yesterday has an address in your inbox, and answering "I have no
+        // address for Mark" with his message sitting there is absurd. Only a
+        // sender whose name actually matches counts, and only one of them.
+        const recent = (await google.searchMail({ from: asked, limit: 5 })) ?? [];
+        const senders = [
+          ...new Map(
+            recent
+              .filter((m) => isFrom(m.from, asked))
+              .map((m) => [/<([^>]+)>/.exec(m.from)?.[1]?.toLowerCase() ?? '', m.from] as const)
+              .filter(([address]) => address.includes('@'))
+          ).entries(),
+        ];
+        if (senders.length === 1) {
+          matches.push({ name: saySender(senders[0][1]), email: senders[0][0] });
+        } else if (senders.length > 1) {
+          return {
+            ok: false,
+            spoken: `I have mail from ${senders.length} people called ${asked}. Which one?`,
+            detail: senders.map(([address, from]) => `${saySender(from)} — ${address}`).join('\n'),
+          };
+        } else {
+          return { ok: false, spoken: `I have no address for ${asked}.` };
+        }
+      }
       // Two people with the same first name is a question, not a coin toss —
       // and mail is the one ability here that cannot be taken back.
       if (matches.length > 1) {
@@ -788,21 +866,30 @@ const MAIL_SEND: Ability = {
       return { ok: false, spoken: google.explain('sending mail') };
     }
 
+    // Their words become an email here, in one call that does nothing else —
+    // not in the turn's prompt, where the same instruction was followed one
+    // time and ignored the next. A note to themselves is left as they said it.
+    const draft =
+      (args.draft || '').trim() ||
+      (toSelf ? body : ((await lightEmail({ gist: body, to: asked })) ?? body));
+
     if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
       // Short mail is read out whole, because the words are what is being
       // agreed to. Long mail is named by its subject instead: a body cut off
       // at a character count ends mid-word, and "Prof. Chen grante" is not
       // something anyone can make a decision about. The whole message is on
       // the card either way.
-      const heard = body.length <= 110 ? body : `"${subject}"`;
       return {
         ok: false,
         needsConfirming: true,
-        spoken: `Sending to ${asked}: ${heard}`,
-        detail: `To ${to}\nSubject: ${subject}\n\n${body}`,
+        spoken: `Here's the email to ${toSelf ? 'yourself' : asked}: ${readBack(draft)}`,
+        detail: `To ${to}\nSubject: ${subject}\n\n${toSelf ? draft : await signed(draft)}`,
+        confirmArgs: { ...args, draft },
       };
     }
-    const sent = await google.sendMail(to, subject, body);
+    // A note to yourself is not signed: "Best, Vishnu" at the bottom of your own
+    // reminder is the tell of something written by a machine.
+    const sent = await google.sendMail(to, subject, toSelf ? draft : await signed(draft));
     // The reason matters most here. "That did not send" covered an expired
     // sign-in, a missing scope and a dead network alike — and sending is the
     // one thing where knowing which is the difference between fixing it in ten
@@ -1214,12 +1301,17 @@ const MAIL_REPLY: Ability = {
   args: {
     to: { type: 'string', what: 'who the message was from' },
     about: { type: 'string', what: 'what the message was about' },
-    body: { type: 'string', what: 'what the reply says', required: true },
+    body: {
+      type: 'string',
+      what: 'what they want to say back, in their own words — the app writes it up as a proper reply',
+      required: true,
+    },
     confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
   },
   examples: [
     'reply to Priya saying that works for me',
     'respond to that email and say I will be there',
+    'respond to that email and tell them no, I am busy',
     'answer Sam that I am running late',
   ],
   run: async (args) => {
@@ -1233,8 +1325,15 @@ const MAIL_REPLY: Ability = {
     if (found === null) {
       return { ok: false, spoken: google.explain('that reply') };
     }
+    // Nothing from them to reply to, but a person was named: they want to say
+    // this to that person, and a new email does it. "Email Priya that…" routed
+    // here and stopped at "I could not find the message from Priya", which is
+    // true and useless. Same draft, same read-back, same press.
+    if (found.length === 0 && (args.to || '').trim()) {
+      return MAIL_SEND.run({ to: args.to, body, ...(args.draft ? { draft: args.draft } : {}), ...(args.confirmed ? { confirmed: args.confirmed } : {}) });
+    }
     if (found.length === 0) {
-      const which = args.to ? ` from ${args.to}` : args.about ? ` about ${args.about}` : '';
+      const which = args.about ? ` about ${args.about}` : '';
       return { ok: false, spoken: `I could not find the message${which} to reply to.` };
     }
 
@@ -1260,22 +1359,31 @@ const MAIL_REPLY: Ability = {
     const named = (args.to || '').trim();
     const target = named ? found.find((m) => isFrom(m.from, named)) : found[0];
     if (!target) {
-      return { ok: false, spoken: `I couldn't find a message from ${named} to reply to.` };
+      return MAIL_SEND.run({ to: named, body, ...(args.draft ? { draft: args.draft } : {}), ...(args.confirmed ? { confirmed: args.confirmed } : {}) });
     }
 
     // A reply is sent mail, and sent mail is not taken back. mail.send always
     // asked; this did not, which was survivable while a keyword gate stood in
     // front of it and is not now that the model chooses what runs.
+    const draft =
+      (args.draft || '').trim() ||
+      ((await lightEmail({
+        gist: body,
+        to: saySender(target.from),
+        replyingTo: `${target.subject}: ${target.snippet}`,
+      })) ?? body);
+
     if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
       return {
         ok: false,
         needsConfirming: true,
-        spoken: `Replying to ${saySender(target.from)}: ${body.slice(0, 120)}`,
-        detail: target.subject,
+        spoken: `Here's the reply to ${saySender(target.from)}: ${readBack(draft)}`,
+        detail: `${/^re:/i.test(target.subject) ? target.subject : `Re: ${target.subject}`}\n\n${await signed(draft)}`,
+        confirmArgs: { ...args, draft },
       };
     }
 
-    const sent = await google.replyTo(target, body);
+    const sent = await google.replyTo(target, await signed(draft));
     return sent
       ? { ok: true, spoken: `Replied to ${saySender(target.from)}.`, detail: target.subject }
       : { ok: false, spoken: google.explain('that reply') };

@@ -90,7 +90,7 @@ export function abilityIdFor(toolName: string, ids: string[] = []): string {
  * ability with the decision attached, and a model that could set it would be
  * able to confirm on the person's behalf.
  */
-const NOT_THE_MODELS_TO_SET = new Set(['confirmed']);
+const NOT_THE_MODELS_TO_SET = new Set(['confirmed', 'draft']);
 
 function describe(name: string, spec: ArgSpec): { type: 'STRING' | 'NUMBER'; description: string } {
   return {

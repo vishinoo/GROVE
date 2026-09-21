@@ -1107,6 +1107,63 @@ export async function lightDocument(
 }
 
 /**
+ * Someone's gist, written up as the email they would have sent.
+ *
+ * One job, one prompt. The same instruction inside the turn's system prompt —
+ * which is also juggling thirty tools, a personality and a calendar — was
+ * followed one time and ignored the next: "tell him I'll send it tomorrow"
+ * went out as exactly that, no greeting, in lower case. A call that does
+ * nothing but this does it every time.
+ *
+ * The line it must not cross is invention. It may make "no, I'm busy" polite;
+ * it may not give a reason, suggest another day, or promise anything, because
+ * the person approving it by ear will not catch an added sentence they did not
+ * say.
+ */
+export async function lightEmail(input: {
+  gist: string;
+  to: string;
+  replyingTo?: string;
+}): Promise<string | null> {
+  const gist = input.gist.trim();
+  if (!gist) return null;
+  const text = await complete(
+    `You turn what someone wants to say into the email they would send. Output only the email body.
+
+- Start with "Hi" and how the recipient is addressed: their first name, or title and surname for a professor, doctor or anyone formal ("Hi Professor Chen,").
+- Then their point in one to three short sentences: clear, polite, professional, warm but not gushing. Rephrase it the way a composed professional would write it — never copy their casual words as they are. Thank them only when replying to something they sent, and only for that.
+  "no I'm busy" (replying to an invitation) → "Thanks for thinking of me. Unfortunately I'm not available then, so I'll have to pass this time."
+  "I'll send it tomorrow" → "I'll have it over to you tomorrow."
+  "can't make the study session tonight" → "Unfortunately I won't be able to make the study session tonight."
+- Say exactly what they meant and NOTHING more. Never add a reason, date, time, place, apology, offer, suggestion or promise they did not give. "No, I'm busy" is a polite no because they are not available — not an excuse, not "maybe next week".
+- Keep any specific fact they gave (times, days, amounts, names) exactly as given.
+- No subject line, no sign-off, no name at the end, no placeholders like [Name], no markdown.`,
+    [
+      {
+        role: 'user',
+        content: [
+          `To: ${input.to}`,
+          input.replyingTo ? `Replying to their message: ${input.replyingTo.slice(0, 600)}` : '',
+          `What they want to say: ${gist}`,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      },
+    ],
+    false,
+    false,
+    false,
+    400
+  );
+  const body = (text ?? '')
+    .replace(/[*`]+/g, '')
+    // The prompt says no sign-off; this makes sure, since the app adds one.
+    .replace(/\n+\s*(?:best|thanks|thank you|cheers|regards|kind regards|sincerely|all the best)[,!.]?\s*(?:\n+[^\n]*)?\s*$/i, '')
+    .trim();
+  return body || null;
+}
+
+/**
  * What is worth remembering in a stretch of someone's life.
  *
  * One call over a batch — a dozen turns, or one finished note — rather than one

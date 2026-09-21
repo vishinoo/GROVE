@@ -249,6 +249,27 @@ their answer is the signal. The pulse is delayed so a fast turn makes no sound
 at all. The JS side probes for the native functions, so an update reaching an
 older binary is silent rather than broken.
 
+## Email in your words, sent in better ones
+
+You give the gist — "tell them no, I'm busy" — and `lightEmail` writes the email:
+a greeting ("Hi Professor Chen,"), the point in one to three sentences, your
+first name signed by code from your Google profile (`signed()`), never by the
+model, which invents names. Texts are left in your own voice.
+
+- **Its own call, not a rule in the turn's prompt.** The same instruction in the
+  big system prompt was followed one time and ignored the next.
+- **It may polish, never add.** No reasons, dates, promises or offers you didn't
+  give. The approver is listening, not reading, and will not catch an extra
+  sentence. The prompt's own examples leak: "thanks for your patience" in an
+  example ended up in unrelated emails, so examples are kept neutral.
+- **The press sends what was heard.** The draft is read back in full and
+  carried to the confirmation in `confirmArgs`; a confirmation that re-drafted
+  would send words nobody approved. `draft` is on the list the model can never
+  set, alongside `confirmed`.
+- **Addresses come from the inbox too.** Someone who emailed you has an address
+  even when they are not in contacts. And a reply with nothing to reply to
+  becomes a new email to the person named, through the same read-back and press.
+
 ## Failing honestly
 
 - **A thrown error is not "offline" unless it says so.** `failure.ts` sorts

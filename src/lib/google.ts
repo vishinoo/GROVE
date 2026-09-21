@@ -633,6 +633,25 @@ export async function me(): Promise<string | null> {
   return ownAddress;
 }
 
+let ownName: string | null | undefined;
+
+/**
+ * The first name on their Google account, for signing mail.
+ *
+ * Grove writes emails in their voice now, and an email that ends with nobody's
+ * name reads as sent by a script. The profile scope has been granted since the
+ * first sign-in, so this costs one call per session.
+ */
+export async function myFirstName(): Promise<string | null> {
+  if (ownName !== undefined) return ownName;
+  const profile = await call<{ given_name?: string; name?: string }>(
+    'https://www.googleapis.com/oauth2/v2/userinfo'
+  );
+  const first = (profile?.given_name || profile?.name?.split(' ')[0] || '').trim();
+  ownName = first || null;
+  return ownName;
+}
+
 /* ------------------------------------------------------------ contacts */
 
 export type Contact = { name: string; email: string; phone?: string };

@@ -747,7 +747,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // Held, not done. The ability stopped short of the irreversible part and
     // said what it is about to do; the press decides whether it happens.
     if (outcome.needsConfirming) {
-      awaitingYes.current = { ability, args: reply.args, at: Date.now() };
+      awaitingYes.current = { ability, args: outcome.confirmArgs ?? reply.args, at: Date.now() };
       if (!mounted.current) return;
       setCaption(outcome.spoken);
       await whenQuiet();
