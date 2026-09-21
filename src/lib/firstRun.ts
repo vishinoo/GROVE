@@ -41,8 +41,3 @@ export async function hasSeenOnboarding(): Promise<boolean> {
 export async function markOnboardingSeen(): Promise<void> {
   await AsyncStorage.setItem(SEEN_KEY, '1').catch(() => {});
 }
-
-/** "Replay intro", for when the hardware walkthrough is worth seeing again. */
-export async function resetOnboarding(): Promise<void> {
-  await AsyncStorage.removeItem(SEEN_KEY).catch(() => {});
-}

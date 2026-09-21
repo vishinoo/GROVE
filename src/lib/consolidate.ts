@@ -16,6 +16,7 @@
 import { lightConsolidate } from './lightModel';
 import {
   absorb,
+  addPending,
   current,
   loadLife,
   readyToConsolidate,
@@ -77,13 +78,35 @@ function todayLine(now = new Date()): string {
   });
 }
 
-async function learn(uid: string, material: string, source: string): Promise<Life | null> {
+/**
+ * Reads material into the long memory.
+ *
+ * 'failed' and 'nothing' are different outcomes and the buffer treats them
+ * differently: nothing worth keeping is an answer, a call that never came back
+ * is not — and clearing the buffer on both threw away every turn said while
+ * the phone had no signal.
+ */
+async function learn(uid: string, material: string, source: string): Promise<'kept' | 'nothing' | 'failed'> {
   const life = await loadLife(uid);
   const learned = parse(await lightConsolidate(material, knownBlock(life, material), todayLine()));
-  if (!learned) return null;
-  if ((learned.entities?.length ?? 0) === 0 && (learned.episodes?.length ?? 0) === 0) return null;
-  return updateLife(uid, (now) => absorb(now, learned, source));
+  if (!learned) return 'failed';
+  if ((learned.entities?.length ?? 0) === 0 && (learned.episodes?.length ?? 0) === 0) return 'nothing';
+  await updateLife(uid, (now) => absorb(now, learned, source));
+  return 'kept';
 }
+
+/** How long unread turns are kept for another try before being let go. */
+const RETRY_FOR_MS = 48 * 3_600_000;
+
+/**
+ * One read of the buffer at a time, per account.
+ *
+ * Opening the app and a turn filling the buffer can both start a read in the
+ * same second. Two reads take the same turns, and the second one's cleanup
+ * then removes turns that arrived in between, unread. The second caller now
+ * waits for the first instead.
+ */
+const reading = new Map<string, Promise<void>>();
 
 /**
  * Adds a finished exchange to the buffer, and reads the buffer when it is full.
@@ -92,10 +115,7 @@ async function learn(uid: string, material: string, source: string): Promise<Lif
  * is most turns.
  */
 export async function afterTurn(uid: string, said: string, replied: string): Promise<void> {
-  const life = await updateLife(uid, (now) => ({
-    ...now,
-    pending: [...now.pending, { at: new Date().toISOString(), said: said.slice(0, 500), replied: replied.slice(0, 500) }],
-  }));
+  const life = await updateLife(uid, (now) => addPending(now, said, replied));
   if (!readyToConsolidate(life)) return;
   await consolidateNow(uid);
 }
@@ -107,6 +127,14 @@ export async function afterTurn(uid: string, said: string, replied: string): Pro
  * remembered rather than sitting unread until the next dozen turns.
  */
 export async function consolidateNow(uid: string): Promise<void> {
+  const inFlight = reading.get(uid);
+  if (inFlight) return inFlight;
+  const run = readBuffer(uid).finally(() => reading.delete(uid));
+  reading.set(uid, run);
+  return run;
+}
+
+async function readBuffer(uid: string): Promise<void> {
   const life = await loadLife(uid);
   if (life.pending.length === 0) return;
 
@@ -114,12 +142,15 @@ export async function consolidateNow(uid: string): Promise<void> {
     .map((t) => `[${new Date(t.at).toLocaleString('en-GB')}]\nThem: ${t.said}\nGrove: ${t.replied}`)
     .join('\n\n');
   const taken = life.pending.length;
+  const oldest = new Date(life.pending[0].at).getTime();
 
-  await learn(uid, material, 'conversation');
+  const outcome = await learn(uid, material, 'conversation');
 
-  // Cleared whether or not the model had anything to say, and only the turns
-  // that were read: a failed call must not make the same turns be read again
-  // for ever, and turns that arrived meanwhile have not been looked at.
+  // A failed read keeps the turns for the next one — unless they have been
+  // waiting two days, at which point a call that keeps failing must not hold
+  // the buffer for ever. Only the turns that were read are removed; any that
+  // arrived meanwhile have not been looked at.
+  if (outcome === 'failed' && Date.now() - oldest < RETRY_FOR_MS) return;
   await updateLife(uid, (now) => ({
     ...now,
     pending: now.pending.slice(taken),

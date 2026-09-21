@@ -208,7 +208,15 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       // gets one.
       pulseTimer.current = setTimeout(() => {
         pulseTimer.current = null;
-        if (busy(stateNow.current)) remote.workingPulse(true);
+        if (!busy(stateNow.current)) return;
+        remote.workingPulse(true);
+        // A cap, whatever else happens. Every path out of working stops the
+        // pulse, but a loop that ticks for ever if one of them is ever missed
+        // is not a risk worth taking with something playing in someone's ear.
+        pulseTimer.current = setTimeout(() => {
+          pulseTimer.current = null;
+          remote.workingPulse(false);
+        }, 90_000);
       }, 900);
     } else if (!busy(now) && busy(was)) {
       if (pulseTimer.current) clearTimeout(pulseTimer.current);

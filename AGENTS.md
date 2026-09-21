@@ -1,7 +1,8 @@
 # Grove
 
 A companion app for a pair of Bluetooth AI glasses and a ring. One agent, spoken
-to hands-free, that reaches for Noctus tools when a job needs one.
+to hands-free, that runs on the phone and reaches Google, the calendar, music
+and the web directly. Noctus is optional.
 
 ## Expo HAS CHANGED
 
@@ -148,11 +149,11 @@ due sparks when Grove is next opened.
 - `src/lib/persona.ts` — the manner is user-authored and goes into a system
   prompt, so `mannerDirective` wraps it to quarantine it as style-only. It is a
   guard, not a guarantee; keep the framing when editing.
-- `src/lib/lightModel.ts` — no longer holds a key. The model call goes through
-  `POST /api/grove/chat` on Noctus, which holds the secret and forwards. It was
-  a bundled `EXPO_PUBLIC_*` key until 2026-09-07; that was documented as testing
-  only and stopped being acceptable when a build reached TestFlight. Everything
-  outside this file is provider-agnostic, so swapping provider is still one file.
+- `src/lib/lightModel.ts` — every model call, and the only file that knows a
+  provider. The Gemini key is a bundled `EXPO_PUBLIC_*` value: accepted for a
+  personal build on a prepaid key, and to be moved behind a server before a
+  build reaches anyone else. Everything outside this file is provider-agnostic,
+  so that move is one file.
 - `src/lib/modes.ts` — a mode is a manner, a set of allowed abilities, and how
   freely Grove may speak first. Commute has no mail on purpose: a message read
   aloud at a junction is worse than no mail at all.
@@ -329,6 +330,15 @@ keeps is readable and deletable on the Sparks screen, because a memory you
 cannot see is one you cannot correct.
 
 Details that were bugs first:
+
+- **A failed read keeps the buffer.** Clearing it whether or not the model
+  answered threw away every turn said without signal. A failed read now keeps
+  the turns for the next one, for up to two days. And only one read runs per
+  account at a time: two at once each took the same turns, and the second's
+  clean-up removed turns that had arrived in between, unread.
+- **Promises get closed.** `memory.done` ("I sent Jason the build") marks the
+  closest open commitment as kept. Without it nothing ever did, and "what
+  should I be doing" raised finished work for ever.
 
 - **A leading word only matches inside one kind.** "Mark" the investor was
   merged into "MARK 312" the course, producing one entity holding a person's

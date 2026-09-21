@@ -43,12 +43,14 @@ import { loadNotes, searchNotes } from './notes';
 import { loadPlayed, playedLines, recordPlayed } from './listening';
 import { loadDocs, rememberDoc } from './docs';
 import {
+  closeEpisode,
   entityLines,
   episodeLines,
   findEntity,
   loadLife,
   openCommitments,
   searchLife,
+  updateLife,
 } from './life';
 import { shortDate, windowFor, within as inWindow } from './when';
 import { MODES } from './modes';
@@ -2609,6 +2611,45 @@ const LIFE_SEARCH: Ability = {
 };
 
 /**
+ * "I sent Jason the build."
+ *
+ * A promise the long memory recorded stays outstanding until something says
+ * it was kept, and nothing did: "what should I be doing" went on raising the
+ * build for Jason long after it was sent. This closes it — the closest open
+ * commitment to the words, and only one, so "done" never clears the wrong
+ * thing. Not a confirmation: reopening a closed promise is one sentence away.
+ */
+const COMMITMENT_DONE: Ability = {
+  id: 'memory.done',
+  name: 'Mark as done',
+  what: 'Marks something they promised or had outstanding as done, so it stops coming up. For "I sent Jason the build", "that\'s done", "I handed in the draft".',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: { what: { type: 'string', what: 'what they finished, in their words', required: true } },
+  examples: ['mark the build for Jason as done', 'tick off handing in the draft', 'mark the pricing page as done'],
+  run: async (args) => {
+    const what = (args.what || '').trim();
+    if (!what) return { ok: false, spoken: 'What did you finish?' };
+    const life = await loadLife(CURRENT_UID);
+    const open = openCommitments(life);
+    if (open.length === 0) return { ok: true, spoken: 'Nothing was outstanding — noted all the same.' };
+
+    const found = searchLife({ ...life, episodes: open }, what).episodes;
+    const hit = found[0];
+    if (!hit) {
+      return {
+        ok: false,
+        spoken: "I couldn't match that to anything outstanding. Which one did you finish?",
+        detail: episodeLines(open, life),
+      };
+    }
+    await updateLife(CURRENT_UID, (now) => closeEpisode(now, hit.id));
+    return { ok: true, spoken: `Done: ${hit.title}.` };
+  },
+};
+
+/**
  * "Brief me on Jason."
  *
  * Pulls the person together from everywhere they appear: what Grove has been
@@ -3318,6 +3359,7 @@ const SET_MODE: Ability = {
 
 export const ABILITIES: Ability[] = [
   NOW,
+  COMMITMENT_DONE,
   LIFE_SEARCH,
   PERSON_BRIEF,
   MAIL_IMPORTANT,

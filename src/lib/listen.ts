@@ -64,19 +64,6 @@ export function isListening(): boolean {
   return running;
 }
 
-export async function requestPermission(): Promise<boolean> {
-  const module = speech();
-  if (!module) return false;
-  try {
-    const existing = await module.getPermissionsAsync();
-    if (existing.granted) return true;
-    const asked = await module.requestPermissionsAsync();
-    return asked.granted;
-  } catch {
-    return false;
-  }
-}
-
 export type ListenOptions = {
   /** Keep audio on the device rather than sending it to Apple. */
   preferOnDevice?: boolean;

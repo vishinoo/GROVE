@@ -92,11 +92,6 @@ let suppressVolumeUntil = 0;
 let unsubscribes: (() => void)[] = [];
 let resident = false;
 
-/** The trigger is only real when the native module is here. */
-export function isSupported(): boolean {
-  return isAvailable();
-}
-
 /**
  * Whether the ring can reach Grove right now.
  *

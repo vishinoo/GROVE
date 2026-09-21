@@ -88,21 +88,6 @@ export type Mode = {
    * than no feature.
    */
   onEnter?: string;
-  /**
-   * Said aloud when a turn is taking long enough that silence would read as a
-   * crash — while a search is genuinely in flight.
-   *
-   * This is not the promise the prompt forbids. That rule exists because "let
-   * me check" with nothing behind it ends the conversation with someone
-   * waiting. Here the work is already running and the answer is guaranteed to
-   * follow, so saying so is the honest thing rather than the dishonest one.
-   *
-   * Several per mode, picked at random: the same sentence every time is how you
-   * notice it is a canned line rather than someone talking to you.
-   */
-  holding: string[];
-  /** When the search came back with nothing worth saying. */
-  empty: string;
   /** When nothing answered at all — no model, no network. */
   stuck: string;
 };
@@ -119,8 +104,6 @@ export const MODES: Mode[] = [
     manner: '',
     allow: null,
     interrupt: 'freely',
-    holding: ['One second.', 'Give me a moment.', 'Looking now.'],
-    empty: "I couldn't find anything on that.",
     stuck: 'Nothing came back. Try me again in a second.',
   },
   {
@@ -138,15 +121,13 @@ export const MODES: Mode[] = [
       'mode.set', 'notes.search', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.find',
       'calendar.add', 'weather.now', 'memory.recall', 'memory.add', 'music.play', 'music.recent',
       'mail.search', 'mail.summarise', 'mail.important', 'contact.find',
-      'now.context', 'memory.search', 'person.brief', 'reminders.batch',
+      'now.context', 'memory.search', 'memory.done', 'person.brief', 'reminders.batch',
     ],
     interrupt: 'never',
     // Something happens on the way in, rather than the mode being a label on a
     // manner. What it does is what focus actually needs: know what is coming so
     // it can stop guarding the clock, and something to work to.
     onEnter: 'Tell me what is left on my calendar today in one sentence, then put on something instrumental to work to.',
-    holding: ['Moment.', 'Checking.'],
-    empty: 'Nothing useful.',
     stuck: 'No answer right now.',
   },
   {
@@ -162,14 +143,12 @@ export const MODES: Mode[] = [
       'doc.find', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.add',
       'mail.search', 'contact.find',
       'weather.now', 'maps.eta', 'maps.go', 'music.recent', 'doc.create', 'doc.recent',
-      'now.context', 'memory.search', 'person.brief', 'reminders.batch',
+      'now.context', 'memory.search', 'memory.done', 'person.brief', 'reminders.batch',
     ],
     interrupt: 'never',
     // Study is the one mode where being asked something back is the point, so
     // entering it opens with the question rather than an announcement.
     onEnter: 'Ask me what I am studying, then put on something instrumental without words.',
-    holding: ['Let me look that up properly — one moment.', 'Good question. Give me a second to check rather than guess.'],
-    empty: "I couldn't find a good source for that, so I'd rather not guess.",
     stuck: "I can't reach anything to check that with at the moment.",
   },
   {
@@ -185,15 +164,13 @@ export const MODES: Mode[] = [
     allow: [
       'mode.set', 'notes.search', 'music.play', 'music.recent', 'weather.now', 'reminders.add', 'memory.recall',
       'memory.add', 'day.brief', 'calendar.read', 'gcal.read', 'calendar.find',
-      'mail.search', 'now.context', 'memory.search', 'person.brief', 'reminders.batch',
+      'mail.search', 'now.context', 'memory.search', 'memory.done', 'person.brief', 'reminders.batch',
     ],
     interrupt: 'sparingly',
     // The evening version of a brief: what is coming tomorrow, said once, and
     // something quiet on. Nothing that opens a thread — no mail, no sending —
     // which is what the allow list above is for.
     onEnter: 'Tell me what is on tomorrow in one sentence, then put on something calm.',
-    holding: ['One moment.', 'Just having a look.'],
-    empty: 'Nothing on that one.',
     stuck: "Can't check that just now.",
   },
   {
@@ -210,8 +187,6 @@ export const MODES: Mode[] = [
     allow: null,
     interrupt: 'sparingly',
     onEnter: 'Tell me what needs my attention — my next meeting and anything in my inbox that actually needs me — in two sentences.',
-    holding: ['On it.', 'One moment.'],
-    empty: 'Nothing there.',
     stuck: "Can't reach that right now.",
   },
   {
@@ -228,8 +203,6 @@ export const MODES: Mode[] = [
     ],
     interrupt: 'never',
     onEnter: 'Put on something with energy to train to.',
-    holding: ['Sec.', 'Checking.'],
-    empty: 'Nothing on that.',
     stuck: 'No answer right now.',
   },
   {
@@ -247,8 +220,6 @@ export const MODES: Mode[] = [
       'reminders.add', 'now.context',
     ],
     interrupt: 'never',
-    holding: ['One sec.', 'Looking.'],
-    empty: 'Nothing on that one.',
     stuck: "Can't check that just now.",
   },
   {
@@ -267,8 +238,6 @@ export const MODES: Mode[] = [
     ],
     interrupt: 'sparingly',
     onEnter: 'Tell me what is next today, how long it takes to get there, and what it is doing outside.',
-    holding: ['Checking.', 'One moment.'],
-    empty: 'Nothing on that.',
     stuck: 'Cannot reach that right now.',
   },
   {
@@ -282,17 +251,9 @@ export const MODES: Mode[] = [
     allow: null,
     interrupt: 'sparingly',
     onEnter: 'Tell me anything I still need to do today, in one sentence.',
-    holding: ['One moment.', 'Just a sec.'],
-    empty: 'Nothing on that.',
     stuck: "Can't check that just now.",
   },
 ];
-
-/** One of the mode's holding lines, at random. */
-export function holdingLine(mode: Mode): string {
-  const lines = mode.holding.length > 0 ? mode.holding : ['One second.'];
-  return lines[Math.floor(Math.random() * lines.length)];
-}
 
 export function modeById(id: string): Mode {
   return MODES.find((m) => m.id === id) ?? MODES[0];

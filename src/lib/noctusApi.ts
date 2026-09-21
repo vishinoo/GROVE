@@ -206,22 +206,12 @@ export type NoctusUser = {
 
 /* ---------------------------------------------------------------- account */
 
-export function fetchMe(): Promise<{ user: NoctusUser }> {
-  return request('/api/auth/me');
-}
-
 /** Noctus creates the user row on first sign-in from a new client. */
 export function syncAccount(displayName?: string): Promise<{ user: NoctusUser }> {
   return request('/api/auth/sync', { method: 'POST', body: { displayName } });
 }
 
 /* --------------------------------------------------------- integrations */
-
-/** Which providers this Noctus can actually complete a consent flow for. */
-export function fetchOAuthProviders(signal?: AbortSignal): Promise<Record<string, boolean>> {
-  return request('/api/oauth/providers', { auth: false, signal });
-}
-
 
 /** The integration layer: which of the user's connections are live. */
 export function fetchConnections(signal?: AbortSignal): Promise<{ connected: string[] }> {

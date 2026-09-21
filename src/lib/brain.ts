@@ -108,6 +108,7 @@ const TOOL_RULES = `How to use your tools:
 - To send or share a document you wrote, look it up with the documents-written tool first and put its link in the email. Never guess a link.
 - Anything about their own life — what they should be doing, what they promised, who someone is, what was decided, an idea they had — comes from the memory tools, not from this conversation. You only see the last few turns; the tools see months.
 - "What should I be doing", "I have an hour, what now", "catch me up": call the where-things-stand tool, then pick ONE thing and say why it is the one, weighing deadlines, what is promised, and how long they have.
+- When they say they finished something that was outstanding ("I sent Jason the build"), mark it done.
 - "Brief me on someone" or "who is X": use the person tool. Never assemble a person from memory of this conversation.
 - "Anything important" about mail: use the tool that filters it. Name who and what they want, not how many are unread.
 - A question about when something happened, or about something from a named stretch of time, goes to the long-memory search with that time passed as the when argument.
@@ -234,8 +235,14 @@ const FRESH =
 
 const PERSONAL = /\b(?:my (?:calendar|schedule|inbox|email|emails|mail|reminders|notes|contacts|day|week)|remind me|what(?:'s| is) on)\b/i;
 
+/**
+ * Asked, not said. "That was a good game" is a remark and needs no search;
+ * "how did the game go" is a question. Only questions get looked up.
+ */
+const ASKED = /\?\s*$|^\s*(?:what|what's|whats|how|who|when|where|which|why|did|does|do|is|are|was|were|will|any|can|could|tell me|give me|check|look up|find out)\b/i;
+
 export function needsFreshFacts(text: string): boolean {
-  return FRESH.test(text) && !PERSONAL.test(text);
+  return FRESH.test(text) && ASKED.test(text) && !PERSONAL.test(text);
 }
 
 /**

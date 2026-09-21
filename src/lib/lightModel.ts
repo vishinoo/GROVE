@@ -1,36 +1,28 @@
 /**
- * The cheap tier.
+ * Every call Grove makes to a model, and the only file that knows a provider.
  *
- * Indy is rate-limited per account per hour — two messages an hour on the free
- * plan — and it was being spent on "hello". This handles the conversation that
- * doesn't need to know anything about the account, and says so when a request
- * does, at which point grove.ts escalates to Indy.
+ * Two kinds of call live here. `toolTurn` is the ordinary turn: the model is
+ * handed Grove's abilities as typed functions and chooses what to run (see
+ * brain.ts). Everything else is one job per function — `lightEmail` writes an
+ * email from a gist, `lightDocument` a document, `lightConsolidate` reads the
+ * long memory's buffer, `lightBrief` answers from a web search — because one
+ * prompt doing one thing is followed every time, and the same instruction
+ * buried in the turn's prompt was followed one time in two.
  *
- * It matters more now than it did on a screen. Grove is spoken to, so a reply
- * that takes four seconds to arrive feels broken in a way the same delay in a
- * chat bubble never did — and the free tier's two messages an hour would
- * otherwise be gone before lunch.
+ * Where a call goes: Ollama on the LAN if one answers (free), then Gemini with
+ * the device's own key, then a backend if one is configured. The order matters:
+ * while the backend came first, every turn paid its timeout before falling
+ * through.
  *
  * ─────────────────────────────────────────────────────────────────────────
- *  TEMPORARY. This file calls a model provider directly from the device.
- *
- *  `EXPO_PUBLIC_*` values are compiled into the JavaScript bundle, so a
- *  Gemini key set here is extractable from any release build by anyone who
- *  downloads it. That is acceptable for testing Grove against a throwaway
- *  key and is NOT acceptable for a build you ship.
- *
- *  The fix is a `/api/chat/light` endpoint on Noctus holding the key, the way
- *  /api/indy/chat already does. Everything outside this file talks to
- *  `lightTurn` and `lightSummarise` and knows nothing about providers, so
- *  that swap is a change to this file alone.
+ *  THE KEY IS IN THE BUNDLE. `EXPO_PUBLIC_*` values are compiled into the
+ *  JavaScript, so the Gemini key is extractable from any build by anyone who
+ *  has one. That is an accepted trade for a personal build on a prepaid key.
+ *  It stops being acceptable the day a build goes to anyone else: move the
+ *  call behind a server that holds the key. Nothing outside this file knows
+ *  which provider answers, so that is a change to this file alone.
  * ─────────────────────────────────────────────────────────────────────────
- *
- * Ollama is preferred when it's reachable because it costs nothing at all. It
- * only ever works on a LAN — the phone and the machine running `ollama serve`
- * have to be on the same network — so it can never be the only path.
  */
-
-
 
 import { failureKind } from './failure';
 import * as SecureStore from 'expo-secure-store';
@@ -41,9 +33,8 @@ import { getNoctusUrl } from './noctusApi';
 const OLLAMA_URL = (process.env.EXPO_PUBLIC_OLLAMA_URL ?? '').replace(/\/$/, '');
 const OLLAMA_MODEL = process.env.EXPO_PUBLIC_OLLAMA_MODEL || 'llama3.2';
 
-/** Mobile networks are slow, but a chat reply that takes this long is lost. */
 /**
- * How long the model gets before Grove gives up and says something.
+ * How long a local Ollama gets before Grove gives up and says something.
  *
  * Cut from twelve seconds. Spoken, a pause this long is indistinguishable from
  * the app having crashed — people press the ring again, which cancels the turn,
@@ -102,9 +93,8 @@ export type AbilitySummary = { id: string; what: string }[];
 /**
  * Whether Grove has a model at all.
  *
- * True whenever Noctus is reachable, because the key lives there now — the app
- * can no longer tell from its own configuration, and pretending otherwise would
- * report "no model" on a perfectly working install.
+ * Always true, because it cannot be told from configuration: a key may be in
+ * the bundle or the Keychain, Ollama may be up, or a backend may answer.
  */
 export function isLightModelConfigured(): boolean {
   // Kept true because the answer is genuinely "it depends": a key may sit in
@@ -114,7 +104,7 @@ export function isLightModelConfigured(): boolean {
   return true;
 }
 
-/** Whether Grove can still think with Noctus down. Shown in Settings. */
+/** Whether this phone has a key of its own. Shown in Settings. */
 export async function hasOwnKey(): Promise<boolean> {
   return Boolean(await loadOwnKey());
 }
@@ -188,28 +178,11 @@ async function askOllama(
 }
 
 /**
- * The model, through Noctus.
- *
- * This used to call Gemini directly with a key from EXPO_PUBLIC_*, which is
- * compiled into the bundle and extractable from any build. That was documented
- * as testing-only from the start and stopped being acceptable the moment a
- * build went to TestFlight, so the key moved to the server and this became a
- * call to /api/grove/chat.
- *
- * The prompt, the house rules and the ability list still live here. Noctus
- * holds the secret and forwards; it has no opinion about what Grove says.
- */
-/**
  * A key the user typed in, kept on the device only.
  *
- * The middle ground between the two bad options. A key compiled into the bundle
- * ships to everyone who installs the app; a key only on Noctus means Grove
- * cannot think when Noctus is down, which for something you talk to is the
- * whole product failing rather than one feature.
- *
- * This one is entered in Settings and stored in the Keychain, so it is on one
- * phone rather than in every build, and Grove keeps working when the server
- * does not. Unset by default: the proxy is still the primary path.
+ * Entered in Settings and stored in the Keychain, so it lives on one phone
+ * rather than in every build. When it is unset, the bundled key is used — see
+ * the note at the top of this file.
  */
 const OWN_KEY = 'grove:own-model-key:v1';
 
@@ -262,12 +235,6 @@ export async function setOwnKey(key: string): Promise<void> {
 }
 
 /**
- * Straight to the provider, using the device's own key.
- *
- * The fallback for when Noctus is unreachable — on cellular, or because the
- * machine it runs on went to sleep. Same prompt, same model, no server.
- */
-/**
  * Why the model last came back with nothing.
  *
  * "Can't get to anything right now" was said for a rate limit, a timeout, an
@@ -294,6 +261,7 @@ export function lastModelTrouble(): ModelTrouble {
   return modelTrouble;
 }
 
+/** Straight to Gemini with this device's key: the main path, no server. */
 async function askDirect(
   system: string,
   messages: LightMessage[],

@@ -102,9 +102,13 @@ export function calculate(text: string): string | null {
   const runs = t.match(/[\d.,()\s]*\d[\d.,()\s]*(?:[-+*/^][\d.,()\s]*\d[\d.,()\s]*)+/g) ?? [];
   const run = runs.sort((a, b) => b.length - a.length)[0];
   if (!run) return null;
+  // A date, a phone number or a score is not a sum — and all three are
+  // written with the dash tight against the digits ("5-2", "780-555-0199").
+  // Said out loud, subtraction arrives as "minus" and comes back spaced, so
+  // this is tested before the spaces are taken out, or "10 minus 2" is skipped.
+  if (/^\s*\d+(?:-\d+)+\s*$/.test(run)) return null;
   const expr = run.replace(/,(?=\d{3}\b)/g, '').replace(/\s+/g, '');
-  // A date or a phone number is not a sum.
-  if (!/[-+*/^]/.test(expr) || /^\d+-\d+(-\d+)?$/.test(expr)) return null;
+  if (!/[-+*/^]/.test(expr)) return null;
   try {
     const value = evaluate(expr);
     return Number.isFinite(value) ? `${expr} = ${format(value)}` : null;

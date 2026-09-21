@@ -1024,10 +1024,3 @@ export function instructionFrom(text: string): string {
   t = t.replace(/\s{2,}/g, ' ').trim().replace(/^[,\s]+|[,\s]+$/g, '');
   return t || text.trim();
 }
-
-/** The request as an activity row should label it: one trimmed sentence. */
-export function shortTask(text: string): string {
-  const t = text.trim().replace(/[.?!]+$/, '');
-  const capped = t.length > 120 ? `${t.slice(0, 117)}…` : t;
-  return capped.charAt(0).toUpperCase() + capped.slice(1);
-}

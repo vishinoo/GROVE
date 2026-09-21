@@ -159,11 +159,6 @@ export async function remember(
   return next;
 }
 
-/** Everything being worked towards, newest first. */
-export function goalsIn(facts: Fact[]): Fact[] {
-  return facts.filter((f) => f.kind === 'goal');
-}
-
 /**
  * Correct a fact in place.
  *
