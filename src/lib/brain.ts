@@ -77,6 +77,7 @@ const ASK_BACK = {
 export type RanTool = { ability: Ability; ok: boolean; spoken: string; detail?: string };
 
 const TOOL_RULES = `How to use your tools:
+- Small talk is just talk. "How's it going", "hey", "thanks", "you there?" get a reply in character and no tool — they are not questions about their day.
 - Anything about their calendar, email, weather, music, directions, contacts, messages, reminders or what you remember about them: call a tool. Never answer those from your own head — you do not have that information until a tool returns it.
 - Never say what is or is not in their calendar, inbox, music library or contacts unless a tool just told you. "That isn't in your library" without having searched is a lie, however likely it sounds.
 - If no tool covers what they asked, say plainly that you cannot do that right now. Do not invent a reason.

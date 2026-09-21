@@ -28,7 +28,6 @@ import {
   openReminders,
   ensureRemindersAccess,
   createEvent,
-  eventsAhead,
   removeEvent,
   moveEvent,
   readWhen,
@@ -2152,32 +2151,47 @@ const DAY: Ability = {
   needs: [],
   reads: true,
   args: {
-    place: { type: 'string', what: 'where they are; use what you know of where they live' },
+    place: { type: 'string', what: 'only if they named somewhere; otherwise leave empty' },
   },
-  examples: ['handle my morning', "how's my day looking", 'what have I got on'],
+  examples: ['handle my morning', "how's my day looking", 'what have I got on today'],
   run: async (args) => {
-    const [events, sky] = await Promise.all([
-      eventsAhead(24).catch(() => null),
-      args.place ? WEATHER.run({ place: args.place }).catch(() => null) : Promise.resolve(null),
+    // Google, like every other calendar read. This one was missed when the
+    // calendar moved: it kept reading the phone's own calendar, which is empty
+    // for anyone whose diary lives in Google, and answered "nothing in the
+    // diary" with a full day ahead — the exact lie the move was made to end.
+    const [upcoming, sky] = await Promise.all([
+      allEvents(2).catch(() => null),
+      // The weather finds its own place — memory, then the network — when none
+      // was given, so it no longer needs the model to supply one.
+      WEATHER.run({ place: args.place ?? '' }).catch(() => null),
     ]);
 
-    const parts: string[] = [];
+    const now = Date.now();
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+    const today = (upcoming ?? []).filter(
+      (e) => e.start.getTime() >= now - 30 * 60_000 && e.start.getTime() <= endOfDay.getTime()
+    );
 
-    if (events === null) {
+    const parts: string[] = [];
+    if (upcoming === null) {
       // Distinguished from "nothing on", which is a different fact entirely.
-      parts.push("I can't see your calendar.");
-    } else if (events.length === 0) {
-      parts.push('Nothing in the diary.');
+      parts.push(google.explain('your calendar'));
+    } else if (today.length === 0) {
+      parts.push('Nothing else on today.');
     } else {
-      const [first, second] = events;
-      let line = `${events.length} thing${events.length === 1 ? '' : 's'} on — ${first.title} ${sayWhen(first.start)}`;
+      const [first, second] = today;
+      let line = `${today.length} thing${today.length === 1 ? '' : 's'} left today — ${first.title} at ${clockOnly(first.start)}`;
       if (second) line += `, then ${second.title}`;
       parts.push(`${line}.`);
     }
-
     if (sky?.ok) parts.push(sky.spoken);
 
-    return { ok: true, spoken: parts.join(' ') };
+    return {
+      ok: upcoming !== null,
+      spoken: parts.join(' '),
+      detail: upcoming && upcoming.length > 0 ? `Today and tomorrow:\n${eventLines(upcoming)}` : undefined,
+    };
   },
 };
 
