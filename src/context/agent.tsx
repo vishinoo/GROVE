@@ -530,8 +530,11 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       held = true;
       // The voice, not the mode: a holding line is the phrase repeated most
       // often, so it is the one most likely to break the character.
-      utter(holdingFor(voice));
-    }, 2200);
+      utter(holdingFor(voice), false, true);
+      // Four seconds, not two. A phone on mobile data takes two to three for
+      // an ordinary answer, so at 2.2 nearly every reply was preceded by
+      // "give me a sec" — and the working pulse already says it is busy.
+    }, 4000);
 
     // A spoken yes or no settles a confirmation, before anything else looks at
     // the sentence. Someone wearing glasses will often answer out loud rather
@@ -852,7 +855,7 @@ function shortFailure(text: string): string {
    * person to press again — which, wearing glasses with the phone in a pocket,
    * is the moment a conversation stops being hands-free.
    */
-  const utter = useCallback((text: string, listenAfter = false) => {
+  const utter = useCallback((text: string, listenAfter = false, stillWorking = false) => {
     // Claimed at the moment of speaking, because stopSpeaking() also fires
     // onDone — an interruption and a natural ending are the same callback.
     // Unguarded, barging in went: press, stop the speech, start listening, and
@@ -877,6 +880,15 @@ function shortFailure(text: string): string {
         // talk. Punctuation was never the signal; intent is.
         if (listenAfter && !running.current) {
           void beginListening(false);
+          return;
+        }
+        // A holding line is said in the middle of a turn, not at the end of
+        // one. Dropping to resting after it showed Ready while the answer was
+        // still on its way, so people pressed — which abandons the turn — and
+        // the next question got another holding line, and the next. Every
+        // reply became "give me a sec" and nothing else.
+        if (stillWorking) {
+          setState((current) => (current === 'speaking' ? 'thinking' : current));
           return;
         }
         // And even within the same turn, only speaking becomes resting. If
