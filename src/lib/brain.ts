@@ -33,6 +33,7 @@ import {
   asToolResults,
   asUserTurn,
   lastModelTrouble,
+  lightFallback,
   toolTurn,
   type ToolHistory,
 } from './lightModel';
@@ -119,6 +120,7 @@ How to answer once tools return:
 - Answer from what came back and nothing else. If it came back empty, say so plainly.
 - You are spoken aloud through glasses. One or two sentences. No lists, no markdown, no URLs, no reading out codes or IDs.
 - Say the useful thing first. Keep your personality — a wry line is welcome — but the answer comes before the joke, never instead of it.
+- Jokes go around the facts, never into them. Never embellish what an email, event, note or person actually said — "Jason wants the build by Friday" is the fact; "Jason is threatening to cancel your licence" is an invention they might believe.
 - Never repeat the question back, never open with "Sure" or "Let me check".
 - If a tool failed, say what failed in one short sentence, in your own voice.`;
 
@@ -214,6 +216,25 @@ function fedInto(read: RanTool, args: Record<string, string>): boolean {
   return spokenWords.filter((w) => used.includes(w)).length / spokenWords.length >= 0.6;
 }
 
+/**
+ * Text as it is heard and shown, with the model's markdown taken out.
+ *
+ * Told not to use markdown, it still wraps titles in it — "*Deep Learning*",
+ * "**Inside Out**" — and the asterisks appeared on the Talk screen and, with
+ * some voices, were read aloud. Removed here, once, for every reply, rather
+ * than asked for politely in the prompt again.
+ */
+export function plainSpeech(text: string): string {
+  return text
+    .replace(/\*+/g, '')
+    .replace(/`+/g, '')
+    .replace(/(^|\s)_{1,2}([^_\n]+?)_{1,2}(?=[\s.,!?;:)]|$)/g, '$1$2')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s*[-•]\s+/gm, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
 /** Why the model came back with nothing, said as a person would say it. */
 function troubleLine(context: GroveContext): string {
   switch (lastModelTrouble()) {
@@ -223,6 +244,8 @@ function troubleLine(context: GroveContext): string {
       return 'That took too long to come back. Ask me again.';
     case 'offline':
       return 'I have no connection right now.';
+    case 'server':
+      return "Google's end had a hiccup. Ask me again.";
     case 'no-model':
       return 'The model I am set to use has been retired. That needs changing in my settings.';
     case 'no-key':
@@ -274,11 +297,25 @@ export async function askWithTools(
       // Anything that did run is still worth saying — the weather came back
       // even if the follow-up call to the model did not.
       const already = ran.filter((r) => r.ok).map((r) => r.spoken).filter(unique).join(' ');
-      return { text: already || troubleLine(context), args: {}, fact, ran };
+      if (already) return { text: already, args: {}, fact, ran };
+      // Nothing to say yet: try the plain path before admitting defeat. A
+      // missing key or a retired model will fail there too, so skip it.
+      const trouble = lastModelTrouble();
+      if (trouble !== 'no-key' && trouble !== 'no-model') {
+        const plain = await lightFallback(
+          system,
+          history
+            .filter((t) => t.text.trim())
+            .map((t) => ({ role: t.role === 'assistant' ? ('assistant' as const) : ('user' as const), content: t.text })),
+          userText
+        );
+        if (plain) return { text: plainSpeech(plain), args: {}, fact, ran };
+      }
+      return { text: troubleLine(context), args: {}, fact, ran };
     }
 
     if (turn.kind === 'text') {
-      return { text: turn.text, args: {}, fact, ran };
+      return { text: plainSpeech(turn.text), args: {}, fact, ran };
     }
 
     contents.push(turn.raw);
@@ -292,7 +329,7 @@ export async function askWithTools(
         if (question) {
           // The question stands on its own. Anything looked up first went to
           // the model, which wrote the question knowing it.
-          return { text: question, args: {}, fact, ran, expectsReply: true };
+          return { text: plainSpeech(question), args: {}, fact, ran, expectsReply: true };
         }
         results.push({ name: call.name, result: { ok: false, result: 'Ask a question.' } });
         continue;

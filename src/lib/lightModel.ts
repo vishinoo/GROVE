@@ -32,6 +32,7 @@
 
 
 
+import { failureKind } from './failure';
 import * as SecureStore from 'expo-secure-store';
 
 import { fetchJson } from './net';
@@ -283,6 +284,8 @@ export type ModelTrouble =
   | 'rate-limited'
   | 'timeout'
   | 'offline'
+  /** Google's side failed — a 5xx. Worth one retry, unlike a refusal. */
+  | 'server'
   | 'refused';
 
 let modelTrouble: ModelTrouble = 'none';
@@ -370,7 +373,8 @@ async function askDirect(
     modelTrouble = text ? 'none' : 'refused';
     return text;
   } catch (problem) {
-    modelTrouble = problem instanceof Error && problem.name === 'AbortError' ? 'timeout' : 'offline';
+    const kind = failureKind(problem);
+    modelTrouble = kind === 'error' ? 'refused' : kind;
     return null;
   }
 }
@@ -817,7 +821,28 @@ export type ToolHistory = unknown[];
 
 const TOOL_TIMEOUT_MS = 20_000;
 
+/**
+ * One tool turn, tried twice when the first failure was the kind that passes.
+ *
+ * A timeout, a dropped connection, a 429 or a 5xx on a phone moving between
+ * cell towers is usually gone a second later, and the alternative to one quick
+ * retry is telling someone Grove is broken because they asked while walking
+ * past a dead spot. A refusal or a missing key is not retried: it will fail
+ * the same way again.
+ */
 export async function toolTurn(
+  system: string,
+  contents: ToolHistory,
+  declarations: unknown[]
+): Promise<ToolTurn> {
+  const first = await toolTurnOnce(system, contents, declarations);
+  if (first.kind !== 'nothing') return first;
+  if (!['timeout', 'offline', 'rate-limited', 'server'].includes(modelTrouble)) return first;
+  await new Promise((done) => setTimeout(done, modelTrouble === 'rate-limited' ? 1500 : 600));
+  return toolTurnOnce(system, contents, declarations);
+}
+
+async function toolTurnOnce(
   system: string,
   contents: ToolHistory,
   declarations: unknown[]
@@ -854,7 +879,7 @@ export async function toolTurn(
 
     if (!response.ok) {
       if ((response.status === 429 || response.status >= 500)) {
-        modelTrouble = response.status === 429 ? 'rate-limited' : 'refused';
+        modelTrouble = response.status === 429 ? 'rate-limited' : 'server';
       } else {
         modelTrouble = response.status === 404 ? 'no-model' : 'refused';
       }
@@ -884,10 +909,40 @@ export async function toolTurn(
     modelTrouble = 'refused';
     return { kind: 'nothing' };
   } catch (problem) {
-    modelTrouble =
-      problem instanceof Error && problem.name === 'AbortError' ? 'timeout' : 'offline';
+    const kind = failureKind(problem);
+    modelTrouble = kind === 'error' ? 'refused' : kind;
     return { kind: 'nothing' };
   }
+}
+
+/**
+ * An answer without tools, for when the tool turn failed twice.
+ *
+ * "Where can I find this book, should I try the library" needs no tool at
+ * all, and answering it with "I have no connection" because the tool turn
+ * timed out is a failure the person can do nothing about. This is a second,
+ * simpler path to an answer: the same voice and the same system prompt, with
+ * search, and an instruction not to guess at anything personal it could not
+ * look up.
+ */
+export async function lightFallback(
+  system: string,
+  history: LightMessage[],
+  userText: string
+): Promise<string | null> {
+  const text = await complete(
+    `${system}
+
+Your tools are unavailable for this one answer. Answer from what you know, from search, and from the conversation so far — "it" and "the book" mean whatever was just being discussed. If the question needs their own data — their calendar, email, contacts, reminders, notes, or what you remember about them — say in one short sentence, in your own voice, that you couldn't get to it just now and to ask again. Never guess at their data. Public things like libraries, shops, books and prices are not their data: answer those.`,
+    // Without the conversation, "where can I find it" had no "it" — and the
+    // answer told them to go and look at whatever book they had meant.
+    [...history.slice(-8), { role: 'user', content: userText }],
+    false,
+    false,
+    true,
+    700
+  );
+  return text?.trim() || null;
 }
 
 /** A user's sentence, in the shape a tool conversation expects. */

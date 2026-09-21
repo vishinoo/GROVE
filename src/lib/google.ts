@@ -14,6 +14,7 @@
  * connect Google — rather than reporting a failure the person cannot act on.
  */
 
+import { failureKind } from './failure';
 import { googleToken, missingScopes } from './googleAuth';
 
 /* ------------------------------------------------------------ base64url */
@@ -74,6 +75,35 @@ export type Reason =
 
 let lastReason: Reason = 'none';
 
+/**
+ * Which API was switched off, and Google's own link to switch it on.
+ *
+ * "That API is not switched on" named no API, so the fix meant guessing which
+ * of five to go and enable. Google's 403 says exactly which one and includes
+ * the activation link; keeping both turns a vague refusal into one tap.
+ */
+let disabled: { name: string; url: string } | null = null;
+
+const API_NAMES: Record<string, string> = {
+  'docs.googleapis.com': 'The Google Docs API',
+  'drive.googleapis.com': 'The Google Drive API',
+  'gmail.googleapis.com': 'The Gmail API',
+  'calendar-json.googleapis.com': 'The Google Calendar API',
+  'people.googleapis.com': 'The Google People API',
+};
+
+/** The switch-on link for whatever was last refused, if Google gave one. */
+export function activationLink(): string | null {
+  return lastReason === 'api-disabled' && disabled ? disabled.url : null;
+}
+
+function noteDisabled(body: string): void {
+  const service = /([a-z-]+\.googleapis\.com)/.exec(body)?.[1] ?? '';
+  const url =
+    /(https:\/\/console\.(?:developers|cloud)\.google\.com\/apis\/api\/[^\s"\\]+)/.exec(body)?.[1] ?? '';
+  disabled = service || url ? { name: API_NAMES[service] ?? 'A Google API', url } : null;
+}
+
 /** The failure, as a sentence to say out loud. */
 export function explain(what = 'that'): string {
   switch (lastReason) {
@@ -84,7 +114,9 @@ export function explain(what = 'that'): string {
     case 'auth-expired':
       return 'My Google sign-in has expired. Reconnect Google in Connections.';
     case 'api-disabled':
-      return `Google is refusing ${what} — that API is not switched on for this project yet.`;
+      return disabled
+        ? `${disabled.name} is switched off in your Google Cloud project. The link to turn it on is on the card.`
+        : `Google is refusing ${what} — that API is not switched on for this project yet.`;
     case 'missing-scope':
       return `I am signed in to Google but was never given permission for ${what}. Disconnect and reconnect Google in Connections, and allow everything on the consent screen.`;
     case 'rate-limited':
@@ -134,6 +166,7 @@ async function call<T>(
         lastReason = /insufficient|scope|ACCESS_TOKEN_SCOPE/i.test(body)
           ? 'missing-scope'
           : 'api-disabled';
+        if (lastReason === 'api-disabled') noteDisabled(body);
         return null;
       }
       lastReason =
@@ -155,7 +188,8 @@ async function call<T>(
     const text = await response.text();
     return text ? (JSON.parse(text) as T) : null;
   } catch (problem) {
-    lastReason = problem instanceof Error && problem.name === 'AbortError' ? 'timeout' : 'offline';
+    const kind = failureKind(problem);
+    lastReason = kind === 'error' ? 'server' : kind;
     return null;
   } finally {
     clearTimeout(timer);
@@ -393,6 +427,97 @@ export function layout(text: string): { plain: string; requests: unknown[] } {
   return { plain, requests };
 }
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** The same two markers as `layout`, as HTML that Drive turns into a Doc. */
+export function asHtml(text: string): string {
+  const out: string[] = [];
+  let inList = false;
+  for (const raw of text.split('\n')) {
+    const heading = /^##\s+(.*)$/.exec(raw);
+    const bullet = /^-\s+(.*)$/.exec(raw);
+    if (bullet) {
+      if (!inList) out.push('<ul>');
+      inList = true;
+      out.push(`<li>${escapeHtml(bullet[1])}</li>`);
+      continue;
+    }
+    if (inList) out.push('</ul>');
+    inList = false;
+    if (heading) out.push(`<h2>${escapeHtml(heading[1])}</h2>`);
+    else if (raw.trim()) out.push(`<p>${escapeHtml(raw)}</p>`);
+  }
+  if (inList) out.push('</ul>');
+  return `<html><body>${out.join('')}</body></html>`;
+}
+
+/**
+ * A Google Doc made through Drive instead of the Docs API.
+ *
+ * Drive converts an uploaded HTML file into a Google Doc, headings and bullets
+ * included, in one call. It is the fallback for a project where the Docs API
+ * is switched off — which is what "Google is refusing writing that document"
+ * turned out to be — so documents still work with one API instead of two.
+ */
+async function createDocViaDrive(
+  title: string,
+  text: string
+): Promise<{ id: string; url: string } | null> {
+  const token = await googleToken();
+  if (!token) {
+    lastReason = 'not-connected';
+    return null;
+  }
+  const boundary = `grove${Date.now().toString(36)}`;
+  const body = [
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    JSON.stringify({ name: title.slice(0, 120) || 'Untitled', mimeType: 'application/vnd.google-apps.document' }),
+    `--${boundary}`,
+    'Content-Type: text/html; charset=UTF-8',
+    '',
+    asHtml(text),
+    `--${boundary}--`,
+    '',
+  ].join('\r\n');
+
+  try {
+    const response = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': `multipart/related; boundary=${boundary}`,
+        },
+        body,
+        signal: AbortSignal.timeout(25_000),
+      }
+    );
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      if (response.status === 403) {
+        lastReason = /insufficient|scope|ACCESS_TOKEN_SCOPE/i.test(detail) ? 'missing-scope' : 'api-disabled';
+        if (lastReason === 'api-disabled') noteDisabled(detail);
+      } else {
+        lastReason = response.status === 401 ? 'auth-expired' : 'server';
+      }
+      return null;
+    }
+    const made = (await response.json()) as { id?: string };
+    if (!made.id) return null;
+    lastReason = 'none';
+    return { id: made.id, url: `https://docs.google.com/document/d/${made.id}/edit` };
+  } catch (problem) {
+    const kind = failureKind(problem);
+    lastReason = kind === 'error' ? 'server' : kind;
+    return null;
+  }
+}
+
 export async function createDoc(
   title: string,
   text: string
@@ -404,7 +529,18 @@ export async function createDoc(
     body: { title: title.slice(0, 120) || 'Untitled' },
   });
   const id = made?.documentId;
-  if (!id) return null;
+  if (!id) {
+    // The Docs API switched off is a project setting, not a failure of the
+    // document: Drive can make the same thing.
+    if (lastReason === 'api-disabled') {
+      const docsOff = disabled;
+      const viaDrive = await createDocViaDrive(title, text);
+      if (viaDrive) return viaDrive;
+      // Both off: name the first one, since that is the one to switch on.
+      if (lastReason === 'api-disabled' && docsOff) disabled = docsOff;
+    }
+    return null;
+  }
 
   const { plain, requests } = layout(text);
   await call<unknown>(`https://docs.googleapis.com/v1/documents/${id}:batchUpdate`, {

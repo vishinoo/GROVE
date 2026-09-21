@@ -249,6 +249,25 @@ their answer is the signal. The pulse is delayed so a fast turn makes no sound
 at all. The JS side probes for the native functions, so an update reaching an
 older binary is silent rather than broken.
 
+## Failing honestly
+
+- **A thrown error is not "offline" unless it says so.** `failure.ts` sorts
+  timeouts, real network failures and everything else. React Native rejects an
+  abort with a DOMException that is not always an `Error`, and
+  `AbortSignal.timeout` names it TimeoutError — so the old test announced every
+  slow answer as "I have no connection right now", on full signal.
+- **The tool turn is retried once** on timeout, network, 429 or 5xx, then falls
+  back to a plain answer with the conversation and search (`lightFallback`),
+  which is told to answer public questions and to say plainly when it could not
+  reach their own data rather than guess.
+- **Model markdown is stripped** from every reply in `plainSpeech()` — told not
+  to, it still wraps titles in asterisks, which showed on screen and could be
+  read aloud.
+- **Documents survive the Docs API being switched off.** `createDoc` falls back
+  to uploading HTML through Drive, which converts it into a Doc with headings
+  and bullets intact. When an API is off, the error names which one and carries
+  Google's own activation link to the card.
+
 ## The long memory
 
 `src/lib/memory.ts` is forty one-line facts sent with every turn. `src/lib/life.ts`

@@ -476,7 +476,14 @@ const DOC_CREATE: Ability = {
     if (!text) return { ok: false, spoken: 'I could not get that written just then.' };
 
     const made = await google.createDoc(title || about.split(/\s+/).slice(0, 6).join(' '), text);
-    if (!made) return { ok: false, spoken: google.explain('writing that document') };
+    if (!made) {
+      const link = google.activationLink();
+      return {
+        ok: false,
+        spoken: google.explain('writing that document'),
+        detail: link ? `Turn it on here, then ask again:\n${link}` : undefined,
+      };
+    }
 
     await rememberDoc(CURRENT_UID, title || about.slice(0, 60), made.url);
 
