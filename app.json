@@ -28,7 +28,11 @@
         "NSLocationWhenInUseUsageDescription": "Grove uses where you are to work out how long it takes to get somewhere.",
         "NSPhotoLibraryUsageDescription": "Grove can find a photo when you describe one out loud.",
         "NSPhotoLibraryAddUsageDescription": "Grove saves a photo to your library only when you ask it to.",
-        "NSContactsUsageDescription": "Grove looks up a name when you ask it to message or email someone."
+        "NSContactsUsageDescription": "Grove looks up a name when you ask it to message or email someone.",
+        "NSLocalNetworkUsageDescription": "Grove talks to the bridge running on your own Mac, over your home Wi-Fi, when you ask it to do something on your computer.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
       }
     },
     "android": {

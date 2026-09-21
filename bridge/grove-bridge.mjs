@@ -87,7 +87,12 @@ function runAgent(task) {
   return new Promise((resolve) => {
     const child = execFile(
       'claude',
-      ['-p', task],
+      // Edits inside the working folder go ahead; anything else — a shell
+      // command, a write outside it — still asks, and asking with nobody
+      // there is a refusal. That is the line: an agent that can write files
+      // in its own scratch folder, not one that can run commands on your Mac
+      // because a sentence was misheard on a walk.
+      ['-p', task, '--permission-mode', 'acceptEdits'],
       { cwd: WORK_DIR, timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
       (error, stdout, stderr) => {
         if (error && !stdout) {
