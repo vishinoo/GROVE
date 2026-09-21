@@ -35,6 +35,10 @@ import UIKit
 public class GroveRemoteModule: Module {
   /// Renders the silence that keeps the session alive between conversations.
   private var keepAlive: AVAudioPlayer?
+  /** One player per chime, kept so a chime costs nothing after the first. */
+  private var chimes: [String: AVAudioPlayer] = [:]
+  /** The soft pulse that plays while Grove is working on something. */
+  private var working: AVAudioPlayer?
   /// Whether we have taken the session and registered for the remote.
   private var holding = false
   /// Tokens for the block-based notification observers, so they can actually
@@ -82,6 +86,28 @@ public class GroveRemoteModule: Module {
       self.publishNowPlaying(playing: true)
       self.observeSystem()
       self.holding = true
+    }
+
+    /**
+     * A short sound that says what state Grove is in.
+     *
+     * "listen" rises: you can talk now. "stop" falls: it has stopped hearing
+     * you. "done" is a single soft note for a job finished. Without these the
+     * only signal was the screen — which someone wearing glasses, phone in a
+     * pocket, is by definition not looking at — so the microphone could open
+     * and close with nobody knowing either had happened.
+     */
+    AsyncFunction("playChime") { (kind: String) in
+      DispatchQueue.main.async { self.playChime(kind) }
+    }
+
+    /** A quiet pulse while work is in flight, until `stopWorking`. */
+    AsyncFunction("startWorking") {
+      DispatchQueue.main.async { self.startWorkingPulse() }
+    }
+
+    AsyncFunction("stopWorking") {
+      DispatchQueue.main.async { self.stopWorkingPulse() }
     }
 
     /** Give the session back. The ring stops reaching us the moment we do. */
@@ -522,6 +548,110 @@ public class GroveRemoteModule: Module {
     u16(channels * bitsPerSample / 8); u16(bitsPerSample)
     ascii("data"); u32(dataBytes)
     wav.append(Data(count: dataBytes))
+
+    do {
+      try wav.write(to: url)
+      return url
+    } catch {
+      return nil
+    }
+  }
+
+  // MARK: - Chimes
+
+  private func playChime(_ kind: String) {
+    if chimes[kind] == nil, let url = Self.chimeURL(kind) {
+      chimes[kind] = try? AVAudioPlayer(contentsOf: url)
+      chimes[kind]?.prepareToPlay()
+    }
+    guard let player = chimes[kind] else { return }
+    player.volume = 0.55
+    player.currentTime = 0
+    player.play()
+  }
+
+  private func startWorkingPulse() {
+    if working == nil, let url = Self.chimeURL("working") {
+      working = try? AVAudioPlayer(contentsOf: url)
+      working?.numberOfLoops = -1
+      working?.prepareToPlay()
+    }
+    guard let player = working, !player.isPlaying else { return }
+    // Quieter than the others: it repeats, and a repeating sound at the same
+    // level as a one-off is the thing people turn off.
+    player.volume = 0.22
+    player.currentTime = 0
+    player.play()
+  }
+
+  private func stopWorkingPulse() {
+    working?.stop()
+  }
+
+  /**
+   * The chimes, synthesised at runtime like the silence.
+   *
+   * Sine tones with a touch of the octave above for warmth, a few milliseconds
+   * of attack so they do not click, and a decay across each note so they sound
+   * struck rather than switched on. Short on purpose: the listen chime plays as
+   * the microphone opens, and anything long gets transcribed as the start of
+   * what you said.
+   */
+  private static func chimeURL(_ kind: String) -> URL? {
+    // (frequency in Hz, seconds). A frequency of 0 is a rest.
+    let notes: [(Double, Double)]
+    var loopLength: Double? = nil
+    switch kind {
+    case "listen": notes = [(659.25, 0.07), (0, 0.012), (987.77, 0.1)]
+    case "stop": notes = [(880.0, 0.07), (0, 0.012), (587.33, 0.1)]
+    case "done": notes = [(1046.5, 0.14)]
+    case "working":
+      notes = [(523.25, 0.05)]
+      loopLength = 1.1
+    default: return nil
+    }
+
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent("grove-chime-\(kind)-v1.wav")
+    if FileManager.default.fileExists(atPath: url.path) { return url }
+
+    let sampleRate = 44100
+    var samples: [Int16] = []
+    for (frequency, seconds) in notes {
+      let count = Int(seconds * Double(sampleRate))
+      for i in 0..<count {
+        if frequency == 0 {
+          samples.append(0)
+          continue
+        }
+        let t = Double(i) / Double(sampleRate)
+        let attack = min(1.0, t / 0.006)
+        let decay = exp(-t * (3.2 / seconds))
+        let tone = (sin(2 * Double.pi * frequency * t) + 0.25 * sin(4 * Double.pi * frequency * t)) / 1.25
+        let value = max(-1.0, min(1.0, tone * attack * decay)) * 0.8
+        samples.append(Int16(value * Double(Int16.max)))
+      }
+    }
+    if let loopLength {
+      let pad = Int(loopLength * Double(sampleRate)) - samples.count
+      if pad > 0 { samples.append(contentsOf: [Int16](repeating: 0, count: pad)) }
+    }
+
+    let dataBytes = samples.count * 2
+    var wav = Data()
+    func ascii(_ s: String) { wav.append(contentsOf: Array(s.utf8)) }
+    func u32(_ v: Int) { var l = UInt32(v).littleEndian; withUnsafeBytes(of: &l) { wav.append(contentsOf: $0) } }
+    func u16(_ v: Int) { var l = UInt16(v).littleEndian; withUnsafeBytes(of: &l) { wav.append(contentsOf: $0) } }
+
+    ascii("RIFF"); u32(36 + dataBytes); ascii("WAVE")
+    ascii("fmt "); u32(16); u16(1); u16(1)
+    u32(sampleRate); u32(sampleRate * 2)
+    u16(2); u16(16)
+    ascii("data"); u32(dataBytes)
+    for sample in samples {
+      var l = sample.littleEndian
+      withUnsafeBytes(of: &l) { wav.append(contentsOf: $0) }
+    }
 
     do {
       try wav.write(to: url)

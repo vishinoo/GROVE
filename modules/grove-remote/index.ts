@@ -80,6 +80,9 @@ type Native = {
    * one throws "not a function" at someone who only pressed a button.
    */
   requestMusicAccess?(): Promise<boolean>;
+  playChime?(kind: string): Promise<void>;
+  startWorking?(): Promise<void>;
+  stopWorking?(): Promise<void>;
   requestLocationAccess?(): Promise<boolean>;
   activate(playSilence: boolean): Promise<void>;
   playMusic(query: string): Promise<MusicResult>;
@@ -254,4 +257,24 @@ export function onInterruption(
 ): () => void {
   const sub = native?.addListener('onInterruption', listener as (p: never) => void);
   return () => sub?.remove();
+}
+
+/**
+ * The sounds that say what state Grove is in.
+ *
+ * Optional, like every function added after a build shipped: an update can
+ * reach a phone whose binary predates these, and there they do nothing rather
+ * than throw at someone who only pressed a button.
+ */
+export type Chime = 'listen' | 'stop' | 'done';
+
+export function chime(kind: Chime): void {
+  if (typeof native?.playChime !== 'function') return;
+  void native.playChime(kind).catch(() => undefined);
+}
+
+export function workingPulse(on: boolean): void {
+  const fn = on ? native?.startWorking : native?.stopWorking;
+  if (typeof fn !== 'function') return;
+  void fn.call(native).catch(() => undefined);
 }

@@ -223,6 +223,32 @@ refusing on an unknown is how a working setup gets declared broken.
 **If you change `SCOPES`, say in the release notes that Google must be
 disconnected and reconnected.** Nothing else can fix it.
 
+## When Grove listens, and how you know
+
+**The microphone opens after speech only when something is waiting on an
+answer** — the model called `ask_back`, or an ability asked for a missing detail
+(`pending` in agent.tsx). It used to open after anything ending in a question
+mark, and a personality that ends half its replies on a joke opened the mic at
+random. People stopped trusting when it was safe to talk. Punctuation was never
+the signal; intent is. `utter(text, listenAfter)` takes that decision
+explicitly — never infer it from the text again.
+
+`ask_back` is a declared tool rather than an ability: calling it ends the turn,
+the question is the reply, and the answer arrives as the next sentence with the
+question in the history. The rules push it towards plans, recommendations,
+gifts and decisions, and away from plain requests. Tested: "make me a workout
+plan" asks the goal and days; the answer produces the plan without a second
+question.
+
+**Every state change has a sound**, synthesised natively in grove-remote the
+same way the keep-alive silence is (no bundled audio files): a rising chime when
+the mic opens, a falling one when it closes with nothing heard, a soft pulse
+while work takes longer than 900ms, and a single note when something was
+actually changed — added, sent, moved, written. Lookups get no "done" chime;
+their answer is the signal. The pulse is delayed so a fast turn makes no sound
+at all. The JS side probes for the native functions, so an update reaching an
+older binary is silent rather than broken.
+
 ## The long memory
 
 `src/lib/memory.ts` is forty one-line facts sent with every turn. `src/lib/life.ts`

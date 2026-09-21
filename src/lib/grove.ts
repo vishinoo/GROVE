@@ -54,6 +54,11 @@ export type Turn = {
 };
 
 export type GroveReply = {
+  /**
+   * The model asked something back on purpose and is waiting for the answer,
+   * so the microphone should open when it has finished speaking.
+   */
+  expectsReply?: boolean;
   /** What Grove says. Always non-empty. */
   text: string;
   /** The ability to run now, when the user asked for something to happen. */

@@ -52,6 +52,27 @@ import { abilityIdFor, argsFromCall, declarationsFor } from './tools';
  */
 const MAX_ROUNDS = 4;
 
+/**
+ * The one tool that is not an ability: asking the person something back.
+ *
+ * A tool rather than a question mark, because the question mark was the
+ * signal and it was wrong half the time — a personality that ends replies on
+ * a joke opened the microphone for answers nobody was going to give. A call to
+ * this is a decision to wait for one.
+ */
+const ASK_BACK = {
+  name: 'ask_back',
+  description:
+    'Ask the person one short question back and listen for their answer. Use for open-ended requests — plans, recommendations, gifts, advice on a decision — where the right answer depends on their goal, taste, time or priorities. Written in your own voice, with personality.',
+  parameters: {
+    type: 'OBJECT',
+    properties: {
+      question: { type: 'STRING', description: 'The question, as you would say it to them.' },
+    },
+    required: ['question'],
+  },
+};
+
 /** A tool that already ran inside the loop, for the card on the Talk screen. */
 export type RanTool = { ability: Ability; ok: boolean; spoken: string; detail?: string };
 
@@ -60,7 +81,14 @@ const TOOL_RULES = `How to use your tools:
 - Never say what is or is not in their calendar, inbox, music library or contacts unless a tool just told you. "That isn't in your library" without having searched is a lie, however likely it sounds.
 - If no tool covers what they asked, say plainly that you cannot do that right now. Do not invent a reason.
 - A sentence with several requests in it gets several tool calls, all at once.
-- Fill in arguments from what they said and from what you know about them. Only ask a question when something you truly need is missing and cannot be reasonably inferred.
+- Fill in arguments from what they said and from what you know about them. Never ask for something you could reasonably infer.
+- Asking back is how you do a good job on open-ended requests. Call ask_back, with ONE question in your own voice and personality, when the right answer depends on something only they know:
+  - making a plan (workouts, their week, studying, a trip): ask the one thing that shapes it — the goal, how much time, what to prioritise. Look things up first if that makes the question sharper.
+  - recommendations and gifts: ask about taste, budget or the occasion.
+  - advice on a decision: ask what matters most to them or what they are worried about.
+  Example — "make me a workout plan" → ask_back: "Are we building muscle or just surviving the stairs — and how many days a week will you actually turn up?"
+  Do not ask back on plain requests you can simply do or answer: a lookup, a message they dictated, music, directions, a document they described. And ask at most once per request — after they answer, do the thing.
+- ask_back is the ONLY way to wait for an answer. An ordinary reply never waits, so never end one on a question you want answered — and a joke or rhetorical question is fine, because nobody will be listening for a reply to it.
 - For calendar questions, pass what they are looking for and any day or position they named ("first", "last", "next", "tomorrow").
 - For email, write the search the way Gmail understands it when that helps: from:xbox, newer_than:7d, is:unread.
 - When sending an email or message, the body must be what they actually said. Tidy it into first person, but never add content they did not give you — no greetings, no check-ins, nothing you made up. If they did not say what it should say, do NOT call the tool; ask them what to say.
@@ -225,7 +253,7 @@ export async function askWithTools(
 ): Promise<GroveReply> {
   const mode = modeById(context.persona.mode ?? 'normal');
   const available = abilitiesFor(mode, ABILITIES);
-  const declarations = declarationsFor(available);
+  const declarations = [...declarationsFor(available), ASK_BACK];
   // A line of names, not the archive: enough that "my cofounder" and "Jason"
   // are the same person without a lookup, and cheap enough to ride on every
   // turn. Everything else about them is a tool call away.
@@ -256,6 +284,19 @@ export async function askWithTools(
     const results: { name: string; result: unknown }[] = [];
 
     for (const call of turn.calls) {
+      // Asking back ends the turn: the question is the reply, and the answer
+      // arrives as the next sentence with this one in the history.
+      if (call.name === ASK_BACK.name) {
+        const question = String((call.args as Record<string, unknown> | undefined)?.question ?? '').trim();
+        if (question) {
+          // The question stands on its own. Anything looked up first went to
+          // the model, which wrote the question knowing it.
+          return { text: question, args: {}, fact, ran, expectsReply: true };
+        }
+        results.push({ name: call.name, result: { ok: false, result: 'Ask a question.' } });
+        continue;
+      }
+
       const ability = abilityById(abilityIdFor(call.name));
 
       // The model can only see tools the mode allows, so this is a model

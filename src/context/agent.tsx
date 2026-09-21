@@ -161,14 +161,62 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    */
   const stateNow = useRef<AgentState>('asleep');
 
+  /** Delays the working pulse, so a fast answer never makes a sound at all. */
+  const pulseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const setState = useCallback(
     (next: AgentState | ((current: AgentState) => AgentState)) => {
-      const resolved = typeof next === 'function' ? next(stateNow.current) : next;
+      const was = stateNow.current;
+      const resolved = typeof next === 'function' ? next(was) : next;
       stateNow.current = resolved;
       setRenderedState(resolved);
+      if (resolved !== was) soundFor(was, resolved);
     },
+    // soundFor only touches refs and the native module.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
+
+  /**
+   * What each change of state sounds like.
+   *
+   * The screen said all of this already, and nobody wearing glasses is looking
+   * at the screen. The microphone opened on its own often enough that people
+   * stopped trusting when it was safe to talk — so opening and closing it now
+   * make a sound, and so does working, in case the silence was the confusing
+   * part.
+   *
+   * Hearing you is not announced: going from listening to thinking means it
+   * heard you, and the pulse that follows says so without a third sound.
+   */
+  const soundFor = (was: AgentState, now: AgentState) => {
+    const remote = remoteModule();
+    if (!remote) return;
+    const busy = (x: AgentState) => x === 'thinking' || x === 'working';
+
+    if ((now === 'listening' || now === 'noting') && was !== 'listening' && was !== 'noting') {
+      remote.chime('listen');
+    } else if ((was === 'listening' || was === 'noting') && (now === 'idle' || now === 'asleep')) {
+      // Stopped hearing you without anything to act on — the case that used
+      // to be invisible.
+      remote.chime('stop');
+    }
+
+    if (busy(now) && !busy(was)) {
+      if (pulseTimer.current) clearTimeout(pulseTimer.current);
+      // Most turns answer in under a second, and a pulse that starts and stops
+      // in the same breath is noise. Only work that is actually taking a while
+      // gets one.
+      pulseTimer.current = setTimeout(() => {
+        pulseTimer.current = null;
+        if (busy(stateNow.current)) remote.workingPulse(true);
+      }, 900);
+    } else if (!busy(now) && busy(was)) {
+      if (pulseTimer.current) clearTimeout(pulseTimer.current);
+      pulseTimer.current = null;
+      remote.workingPulse(false);
+    }
+  };
   const [caption, setCaption] = useState('');
   const [heard, setHeard] = useState('');
   const [level, setLevel] = useState(0);
@@ -535,7 +583,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       setCaption(answered.spoken);
       rememberQuestion(waiting.ability, filled, answered);
       await whenQuiet();
-      if (mine()) utter(answered.ok ? answered.spoken : shortFailure(answered.spoken));
+      if (mine()) {
+        utter(answered.ok ? answered.spoken : shortFailure(answered.spoken), pending.current !== null);
+      }
       return;
     }
 
@@ -569,7 +619,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // A read says nothing until it has something to say. The holding timer
     // above covers a slow one; speaking here as well produced two "let me
     // check"s and, when the lookup failed, no answer at all.
-    if (!reply.holdForTool) utter(reply.text);
+    if (!reply.holdForTool) utter(reply.text, Boolean(reply.expectsReply));
 
     // Anything worth remembering was pulled locally, by keyword, from what was
     // said — never inferred by a model and stored where you cannot see it.
@@ -707,12 +757,15 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     }
 
     rememberQuestion(ability, reply.args, outcome);
+    if (outcome.ok && !ability.reads) doneChime();
 
     const heard = outcome.ok ? outcome.spoken : shortFailure(outcome.spoken);
 
     // The result of work you interrupted is not something you still want read
     // out — you have already moved on and asked something else.
-    if (mine()) utter(heard);
+    // An ability that asked for a missing detail — "what's your home address?"
+    // — is waiting on the answer, so the microphone opens for it.
+    if (mine()) utter(heard, pending.current !== null);
 
     // The song starts when the sentence ends. Anything else means a few seconds
     // of music, an interruption, and a track that has lost its opening.
@@ -800,7 +853,7 @@ function shortFailure(text: string): string {
    * person to press again — which, wearing glasses with the phone in a pocket,
    * is the moment a conversation stops being hands-free.
    */
-  const utter = useCallback((text: string) => {
+  const utter = useCallback((text: string, listenAfter = false) => {
     // Claimed at the moment of speaking, because stopSpeaking() also fires
     // onDone — an interruption and a natural ending are the same callback.
     // Unguarded, barging in went: press, stop the speech, start listening, and
@@ -815,10 +868,15 @@ function shortFailure(text: string): string {
         if (!mounted.current) return;
         // A newer press owns the app now; this speech is over and irrelevant.
         if (turn !== turnSeq.current) return;
-        // A question expects an answer, so listen for one rather than resting.
-        // Only when no ability is still running: something asked while work is
-        // in flight is rhetorical, not a prompt.
-        if (text.trim().endsWith('?') && !running.current) {
+        // Listen only when something is genuinely waiting on an answer — the
+        // model asked back on purpose, or an ability needs a missing detail.
+        //
+        // This used to open the microphone after anything ending in a question
+        // mark. With a personality that ends half its replies on a joke — "or
+        // were you hoping I could conjure it out of thin air?" — that meant the
+        // mic opened at random, and people stopped trusting when it was safe to
+        // talk. Punctuation was never the signal; intent is.
+        if (listenAfter && !running.current) {
           void beginListening(false);
           return;
         }
@@ -1216,6 +1274,7 @@ function shortFailure(text: string): string {
     setState('working');
     const outcome = await runAbility(waiting.ability, { ...waiting.args, confirmed: 'yes' });
     if (!mounted.current) return;
+    if (outcome.ok) doneChime();
     // Otherwise the conversation ends at "press once to go ahead", and "did
     // that send?" is asked of a model that never heard the answer.
     history.current = [...history.current, newTurn('assistant', outcome.spoken)].slice(-24);
@@ -1492,6 +1551,26 @@ function shortFailure(text: string): string {
   );
 
   return <AgentContext.Provider value={value}>{children}</AgentContext.Provider>;
+}
+
+/** The native module, or null on a build without it. Never throws. */
+function remoteModule(): typeof import('grove-remote') | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('grove-remote') as typeof import('grove-remote');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A job finished: something was added, moved, sent or written.
+ *
+ * Only for things that changed something. A lookup answers with its answer; a
+ * chime on top of that is decoration.
+ */
+function doneChime(): void {
+  remoteModule()?.chime('done');
 }
 
 /**
