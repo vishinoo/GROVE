@@ -643,6 +643,14 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     running.current = true;
     setState((current) => (current === 'speaking' ? current : 'working'));
 
+    // Writing takes a minute, and a minute of silence reads as a crash. This is
+    // not the empty promise the prompt forbids — the work is already running
+    // and the answer is guaranteed to follow it.
+    if (ability.slow) {
+      setCaption('Writing…');
+      if (mine()) utter('Writing it now.');
+    }
+
     // Bounded, so a hung ability can never leave a promise unanswered.
     const outcome = await runAbility(ability, reply.args);
     running.current = false;

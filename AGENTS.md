@@ -183,6 +183,30 @@ was tried for this and hangs on our key — several minutes, then a timeout — 
 documents use the same lite model as everything else, which writes 500 to 750
 grounded words in under ten seconds.
 
+**Research reports are three steps, not one.** Asked for "a couple of energy
+stocks", a single call names companies from memory and writes figures that were
+true a year ago. So `doc.create` with `research` plans the subjects
+(`lightPlan`), researches each against the web in parallel (`lightResearch`),
+then writes from those dated notes (`lightDocument`). Measured at about twelve
+seconds for a thousand-word, three-company report — plan 1s, research 5s,
+writing 5s. Anything touching money says it is research rather than advice, and
+never names a price target or an amount to spend.
+
+The model writes two structure markers, `## ` for a heading and `- ` for a
+bullet, and `google.layout()` turns them into real Docs styles on the ranges
+where those lines landed. Styling is a second batchUpdate: if it fails, the
+words are still in the document.
+
+Written documents are recorded in `docs.ts` with their links, and `doc.recent`
+reads them back. Without it, "send that report to Priya" had nothing to send —
+writing is not a read, so it runs outside the tool loop and the model never saw
+the link.
+
+Harness note: `withTimeout` deliberately leaves its timer armed after success
+(it bounds the body read too), so a Node test script lingers up to 75 seconds
+after its last model call. That is the test process, not the app — time the
+ability, not the process.
+
 **A token keeps the scopes it was granted, forever.** Adding a scope to
 `SCOPES` does nothing for anyone already signed in: the refresh token silently
 keeps working for everything it already covered and refuses the new thing. That

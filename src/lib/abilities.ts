@@ -42,6 +42,7 @@ import { loadFacts, recall,
 } from './memory';
 import { loadNotes, searchNotes } from './notes';
 import { loadPlayed, playedLines, recordPlayed } from './listening';
+import { loadDocs, rememberDoc } from './docs';
 import {
   entityLines,
   episodeLines,
@@ -54,7 +55,7 @@ import { shortDate, windowFor, within as inWindow } from './when';
 import { MODES } from './modes';
 import * as google from './google';
 import { isGoogleConnected } from './googleAuth';
-import { lightBrief, lightDigest, lightDocument } from './lightModel';
+import { lightBrief, lightDigest, lightDocument, lightPlan, lightResearch } from './lightModel';
 
 /**
  * Weather codes as a person would say them, not as WMO defines them.
@@ -433,10 +434,14 @@ const DOC_CREATE: Ability = {
       type: 'string',
       what: 'material to work from, if you looked any up — assignment instructions, an email, notes',
     },
-    research: { type: 'string', what: '"yes" when it needs current facts from the web, like companies, prices or news' },
+    research: {
+      type: 'string',
+      what: '"yes" when it needs current facts from the world — companies, prices, news, anything you would otherwise be guessing at. Say yes for any report on real things happening now.',
+    },
   },
   examples: [
     'write me a document about interesting thermal stocks',
+    'give me a detailed report on a couple of energy stocks I might invest in',
     'make me a doc on the housing market',
     'I have an assignment due, can you do it for me',
     'write up my notes into a document',
@@ -449,11 +454,32 @@ const DOC_CREATE: Ability = {
       return { ok: false, spoken: google.explain('writing documents') };
     }
 
-    const text = await lightDocument(about, (args.source || '').trim(), /yes|true/i.test(args.research || ''));
+    const wantsResearch = /yes|true/i.test(args.research || '');
+
+    // A report is three steps, not one. Asked for "a couple of energy stocks",
+    // a single call names companies from memory and writes confident figures
+    // that were true a year ago. So: decide the subjects, look each one up
+    // against the web in parallel, then write from what came back. The parallel
+    // part matters — four subjects one after another is a minute of silence.
+    let notes = '';
+    if (wantsResearch) {
+      const subjects = await lightPlan(`${title}. ${about}`);
+      if (subjects.length > 0) {
+        const found = await Promise.all(subjects.map((subject) => lightResearch(subject, about)));
+        notes = subjects
+          .map((subject, i) => (found[i] ? `Subject: ${subject}\n${found[i]}` : ''))
+          .filter(Boolean)
+          .join('\n\n---\n\n');
+      }
+    }
+
+    const text = await lightDocument(about, (args.source || '').trim(), wantsResearch, notes);
     if (!text) return { ok: false, spoken: 'I could not get that written just then.' };
 
     const made = await google.createDoc(title || about.split(/\s+/).slice(0, 6).join(' '), text);
     if (!made) return { ok: false, spoken: google.explain('writing that document') };
+
+    await rememberDoc(CURRENT_UID, title || about.slice(0, 60), made.url);
 
     const words = text.split(/\s+/).filter(Boolean).length;
     return {
@@ -472,6 +498,37 @@ const DOC_CREATE: Ability = {
  * misheard sentence appended to the wrong document is work to undo rather than
  * a file to delete.
  */
+/**
+ * What Grove has written lately, with the links.
+ *
+ * A read, so it runs inside the loop — which is the point: "send Jason that
+ * report" needs the link in the same turn as the email being composed, and
+ * writing the document happened in a different one.
+ */
+const DOC_RECENT: Ability = {
+  id: 'doc.recent',
+  name: 'Documents written',
+  what: 'The documents Grove has written for them, newest first, with their links. Use before sending or sharing one.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  reads: true,
+  args: {},
+  examples: ['what documents have you written for me', 'send Jason that report', 'share the report with Priya'],
+  run: async () => {
+    const docs = await loadDocs(CURRENT_UID);
+    if (docs.length === 0) return { ok: true, spoken: 'I have not written any documents for you yet.' };
+    return {
+      ok: true,
+      spoken: `The last one was ${docs[0].title}.`,
+      detail: docs
+        .slice(0, 10)
+        .map((d) => `- ${shortDate(d.at)}: ${d.title} — ${d.url}`)
+        .join('\n'),
+    };
+  },
+};
+
 const DOC_APPEND: Ability = {
   id: 'doc.append',
   name: 'Add to a document',
@@ -3134,6 +3191,7 @@ export const ABILITIES: Ability[] = [
   GCAL_READ,
   DOC_FIND,
   DOC_CREATE,
+  DOC_RECENT,
   DOC_APPEND,
   SET_MODE,
   RECALL,
@@ -3163,7 +3221,7 @@ export const ABILITIES: Ability[] = [
 const RUN_TIMEOUT_MS = 20_000;
 
 /** For abilities that write rather than look up. See `slow` on Ability. */
-const SLOW_RUN_TIMEOUT_MS = 90_000;
+const SLOW_RUN_TIMEOUT_MS = 150_000;
 
 /**
  * Runs an ability and guarantees an answer.

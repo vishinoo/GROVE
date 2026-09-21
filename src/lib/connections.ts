@@ -93,6 +93,7 @@ export const CONNECTIONS: Connection[] = [
       'gcal.read',
       'doc.find',
       'doc.create',
+      'doc.recent',
       'doc.append',
       'calendar.read',
       'calendar.move',

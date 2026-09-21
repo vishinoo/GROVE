@@ -937,40 +937,102 @@ export type NoteShape = { title: string; summary: string; points: string[]; acti
  * Plain text, because a Google Doc built from inserted text shows markdown
  * asterisks as asterisks.
  */
+/**
+ * What a report should actually be about, decided before it is written.
+ *
+ * "A couple of energy stocks I might invest in" names nothing to look up. This
+ * turns it into subjects — real companies, with tickers — so the research that
+ * follows has something to search for. Grounded, because the answer depends on
+ * what is happening this month rather than what was true when the model was
+ * trained.
+ */
+export async function lightPlan(brief: string): Promise<string[]> {
+  const raw = await complete(
+    `You decide what a piece of research should cover. Given what someone asked for, name the specific things worth researching — real companies with tickers, real places, real named things. Never generic categories.
+
+Return JSON: {"subjects": ["...", "..."]}. Between 2 and 5 subjects, each a short name with its identifier where it has one, like "NextEra Energy (NEE)". If the request already names them, use exactly those.`,
+    [{ role: 'user', content: brief.slice(0, 1000) }],
+    true,
+    false,
+    false,
+    400
+  );
+  try {
+    const parsed = JSON.parse((raw ?? '{}').replace(/^```(?:json)?\s*|\s*```$/g, '')) as {
+      subjects?: unknown;
+    };
+    return Array.isArray(parsed.subjects)
+      ? parsed.subjects.map((x) => String(x).trim()).filter(Boolean).slice(0, 5)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * One subject, looked up properly.
+ *
+ * Search-grounded and asked for numbers with dates on them, because a report
+ * whose figures are a year old is worse than one that says it could not check:
+ * the first is acted on, the second is looked up.
+ */
+export async function lightResearch(subject: string, brief: string): Promise<string | null> {
+  return complete(
+    `You are researching one subject for a report. Use search. Report only what you actually found.
+
+Write compact notes, not prose: facts, numbers, and dates. Include the most recent figures you can find and say when each is from. Include what has happened lately, what the argument in favour is, and what the risks are. If you could not confirm something, write "unconfirmed" beside it rather than filling it in.`,
+    [{ role: 'user', content: `Subject: ${subject}\n\nThis is for: ${brief.slice(0, 500)}` }],
+    false,
+    false,
+    true,
+    900
+  );
+}
+
 export async function lightDocument(
   brief: string,
   source: string,
-  search: boolean
+  search: boolean,
+  notes = ''
 ): Promise<string | null> {
   const text = await complete(
     `You write documents someone will open and read on a screen.
 
-- Plain text only. No markdown, no asterisks, no hashes, no bullet characters. A heading is a short line on its own; a list item is a line starting with a dash and a space.
+- Structure it with two markers and nothing else: a line starting with "## " is a heading, and a line starting with "- " is a bullet. No other markdown anywhere — no asterisks, no hashes mid-line, no bold, no tables.${
+      notes
+        ? '\n- You have been given research notes. Use their figures, and say when a figure is from. Never invent a number that is not in the notes; if something was not confirmed, say so in a plain sentence.'
+        : ''
+    }
 - Open with one short paragraph saying what this is. Then the substance, under headings.
 - Be specific. Names, numbers, dates, real detail. Never pad, never repeat the brief back, never write "in conclusion".
-- Long enough to be worth opening: 700 to 1200 words unless the brief asks for something shorter or longer. Anything you name gets its own short section — what it is, the numbers that matter, and why it is worth their attention. Depth, not padding — more real detail per section, never more sections saying less.
+- Long enough to be worth opening: ${notes ? '1200 to 2000' : '700 to 1200'} words unless the brief asks for something shorter or longer. Anything you name gets its own short section — what it is, the numbers that matter, and why it is worth their attention. Depth, not padding — more real detail per section, never more sections saying less.
 - If you are working from material they gave you, follow its instructions exactly — its questions, its length, its format. Those instructions beat the length guidance above.
 - When the subject has risk or uncertainty in it, end with a short plain section on what to watch or what could go wrong.
 - If something is uncertain or you could not check it, say so in the document in a plain sentence rather than inventing it.
-- Do not write a title line; the document already has a title.`,
+- Do not write a title line; the document already has a title.
+- If it touches money, health or law, include one plain sentence saying this is research rather than advice. Never tell them how much to spend, and never predict a price.`,
     [
       {
         role: 'user',
-        content: source
-          ? `Write this document: ${brief}
-
-Work from this material:
-${source.slice(0, 12_000)}`
-          : `Write this document: ${brief}`,
+        content: [
+          `Write this document: ${brief}`,
+          source ? `Work from this material:\n${source.slice(0, 12_000)}` : '',
+          notes ? `Research notes gathered for this, with dates:\n${notes.slice(0, 24_000)}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
       },
     ],
     false,
     false,
     search,
-    3000
+    notes ? 5000 : 3000
   );
   const clean = (text ?? '').trim();
-  return clean ? clean.replace(/^#+\s*/gm, '').replace(/\*\*?/g, '') : null;
+  // "##" and "-" survive — they become real headings and bullets in the
+  // document. Everything else markdown is stripped, since it would otherwise
+  // be read as literal asterisks by someone opening the file.
+  return clean ? clean.replace(/^#{1,6}\s*(?=\S)/gm, '## ').replace(/\*\*?/g, '').replace(/^\s*[•*]\s+/gm, '- ') : null;
 }
 
 /**

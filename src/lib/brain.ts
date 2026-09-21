@@ -71,6 +71,7 @@ const TOOL_RULES = `How to use your tools:
 - If they point at work they already have ("the assignment on here", "that brief"), find and read that document first and pass its text as the source, so what you write answers their actual question.
 - Set research on a document when it needs facts from the world — companies, prices, news, anything you would otherwise be guessing at.
 - A document takes half a minute to write. Do not promise one and stop; call the tool.
+- To send or share a document you wrote, look it up with the documents-written tool first and put its link in the email. Never guess a link.
 - Anything about their own life — what they should be doing, what they promised, who someone is, what was decided, an idea they had — comes from the memory tools, not from this conversation. You only see the last few turns; the tools see months.
 - "What should I be doing", "I have an hour, what now", "catch me up": call the where-things-stand tool, then pick ONE thing and say why it is the one, weighing deadlines, what is promised, and how long they have.
 - "Brief me on someone" or "who is X": use the person tool. Never assemble a person from memory of this conversation.
@@ -161,7 +162,18 @@ function unique(line: string, index: number, all: string[]): boolean {
  * answer. "What's the weather and text Sam I'm late" still says the weather,
  * because nothing in the text came from it.
  */
+/**
+ * Lookups that exist only to fill in another tool.
+ *
+ * Finding a number so a message can be sent, or a link so it can be attached,
+ * is plumbing. Read aloud before the thing it was for, it sounds like an
+ * answer to a question nobody asked — "Priya Shah: one seven eight oh…" ahead
+ * of an email that was never about her number.
+ */
+const PLUMBING = new Set(['contact.find', 'doc.recent']);
+
 function fedInto(read: RanTool, args: Record<string, string>): boolean {
+  if (PLUMBING.has(read.ability.id)) return true;
   const found = `${read.spoken}\n${read.detail ?? ''}`.toLowerCase();
   const values = Object.values(args).map((value) => value.trim().toLowerCase());
   if (values.some((v) => v.length >= 6 && found.includes(v))) return true;

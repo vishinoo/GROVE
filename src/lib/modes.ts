@@ -161,7 +161,7 @@ export const MODES: Mode[] = [
       'mode.set', 'notes.search', 'memory.recall', 'memory.add', 'calendar.find', 'music.play',
       'doc.find', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.add',
       'mail.search', 'contact.find',
-      'weather.now', 'maps.eta', 'maps.go', 'music.recent', 'doc.create',
+      'weather.now', 'maps.eta', 'maps.go', 'music.recent', 'doc.create', 'doc.recent',
       'now.context', 'memory.search', 'person.brief', 'reminders.batch',
     ],
     interrupt: 'never',

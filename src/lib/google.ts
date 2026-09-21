@@ -343,6 +343,56 @@ export async function sendMail(to: string, subject: string, body: string): Promi
  * Returns the document's id and a link, so the answer can be "it's in your
  * Drive" rather than "done".
  */
+/**
+ * The markers in a written document turned into real Google Docs formatting.
+ *
+ * The model writes "## Heading" and "- point" because a model asked for no
+ * structure at all writes a wall of paragraphs. Those two markers are stripped
+ * from the text that gets inserted, and become a heading style and a bullet on
+ * the range where that line ended up — so what lands in Drive looks like a
+ * document rather than a transcript of one.
+ *
+ * Offsets are counted against the text as inserted, starting at index 1, which
+ * is where a Google Doc's body begins. Nothing is inserted after this, so the
+ * ranges stay valid.
+ */
+export function layout(text: string): { plain: string; requests: unknown[] } {
+  const requests: unknown[] = [];
+  let plain = '';
+  // Index 1 is the start of the body; index 0 is before it and is rejected.
+  let at = 1;
+
+  for (const raw of text.split('\n')) {
+    const heading = /^##\s+(.*)$/.exec(raw);
+    const bullet = /^-\s+(.*)$/.exec(raw);
+    const line = heading?.[1] ?? bullet?.[1] ?? raw;
+    const start = at;
+    const end = at + line.length + 1; // the newline belongs to the paragraph
+
+    if (heading) {
+      requests.push({
+        updateParagraphStyle: {
+          range: { startIndex: start, endIndex: end },
+          paragraphStyle: { namedStyleType: 'HEADING_2' },
+          fields: 'namedStyleType',
+        },
+      });
+    } else if (bullet) {
+      requests.push({
+        createParagraphBullets: {
+          range: { startIndex: start, endIndex: end },
+          bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE',
+        },
+      });
+    }
+
+    plain += `${line}\n`;
+    at = end;
+  }
+
+  return { plain, requests };
+}
+
 export async function createDoc(
   title: string,
   text: string
@@ -356,12 +406,22 @@ export async function createDoc(
   const id = made?.documentId;
   if (!id) return null;
 
-  // Index 1 is the start of the body — index 0 is before it and is rejected.
+  const { plain, requests } = layout(text);
   await call<unknown>(`https://docs.googleapis.com/v1/documents/${id}:batchUpdate`, {
     method: 'POST',
     timeoutMs: 20_000,
-    body: { requests: [{ insertText: { location: { index: 1 }, text } }] },
+    body: { requests: [{ insertText: { location: { index: 1 }, text: plain } }] },
   });
+  // Styling is its own call, and its own failure. A document with the words in
+  // it and no headings is a small disappointment; one that refused the whole
+  // write because a bullet range was off by one is a lost report.
+  if (requests.length > 0) {
+    await call<unknown>(`https://docs.googleapis.com/v1/documents/${id}:batchUpdate`, {
+      method: 'POST',
+      timeoutMs: 20_000,
+      body: { requests },
+    });
+  }
   // Returned even if the insert failed: the document exists, and pointing at an
   // empty one someone can see beats reporting nothing happened when it did.
   return { id, url: `https://docs.google.com/document/d/${id}/edit` };
