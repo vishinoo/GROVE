@@ -173,7 +173,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       if (resolved !== was) soundFor(was, resolved);
     },
     // soundFor only touches refs and the native module.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
 
