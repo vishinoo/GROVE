@@ -32,10 +32,13 @@ import { describeTrigger, parseSchedule, phraseTrigger, type Spark } from '@/lib
 import { MODES, loadOverrides, setOnEnter, type Mode } from '@/lib/modes';
 import { VALUE_MAX } from '@/lib/memory';
 import type { Note as NoteItem } from '@/lib/notes';
+import type { Entity as LifeEntity, Episode as LifeEpisode } from '@/lib/life';
+import { shortDate } from '@/lib/when';
+import { when as transcriptWhen } from '@/lib/transcript';
 
 export default function Sparks() {
   const palette = usePalette();
-  const { sparks, setSparkEnabled, editSpark, deleteSpark, facts, editFact, forgetFact, forgetEverything, notes, forgetNote, persona, updatePersona } =
+  const { sparks, setSparkEnabled, editSpark, deleteSpark, facts, editFact, forgetFact, forgetEverything, notes, forgetNote, life, forgetEntity, forgetEpisode, persona, updatePersona } =
     useAgent();
   // Goals and facts are shown apart because they are read differently: a goal
   // is something you check on, a fact is something you correct.
@@ -139,6 +142,52 @@ export default function Sparks() {
           ))
         )}
       </Section>
+
+      {/*
+        What Grove has worked out on its own, rather than been told. It is the
+        part of memory most worth being able to read: an assistant that quietly
+        believes something wrong about a person you see every week is worse
+        than one that remembers nothing.
+      */}
+      <Section label="People and projects">
+        {life.entities.length === 0 ? (
+          <Card>
+            <Text style={[Type.bodySm, { color: palette.muted }]}>
+              Nothing yet. As you talk, log meetings and take notes, Grove builds up who and what
+              is in your life here — and what happened, with dates. Everything in here can be
+              deleted.
+            </Text>
+          </Card>
+        ) : (
+          [...life.entities]
+            .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen))
+            .slice(0, 40)
+            .map((entity) => (
+              <EntityCard
+                key={entity.id}
+                entity={entity}
+                episodes={life.episodes.filter((e) => e.about.includes(entity.id))}
+                onForget={() => void forgetEntity(entity.id)}
+                onForgetEpisode={(id) => void forgetEpisode(id)}
+              />
+            ))
+        )}
+      </Section>
+
+      {life.episodes.length > 0 ? (
+        <Section label="What happened">
+          {life.episodes.slice(0, 15).map((episode) => (
+            <EpisodeRow
+              key={episode.id}
+              episode={episode}
+              names={episode.about
+                .map((id) => life.entities.find((e) => e.id === id)?.name)
+                .filter((n): n is string => !!n)}
+              onForget={() => void forgetEpisode(episode.id)}
+            />
+          ))}
+        </Section>
+      ) : null}
 
       <Section label="Memory">
         {plain.length === 0 ? (
@@ -724,6 +773,140 @@ function NoteCard({ note, onForget }: { note: NoteItem; onForget: () => void }) 
           </Pressable>
         </View>
       ) : null}
+    </Card>
+  );
+}
+
+function EntityCard({
+  entity,
+  episodes,
+  onForget,
+  onForgetEpisode,
+}: {
+  entity: LifeEntity;
+  episodes: LifeEpisode[];
+  onForget: () => void;
+  onForgetEpisode: (id: string) => void;
+}) {
+  const palette = usePalette();
+  const [open, setOpen] = useState(false);
+  const known = entity.facts.filter((f) => !f.stale);
+  const stale = entity.facts.filter((f) => f.stale);
+
+  return (
+    <Card style={{ marginBottom: 8, paddingHorizontal: 0, paddingVertical: 0 }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${entity.name}. Tap to ${open ? 'close' : 'open'}.`}
+        onPress={() => setOpen((was) => !was)}
+        style={({ pressed }) => ({ padding: 13, opacity: pressed ? 0.7 : 1 })}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={[Type.cardTitle, { color: palette.ink }]} numberOfLines={open ? undefined : 1}>
+              {entity.name}
+              {entity.relation ? ` · ${entity.relation}` : ''}
+            </Text>
+            <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]} numberOfLines={open ? undefined : 1}>
+              {entity.summary || `${entity.kind} · seen ${transcriptWhen(entity.lastSeen)}`}
+            </Text>
+          </View>
+          <Icon name={open ? 'down' : 'chevron'} size={13} color={palette.muted} />
+        </View>
+      </Pressable>
+
+      {open ? (
+        <View style={{ paddingHorizontal: 13, paddingBottom: 13, gap: 10, borderTopWidth: 1, borderTopColor: palette.line }}>
+          {known.length > 0 ? (
+            <View style={{ gap: 4, marginTop: 10 }}>
+              <Text style={[Type.bodySm, { color: palette.muted }]}>What Grove knows</Text>
+              {known.map((fact, i) => (
+                <Text key={i} style={[Type.body, { color: palette.ink }]}>{`\u2022 ${fact.text}`}</Text>
+              ))}
+            </View>
+          ) : null}
+
+          {episodes.length > 0 ? (
+            <View style={{ gap: 4 }}>
+              <Text style={[Type.bodySm, { color: palette.muted }]}>History</Text>
+              {episodes.slice(0, 10).map((episode) => (
+                <Pressable
+                  key={episode.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete ${episode.title}`}
+                  onLongPress={() => onForgetEpisode(episode.id)}
+                  style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+                >
+                  <Text style={[Type.bodySm, { color: palette.inkSoft }]}>
+                    {`${shortDate(episode.at)} · ${episode.title}${episode.open ? ' (outstanding)' : ''}`}
+                  </Text>
+                </Pressable>
+              ))}
+              <Text style={[Type.bodySm, { color: palette.muted }]}>Hold a line to delete it.</Text>
+            </View>
+          ) : null}
+
+          {stale.length > 0 ? (
+            <View style={{ gap: 4 }}>
+              <Text style={[Type.bodySm, { color: palette.muted }]}>No longer true</Text>
+              {stale.map((fact, i) => (
+                <Text key={i} style={[Type.bodySm, { color: palette.muted }]}>{`\u2022 ${fact.text}`}</Text>
+              ))}
+            </View>
+          ) : null}
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Forget ${entity.name}`}
+            onPress={onForget}
+            hitSlop={6}
+            style={({ pressed }) => ({ paddingVertical: 6, opacity: pressed ? 0.5 : 1 })}
+          >
+            <Text style={[Type.bodySm, { color: palette.alert }]}>Forget {entity.name}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </Card>
+  );
+}
+
+function EpisodeRow({
+  episode,
+  names,
+  onForget,
+}: {
+  episode: LifeEpisode;
+  names: string[];
+  onForget: () => void;
+}) {
+  const palette = usePalette();
+  return (
+    <Card style={{ marginBottom: 6 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={[Type.body, { color: palette.ink }]}>
+            {episode.title}
+            {episode.open ? ' · outstanding' : ''}
+          </Text>
+          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
+            {shortDate(episode.at)}
+            {names.length > 0 ? ` · ${names.join(', ')}` : ''}
+          </Text>
+          {episode.summary ? (
+            <Text style={[Type.bodySm, { color: palette.inkSoft, marginTop: 4 }]}>{episode.summary}</Text>
+          ) : null}
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Delete ${episode.title}`}
+          onPress={onForget}
+          hitSlop={8}
+          style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1, paddingTop: 2 })}
+        >
+          <Text style={[Type.bodySm, { color: palette.alert }]}>Delete</Text>
+        </Pressable>
+      </View>
     </Card>
   );
 }

@@ -30,7 +30,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { Ability } from './abilities';
 
-export type ModeId = 'normal' | 'focus' | 'study' | 'wind-down';
+export type ModeId =
+  | 'normal'
+  | 'focus'
+  | 'study'
+  | 'wind-down'
+  | 'work'
+  | 'gym'
+  | 'social'
+  | 'travel'
+  | 'home';
 
 export type Mode = {
   id: ModeId;
@@ -128,7 +137,8 @@ export const MODES: Mode[] = [
     allow: [
       'mode.set', 'notes.search', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.find',
       'calendar.add', 'weather.now', 'memory.recall', 'memory.add', 'music.play', 'music.recent',
-      'mail.search', 'mail.summarise', 'contact.find',
+      'mail.search', 'mail.summarise', 'mail.important', 'contact.find',
+      'now.context', 'memory.search', 'person.brief', 'reminders.batch',
     ],
     interrupt: 'never',
     // Something happens on the way in, rather than the mode being a label on a
@@ -151,7 +161,8 @@ export const MODES: Mode[] = [
       'mode.set', 'notes.search', 'memory.recall', 'memory.add', 'calendar.find', 'music.play',
       'doc.find', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.add',
       'mail.search', 'contact.find',
-      'weather.now', 'maps.eta', 'maps.go', 'music.recent', 'doc.find', 'doc.create',
+      'weather.now', 'maps.eta', 'maps.go', 'music.recent', 'doc.create',
+      'now.context', 'memory.search', 'person.brief', 'reminders.batch',
     ],
     interrupt: 'never',
     // Study is the one mode where being asked something back is the point, so
@@ -174,7 +185,8 @@ export const MODES: Mode[] = [
     allow: [
       'mode.set', 'notes.search', 'music.play', 'music.recent', 'weather.now', 'reminders.add', 'memory.recall',
       'memory.add', 'day.brief', 'calendar.read', 'gcal.read', 'calendar.find',
-      'mail.search', ],
+      'mail.search', 'now.context', 'memory.search', 'person.brief', 'reminders.batch',
+    ],
     interrupt: 'sparingly',
     // The evening version of a brief: what is coming tomorrow, said once, and
     // something quiet on. Nothing that opens a thread — no mail, no sending —
@@ -182,6 +194,96 @@ export const MODES: Mode[] = [
     onEnter: 'Tell me what is on tomorrow in one sentence, then put on something calm.',
     holding: ['One moment.', 'Just having a look.'],
     empty: 'Nothing on that one.',
+    stuck: "Can't check that just now.",
+  },
+  {
+    id: 'work',
+    tint: '#F59E0B',
+    palette: ['#F59E0B', '#FBBF24', '#FB923C', '#EAB308'],
+    label: 'Work',
+    what: 'Operating. Everything on, nothing volunteered mid-thought.',
+    manner:
+      'They are working. Be an operator, not a companion: the answer first, in as few words as carry it, and the next action named. Say what you did rather than what you are about to do.',
+    // Everything, because work is the mode where the whole toolkit is the
+    // point — mail, calendar, documents, the laptop. What changes is the
+    // manner and that Grove stops volunteering things mid-thought.
+    allow: null,
+    interrupt: 'sparingly',
+    onEnter: 'Tell me what needs my attention — my next meeting and anything in my inbox that actually needs me — in two sentences.',
+    holding: ['On it.', 'One moment.'],
+    empty: 'Nothing there.',
+    stuck: "Can't reach that right now.",
+  },
+  {
+    id: 'gym',
+    tint: '#22C55E',
+    palette: ['#16A34A', '#22C55E', '#4ADE80', '#A3E635'],
+    label: 'Gym',
+    what: 'Training. Music, timers and nothing that starts work.',
+    manner:
+      'They are training and out of breath. One short sentence, nothing to read, no lists. Never bring up work, mail or anything that needs a decision.',
+    allow: [
+      'mode.set', 'music.play', 'music.recent', 'weather.now', 'reminders.add', 'reminders.batch',
+      'memory.add', 'memory.search', 'notes.search', 'calendar.read', 'calendar.find', 'now.context',
+    ],
+    interrupt: 'never',
+    onEnter: 'Put on something with energy to train to.',
+    holding: ['Sec.', 'Checking.'],
+    empty: 'Nothing on that.',
+    stuck: 'No answer right now.',
+  },
+  {
+    id: 'social',
+    tint: '#EC4899',
+    palette: ['#EC4899', '#F472B6', '#FB7185', '#C084FC'],
+    label: 'Social',
+    what: 'Out with people. Who they are, where to go, no work.',
+    manner:
+      'They are out with people and talking to you between sentences of a real conversation. Be quick and quiet. Never raise work, deadlines or mail.',
+    allow: [
+      'mode.set', 'person.brief', 'contact.find', 'call.start', 'message.compose', 'maps.go',
+      'maps.eta', 'ride.request', 'food.order', 'calendar.read', 'calendar.find', 'calendar.add',
+      'weather.now', 'music.play', 'music.recent', 'memory.add', 'memory.search', 'notes.search',
+      'reminders.add', 'now.context',
+    ],
+    interrupt: 'never',
+    holding: ['One sec.', 'Looking.'],
+    empty: 'Nothing on that one.',
+    stuck: "Can't check that just now.",
+  },
+  {
+    id: 'travel',
+    tint: '#06B6D4',
+    palette: ['#0891B2', '#06B6D4', '#22D3EE', '#38BDF8'],
+    label: 'Travel',
+    what: 'Moving. Times, routes, confirmations.',
+    manner:
+      'They are travelling. Logistics first: times, platforms, gates, how long, what is next. Say the number before the sentence about it.',
+    allow: [
+      'mode.set', 'maps.go', 'maps.eta', 'weather.now', 'calendar.read', 'gcal.read', 'calendar.find',
+      'calendar.add', 'mail.search', 'mail.important', 'doc.find', 'ride.request', 'contact.find',
+      'call.start', 'message.compose', 'reminders.add', 'memory.search', 'notes.search', 'music.play',
+      'music.recent', 'now.context', 'person.brief', 'brief.web',
+    ],
+    interrupt: 'sparingly',
+    onEnter: 'Tell me what is next today, how long it takes to get there, and what it is doing outside.',
+    holding: ['Checking.', 'One moment.'],
+    empty: 'Nothing on that.',
+    stuck: 'Cannot reach that right now.',
+  },
+  {
+    id: 'home',
+    tint: '#A3E635',
+    palette: ['#84CC16', '#A3E635', '#FACC15', '#4ADE80'],
+    label: 'Home',
+    what: 'Off the clock, but the day is not over.',
+    manner:
+      'They are at home and off duty. Relaxed and unhurried. Work only if they raise it, and then briefly.',
+    allow: null,
+    interrupt: 'sparingly',
+    onEnter: 'Tell me anything I still need to do today, in one sentence.',
+    holding: ['One moment.', 'Just a sec.'],
+    empty: 'Nothing on that.',
     stuck: "Can't check that just now.",
   },
 ];

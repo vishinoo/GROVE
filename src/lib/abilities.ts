@@ -25,6 +25,7 @@
 
 import {
   addReminder,
+  openReminders,
   ensureRemindersAccess,
   createEvent,
   eventsAhead,
@@ -41,6 +42,15 @@ import { loadFacts, recall,
 } from './memory';
 import { loadNotes, searchNotes } from './notes';
 import { loadPlayed, playedLines, recordPlayed } from './listening';
+import {
+  entityLines,
+  episodeLines,
+  findEntity,
+  loadLife,
+  openCommitments,
+  searchLife,
+} from './life';
+import { shortDate, windowFor, within as inWindow } from './when';
 import { MODES } from './modes';
 import * as google from './google';
 import { isGoogleConnected } from './googleAuth';
@@ -84,6 +94,11 @@ let onModeChange: ((mode: string) => Promise<void>) | null = null;
 
 export function setModeHandler(fn: (mode: string) => Promise<void>): void {
   onModeChange = fn;
+}
+
+/** Whose memory and notes are being read. Set by the provider on sign-in. */
+export function currentAccount(): string {
+  return CURRENT_UID;
 }
 
 export function setCurrentAccount(uid: string): void {
@@ -2230,6 +2245,415 @@ const CALL: Ability = {
  * transcript — because "what were the action items" and "what exactly did I say
  * about the budget" can only be answered from the whole thing.
  */
+/**
+ * Several things to do, put in the list in one go.
+ *
+ * Exists for the end of a meeting log, where the alternative is four separate
+ * confirmations for four action items — which nobody presses through. One
+ * press for the set, and no press means none of them, which is the safe way
+ * round for something that writes into a list you keep.
+ */
+const REMIND_BATCH: Ability = {
+  id: 'reminders.batch',
+  name: 'Reminders',
+  what: 'Adds several things to your reminders at once.',
+  where: 'device',
+  wired: capabilities().calendar,
+  needs: ['reminders-permission'],
+  args: {
+    items: { type: 'string', what: 'the things to do, one per line', required: true },
+    confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
+  },
+  examples: ['add those to my reminders', 'put all of that in my reminders'],
+  run: async (args) => {
+    const items = (args.items || '')
+      .split('\n')
+      .map((line) => line.replace(/^[-*\d.\s]+/, '').trim())
+      .filter(Boolean)
+      .slice(0, 12);
+    if (items.length === 0) return { ok: false, spoken: 'Add what?' };
+
+    if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
+      return {
+        ok: false,
+        needsConfirming: true,
+        spoken: `Adding ${items.length} ${items.length === 1 ? 'reminder' : 'reminders'}`,
+        detail: items.map((i) => `- ${i}`).join('\n'),
+      };
+    }
+
+    if (!(await ensureRemindersAccess())) {
+      return { ok: false, spoken: 'I need access to your reminders. It is in iOS Settings.' };
+    }
+
+    let added = 0;
+    let list = '';
+    for (const item of items) {
+      // The date is read out of the sentence it came in — "send Jason the build
+      // by Friday" is due Friday, and the reminder keeps the whole sentence.
+      const outcome = await addReminder(item.slice(0, 200), readWhen(item));
+      if (outcome.ok) {
+        added += 1;
+        list = outcome.list ?? list;
+      }
+    }
+    if (added === 0) return { ok: false, spoken: 'None of those went in.' };
+    return {
+      ok: true,
+      spoken: `${added} ${added === 1 ? 'reminder' : 'reminders'} in ${list || 'Reminders'}.`,
+      detail: items.map((i) => `- ${i}`).join('\n'),
+    };
+  },
+};
+
+/**
+ * The long memory, searched.
+ *
+ * Everything the voice notes, meetings and conversations have left behind —
+ * people, projects, ideas and the dated things that happened with them. The
+ * time half of a question is handled separately from the words, because "that
+ * idea from last month" has one useful word in it and it is not "idea".
+ */
+const LIFE_SEARCH: Ability = {
+  id: 'memory.search',
+  name: 'Long memory',
+  what: 'Searches everything Grove has remembered about their life — people, projects, ideas, decisions and when things happened.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  reads: true,
+  args: {
+    about: { type: 'string', what: 'what they are asking about, in their words', required: true },
+    when: { type: 'string', what: 'any time they named: "last month", "in August", "last week"' },
+  },
+  examples: [
+    'what was that defence startup idea I had last month',
+    'what did we decide about the pricing',
+    'what have I been working on lately',
+    'what did I say about the demo',
+  ],
+  run: async (args) => {
+    const about = (args.about || '').trim();
+    if (!about) return { ok: false, spoken: 'About what?' };
+
+    const life = await loadLife(CURRENT_UID);
+    // The `when` argument on its own first: it arrives as a bare "March" or
+    // "last month", and gluing it to the question buried it — "March decisions"
+    // reads as no time at all, so a question about March searched everything.
+    const window = windowFor(args.when || '') ?? windowFor(about);
+    const found = searchLife(life, about, window);
+
+    if (!window && found.entities.length === 0 && found.episodes.length === 0) {
+      // "What have I been working on" names nothing in particular, so nothing
+      // scores. The last fortnight is the honest reading of it.
+      const fortnight = life.episodes
+        .filter((ep) => Date.now() - new Date(ep.at).getTime() < 14 * 86_400_000)
+        .slice(0, 8);
+      const projects = life.entities.filter((e) => e.kind === 'project').slice(0, 5);
+      if (fortnight.length === 0 && projects.length === 0) {
+        return { ok: true, spoken: 'I have not written anything down about that.' };
+      }
+      return {
+        ok: true,
+        spoken: 'Nothing on those words exactly, but here is what has been going on.',
+        detail: [
+          'Nothing matched those words. Recently, though:',
+          projects.length ? `Projects: ${projects.map((p) => `${p.name} — ${p.summary}`).join('; ')}` : '',
+          fortnight.length ? episodeLines(fortnight, life) : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      };
+    }
+
+    // A named stretch of time with nothing matching in it is an answer, and
+    // handing over what is known about the same subject from another month is
+    // how "what did I decide in March" gets answered with September's
+    // decision, dated March.
+    if (window && found.episodes.length === 0) {
+      // Before giving up: what IS in that time. The words people use rarely
+      // match the words that got written down — "what did I decide" against an
+      // episode that says "agreed" — and someone who names a stretch of time
+      // usually wants what is in it.
+      const inside = life.episodes.filter((ep) => inWindow(ep.at, window)).slice(0, 8);
+      if (inside.length === 0) {
+        return {
+          ok: true,
+          spoken: `Nothing from ${window.label} about that.`,
+          detail: `Nothing at all was recorded in ${window.label}. Do not answer from other dates — say there is nothing from then.`,
+        };
+      }
+      return {
+        ok: true,
+        spoken: `Nothing matching that from ${window.label}, but here is what is.`,
+        detail: `Nothing matched those words. Everything from ${window.label}, which may or may not be what they meant:\n${episodeLines(inside, life)}`,
+      };
+    }
+
+    const detail = [
+      found.entities.map((e) => entityLines(life, e)).join('\n\n'),
+      found.episodes.length ? `What happened:\n${episodeLines(found.episodes, life)}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    const first = found.episodes[0];
+    const spoken = first
+      ? `${shortDate(first.at)}: ${first.title}.`
+      : `${found.entities[0].name}: ${found.entities[0].summary || 'I have a few notes.'}`;
+    return { ok: true, spoken, detail };
+  },
+};
+
+/**
+ * "Brief me on Jason."
+ *
+ * Pulls the person together from everywhere they appear: what Grove has been
+ * told about them, what happened with them, recent mail either way, and what
+ * is in the calendar with their name on it. The point is the composite — any
+ * one of those alone is something you could have looked up yourself.
+ */
+const PERSON_BRIEF: Ability = {
+  id: 'person.brief',
+  name: 'Brief me on someone',
+  what: 'Everything about a person: what you know, what happened with them, recent mail and anything in the calendar with them.',
+  where: 'server',
+  wired: true,
+  needs: [],
+  reads: true,
+  args: { who: { type: 'string', what: 'the person', required: true } },
+  examples: ['brief me on Jason', 'catch me up on Priya', 'what do I know about Sarah', 'remind me who Mark is'],
+  run: async (args) => {
+    const who = (args.who || '').trim().replace(/^(?:my|the)\s+/i, '');
+    if (!who) return { ok: false, spoken: 'Who?' };
+
+    const life = await loadLife(CURRENT_UID);
+    const entity = findEntity(life.entities, who, 'person') ?? findEntity(life.entities, who);
+    const facts = recall(await loadFacts(CURRENT_UID), who);
+
+    // Mail and calendar are live rather than remembered: what matters about a
+    // person before you see them is usually the thing that arrived this week.
+    const [mail, events] = await Promise.all([
+      google.searchMail({ from: who, limit: 4 }).catch(() => null),
+      google.readCalendar(45).catch(() => null),
+    ]);
+    // Not followed by a number, or "Mark" matches "MARK 312 Lecture" and
+    // Grove tells you about a meeting with a course code.
+    const first = who.split(/\s+/)[0].replace(/[^\w]/g, '');
+    const withThem = first
+      ? (events ?? []).filter((e) => new RegExp(`\\b${first}\\b(?!\\s*\\d)`, 'i').test(e.title))
+      : [];
+    const notes = searchNotes(await loadNotes(CURRENT_UID), who).slice(0, 3);
+
+    const detail = [
+      entity ? entityLines(life, entity) : '',
+      facts.length ? `You have told me: ${facts.map((f) => f.value).join('; ')}` : '',
+      withThem.length
+        ? `In the calendar:\n${withThem.slice(0, 5).map((e) => `- ${shortDate(e.start)}: ${e.title}`).join('\n')}`
+        : '',
+      mail && mail.length > 0
+        ? `Recent mail from them:\n${mail.map((m) => `- ${m.date}: ${m.subject} — ${m.snippet}`).join('\n')}`
+        : '',
+      notes.length ? `Notes mentioning them:\n${notes.map((n) => `- ${n.title}: ${n.summary}`).join('\n')}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    if (!detail) return { ok: true, spoken: `I have nothing on ${who} yet.` };
+    return {
+      ok: true,
+      spoken: entity?.summary || `Here is what I have on ${who}.`,
+      detail,
+    };
+  },
+};
+
+/**
+ * Everything at once: what is happening, what is owed, what is next.
+ *
+ * The tool behind "what am I supposed to be doing right now" and "I have forty
+ * minutes before class, what should I do". Nothing here is new information —
+ * it is the calendar, the reminders, the open commitments and the goals, in
+ * one place, so the model can weigh them against each other instead of
+ * answering from whichever one it happened to look at.
+ */
+const NOW: Ability = {
+  id: 'now.context',
+  name: 'Where things stand',
+  what: 'A picture of right now: what is on, what is outstanding, what is next, and what they are working towards. Use for "what should I be doing" and "I have an hour, what now".',
+  where: 'device',
+  wired: true,
+  needs: [],
+  reads: true,
+  args: {},
+  examples: [
+    'what am I supposed to be doing right now',
+    'I have 40 minutes before class, what should I do',
+    'what should I work on',
+    'where am I at',
+    'catch me up',
+  ],
+  run: async () => {
+    const now = new Date();
+    const [events, reminders, life, facts, notes] = await Promise.all([
+      google.readCalendar(2).catch(() => null),
+      openReminders(15).catch(() => null),
+      loadLife(CURRENT_UID),
+      loadFacts(CURRENT_UID),
+      loadNotes(CURRENT_UID),
+    ]);
+
+    const soon = (events ?? [])
+      .filter((e) => new Date(e.start).getTime() > now.getTime() - 2 * 3_600_000)
+      .slice(0, 6);
+    const on = soon.find(
+      (e) => new Date(e.start).getTime() <= now.getTime() && new Date(e.end || e.start).getTime() > now.getTime()
+    );
+    const next = soon.find((e) => new Date(e.start).getTime() > now.getTime());
+    const gap = next ? Math.round((new Date(next.start).getTime() - now.getTime()) / 60000) : null;
+
+    const goals = facts.filter((f) => f.kind === 'goal').map((f) => f.value);
+    const owed = facts.filter((f) => f.open).map((f) => f.value);
+    const commitments = openCommitments(life).map((e) => `${e.title}${e.summary ? ` — ${e.summary}` : ''}`);
+    // Anything said in the last week that someone still has to do.
+    const recentNotes = notes
+      .filter((n) => Date.now() - new Date(n.createdAt).getTime() < 7 * 86_400_000)
+      .slice(0, 5);
+    const todo = recentNotes.flatMap((n) => n.actions.map((a) => `${a} (from "${n.title}")`));
+
+    const detail = [
+      `Now: ${now.toLocaleString('en-GB', { weekday: 'long', hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'long' })}`,
+      on ? `Happening now: ${on.title} until ${new Date(on.end || on.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : 'Nothing on right now.',
+      next
+        ? `Next: ${next.title} at ${new Date(next.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}${gap !== null ? ` — ${gap} minutes from now` : ''}`
+        : 'Nothing else in the calendar today or tomorrow.',
+      soon.length ? `Coming up:\n${soon.map((e) => `- ${shortDate(e.start)} ${new Date(e.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}: ${e.title}`).join('\n')}` : '',
+      reminders === null
+        ? 'Reminders: no access.'
+        : reminders.length
+          ? `Reminders outstanding:\n${reminders.slice(0, 10).map((r) => `- ${r.title}${r.due ? ` (due ${shortDate(r.due.toISOString())}${r.overdue ? ', overdue' : ''})` : ''}`).join('\n')}`
+          : 'Nothing outstanding in reminders.',
+      commitments.length ? `Promised and not done:\n${commitments.map((c) => `- ${c}`).join('\n')}` : '',
+      owed.length ? `Still owed:\n${owed.map((o) => `- ${o}`).join('\n')}` : '',
+      todo.length ? `From recent notes:\n${todo.slice(0, 8).map((t) => `- ${t}`).join('\n')}` : '',
+      goals.length ? `Working towards: ${goals.join('; ')}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const spoken = on
+      ? `${on.title} is on now.`
+      : next && gap !== null && gap < 180
+        ? `${next.title} in ${gap} minutes.`
+        : 'Nothing on right now.';
+    return { ok: true, spoken, detail };
+  },
+};
+
+/**
+ * "Anything important?"
+ *
+ * The inbox sorted by whether a person needs something from you, which is not
+ * what an inbox is sorted by. The test is deliberately crude and local: mail
+ * from a no-reply address or carrying the vocabulary of marketing is not
+ * something to be told about while walking. The model gets both the sorted
+ * list and the reasoning, and writes the sentence.
+ */
+const MAIL_IMPORTANT: Ability = {
+  id: 'mail.important',
+  name: 'What needs attention',
+  what: 'The mail that actually needs them — real people and replies waiting — with the newsletters left out.',
+  where: 'server',
+  wired: true,
+  needs: ['email'],
+  reads: true,
+  args: { since: { type: 'string', what: 'how far back, as Gmail writes it: newer_than:3d' } },
+  examples: ['anything important', 'anything I need to deal with', 'what needs my attention', 'is there anything urgent'],
+  run: async (args) => {
+    const messages = await google.searchMail({
+      category: 'primary',
+      since: (args.since || '').trim() || 'newer_than:3d',
+      limit: 20,
+    });
+    if (messages === null) return { ok: false, spoken: google.explain('your inbox') };
+    if (messages.length === 0) return { ok: true, spoken: 'Nothing new worth bothering you with.' };
+
+    const life = await loadLife(CURRENT_UID);
+    const known = new Set(
+      life.entities.filter((e) => e.kind === 'person').map((e) => e.name.toLowerCase().split(' ')[0])
+    );
+
+    const scored = messages
+      .map((m) => {
+        const from = m.from.toLowerCase();
+        const text = `${m.subject} ${m.snippet}`.toLowerCase();
+        let score = 0;
+        const why: string[] = [];
+        if (/no-?reply|donotreply|notifications?@|newsletter|marketing|updates@|info@/.test(from)) score -= 4;
+        if (/unsubscribe|% off|sale|deal|webinar|promo|offer ends/.test(text)) score -= 3;
+        if (known.has(from.replace(/<.*/, '').trim().split(/\s+/)[0])) {
+          score += 3;
+          why.push('someone you know');
+        }
+        // A person writing to you, rather than a system writing at you: a
+        // display name of two or more words. "Prof. Chen" counts and
+        // "LinkedIn" does not, which is the whole distinction being drawn.
+        if (
+          !/@(?:no-?reply|mailer|bounce)/.test(from) &&
+          /^[A-Za-z][\w.'-]*(?:\s+[A-Za-z][\w.'-]*)+\s*</.test(m.from.trim())
+        ) {
+          score += 2;
+          why.push('a person, not a service');
+        }
+        if (/\?/.test(text)) {
+          score += 2;
+          why.push('asks you something');
+        }
+        // Every weekday, not the two that happened to be written down first:
+        // "the draft by Thursday" is exactly the mail this tool exists to find,
+        // and it was scoring zero.
+        if (
+          /\bby (?:today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|the \d|end of|next week|then)\b|deadline|\bdue\b|asap|urgent|waiting on|waiting for|follow(?:ing)? up|chase|need (?:it|this|them|the \w+) by/.test(
+            text
+          )
+        ) {
+          score += 3;
+          why.push('has a deadline');
+        }
+        if (/^re:/i.test(m.subject)) {
+          score += 1;
+          why.push('part of a thread');
+        }
+        return { m, score, why };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    const needed = scored.filter((s) => s.score >= 2).slice(0, 5);
+    if (needed.length === 0) {
+      return {
+        ok: true,
+        spoken: 'Nothing that needs you — it is all newsletters and notifications.',
+        detail: scored.map((s) => `- ${s.m.from}: ${s.m.subject}`).join('\n'),
+      };
+    }
+
+    return {
+      ok: true,
+      spoken: `${needed.length} ${needed.length === 1 ? 'email needs' : 'emails need'} you.`,
+      detail: [
+        `Needs attention (${needed.length}):`,
+        ...needed.map((s) => `- ${s.m.from} — ${s.m.subject}: ${s.m.snippet}${s.why.length ? ` [${s.why.join(', ')}]` : ''}`),
+        '',
+        `The rest, not worth mentioning unless asked: ${scored
+          .filter((s) => s.score < 2)
+          .slice(0, 8)
+          .map((s) => s.m.from.replace(/<.*/, '').trim())
+          .join(', ')}`,
+      ].join('\n'),
+    };
+  },
+};
+
 const NOTES_SEARCH: Ability = {
   id: 'notes.search',
   name: 'Notes',
@@ -2663,7 +3087,7 @@ const SET_MODE: Ability = {
   where: 'device',
   wired: true,
   needs: [],
-  args: { mode: { type: 'string', what: 'which one: focus, study, wind down, or normal', required: true } },
+  args: { mode: { type: 'string', what: 'which one: normal, focus, study, work, gym, social, travel, home or wind down', required: true } },
   examples: ['go into focus mode', 'switch to wind down', 'study mode', 'back to normal'],
   run: async (args) => {
     const asked = (args.mode || '').toLowerCase().replace(/\bmode\b/g, '').trim();
@@ -2675,7 +3099,10 @@ const SET_MODE: Ability = {
       return asked.includes(label) || label.includes(asked) || asked.includes(id) || id.includes(asked);
     });
     if (!wanted) {
-      return { ok: false, spoken: `There's no ${asked} mode. There's focus, study, wind down, or normal.` };
+      return {
+        ok: false,
+        spoken: `There's no ${asked} mode. There's work, focus, study, gym, social, travel, home, wind down, or normal.`,
+      };
     }
     if (!onModeChange) return { ok: false, spoken: 'I can\'t switch modes right now.' };
 
@@ -2687,6 +3114,11 @@ const SET_MODE: Ability = {
 };
 
 export const ABILITIES: Ability[] = [
+  NOW,
+  LIFE_SEARCH,
+  PERSON_BRIEF,
+  MAIL_IMPORTANT,
+  REMIND_BATCH,
   NOTES_SEARCH,
   MAC_TASK,
   RIDE,

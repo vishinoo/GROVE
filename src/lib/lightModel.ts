@@ -973,6 +973,52 @@ ${source.slice(0, 12_000)}`
   return clean ? clean.replace(/^#+\s*/gm, '').replace(/\*\*?/g, '') : null;
 }
 
+/**
+ * What is worth remembering in a stretch of someone's life.
+ *
+ * One call over a batch — a dozen turns, or one finished note — rather than one
+ * per sentence, which is the whole cost model of the long memory. The model is
+ * told what is already known about the people in it, so it adds to Jason
+ * instead of inventing a second one, and can say which old facts a new one
+ * replaces.
+ *
+ * Biased hard toward keeping nothing. Most of what anyone says to an assistant
+ * is a request — the weather, a song, a timer — and a memory that files those
+ * as life events buries the three things that mattered.
+ */
+export async function lightConsolidate(
+  material: string,
+  known: string,
+  today: string
+): Promise<string | null> {
+  const text = material.trim();
+  if (!text) return null;
+  return complete(
+    `You keep the long-term memory of one person's assistant. Read what follows and pull out only what is worth remembering about their life months from now.
+
+Keep: people (who they are to the user, what they are doing, what was agreed with them), projects and what state they are in, ideas the user had, decisions, plans, commitments (things someone promised to do, with deadlines), places that matter to them, and meaningful events.
+Skip entirely: requests to the assistant (weather, music, directions, timers, "what's on my calendar"), the assistant's own replies unless they state a fact about the user's life, small talk, and anything you would have to guess.
+
+Today is ${today}. Resolve relative dates ("Friday", "yesterday") to ISO dates.
+
+Return JSON with exactly these keys:
+- "entities": array of { "name", "kind" (person|project|place|org|idea|topic), "relation" (for a person, who they are to the user, e.g. cofounder, sister, professor; else omit), "summary" (one sentence of who or what this is), "facts" (array of short specific facts learned HERE, each one sentence), "outdated" (array of facts from the KNOWN list that something here replaces, copied exactly) }
+- "episodes": array of { "kind" (conversation|meeting|idea|commitment|event|note), "title" (a few words, like a diary heading), "summary" (one or two sentences), "about" (array of entity names it involves), "open" (true only for a commitment not yet done), "at" (ISO date it happened, or omit for today) }
+
+Use the exact names from KNOWN when it is the same person or thing. Never write "the user" as an entity. If nothing is worth keeping, return {"entities":[],"episodes":[]}.`,
+    [
+      {
+        role: 'user',
+        content: `KNOWN:\n${known || '(nothing yet)'}\n\nMATERIAL:\n${text.slice(0, 16_000)}`,
+      },
+    ],
+    true,
+    false,
+    false,
+    2000
+  );
+}
+
 export async function lightNotes(transcript: string): Promise<NoteShape | null> {
   const text = transcript.trim();
   if (!text) return null;

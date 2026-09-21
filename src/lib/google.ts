@@ -480,6 +480,8 @@ export type CalendarEvent = {
   id: string;
   title: string;
   start: string;
+  /** When it finishes, where Google gave one. Empty for an all-day entry. */
+  end: string;
   allDay: boolean;
   location: string;
 };
@@ -491,6 +493,7 @@ type RawEvent = {
   location?: string;
   attendees?: { self?: boolean; responseStatus?: string }[];
   start?: { dateTime?: string; date?: string };
+  end?: { dateTime?: string; date?: string };
 };
 
 export async function readCalendar(days = 1): Promise<CalendarEvent[] | null> {
@@ -521,6 +524,9 @@ export async function readCalendar(days = 1): Promise<CalendarEvent[] | null> {
       id: e.id ?? '',
       title: e.summary || 'Untitled',
       start: e.start?.dateTime || e.start?.date || '',
+      // Needed to answer "is anything on right now" and "how long have I got":
+      // a start time alone cannot tell you whether you are in the middle of it.
+      end: e.end?.dateTime || e.end?.date || '',
       allDay: Boolean(e.start?.date && !e.start?.dateTime),
       location: e.location ?? '',
     }))

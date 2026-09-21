@@ -27,7 +27,7 @@
  * those, because that decision is not the model's to make.
  */
 
-import { abilityById, runAbility, type Ability } from './abilities';
+import { abilityById, currentAccount, runAbility, type Ability } from './abilities';
 import type { GroveContext, GroveReply, Turn } from './grove';
 import {
   asToolResults,
@@ -37,6 +37,7 @@ import {
   type ToolHistory,
 } from './lightModel';
 import { asPromptBlock, factFrom } from './memory';
+import { loadLife, whoIsWho } from './life';
 import { abilitiesFor, modeById } from './modes';
 import { ABILITIES } from './abilities';
 import { activePreset, fallback, mannerDirective } from './persona';
@@ -70,6 +71,11 @@ const TOOL_RULES = `How to use your tools:
 - If they point at work they already have ("the assignment on here", "that brief"), find and read that document first and pass its text as the source, so what you write answers their actual question.
 - Set research on a document when it needs facts from the world — companies, prices, news, anything you would otherwise be guessing at.
 - A document takes half a minute to write. Do not promise one and stop; call the tool.
+- Anything about their own life — what they should be doing, what they promised, who someone is, what was decided, an idea they had — comes from the memory tools, not from this conversation. You only see the last few turns; the tools see months.
+- "What should I be doing", "I have an hour, what now", "catch me up": call the where-things-stand tool, then pick ONE thing and say why it is the one, weighing deadlines, what is promised, and how long they have.
+- "Brief me on someone" or "who is X": use the person tool. Never assemble a person from memory of this conversation.
+- "Anything important" about mail: use the tool that filters it. Name who and what they want, not how many are unread.
+- A question about when something happened, or about something from a named stretch of time, goes to the long-memory search with that time passed as the when argument.
 - For current events, prices, news or anything on the web, use the briefing tool.
 - To go somewhere — "take me", "navigate", "directions to" — use navigate. Use the ride tool only when they say Uber, a ride, a taxi or a cab. For "home" pass "home"; the app knows the address.
 - For a place mentioned in an email, note or event, look that up first and pass the actual street address.
@@ -208,7 +214,13 @@ export async function askWithTools(
   const mode = modeById(context.persona.mode ?? 'normal');
   const available = abilitiesFor(mode, ABILITIES);
   const declarations = declarationsFor(available);
-  const system = systemFor(context, available);
+  // A line of names, not the archive: enough that "my cofounder" and "Jason"
+  // are the same person without a lookup, and cheap enough to ride on every
+  // turn. Everything else about them is a tool call away.
+  const roster = await loadLife(currentAccount())
+    .then((l) => whoIsWho(l))
+    .catch(() => '');
+  const system = [systemFor(context, available), roster].filter(Boolean).join('\n\n');
   const fact = factFrom(userText) ?? undefined;
 
   const contents: unknown[] = [...(historyFor(history) as unknown[]), asUserTurn(userText)];

@@ -54,6 +54,8 @@ import {
 import { isSpeaking, speak, stopSpeaking } from '@/lib/speak';
 import { lightNotes } from '@/lib/lightModel';
 import * as memory from '@/lib/memory';
+import * as life from '@/lib/life';
+import { afterTurn, consolidateNow, rememberNote } from '@/lib/consolidate';
 import * as notesStore from '@/lib/notes';
 import * as sparks from '@/lib/sparks';
 import * as transcript from '@/lib/transcript';
@@ -123,6 +125,11 @@ type AgentValue = {
   notes: notesStore.Note[];
   forgetNote: (id: string) => Promise<void>;
 
+  /** The long memory: who and what is in their life, and what happened. */
+  life: life.Life;
+  forgetEntity: (id: string) => Promise<void>;
+  forgetEpisode: (id: string) => Promise<void>;
+
   /** The trigger, however it was pressed — ring, screen or keyboard. */
   press: () => void;
   /** Skip the microphone entirely. Used by the typed fallback. */
@@ -174,6 +181,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const [activity, setActivity] = useState<transcript.Entry[]>([]);
   const [facts, setFacts] = useState<memory.Fact[]>([]);
   const [noteList, setNoteList] = useState<notesStore.Note[]>([]);
+  const [lifeMemory, setLifeMemory] = useState<life.Life>({ entities: [], episodes: [], pending: [] });
 
   /**
    * The voice note being taken, if one is.
@@ -191,6 +199,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     finishing: boolean;
     endTimer: ReturnType<typeof setTimeout> | null;
     quietTimer: ReturnType<typeof setTimeout> | null;
+    /** Set when this was started as a meeting rather than a note to self. */
+    meeting?: boolean;
+    /** Who is in the room, when they were named. */
+    people: string[];
   } | null>(null);
   const [sparkList, setSparkList] = useState<sparks.Spark[]>([]);
 
@@ -341,6 +353,15 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     void notesStore.loadNotes(uid).then((n) => {
       if (mounted.current) setNoteList(n);
     });
+    void life.loadLife(uid).then((l) => {
+      if (mounted.current) setLifeMemory(l);
+      // A day that ended mid-buffer is still worth remembering. Opening the app
+      // is the only moment iOS reliably gives us to do it.
+      void consolidateNow(uid).then(async () => {
+        const fresh = await life.loadLife(uid);
+        if (mounted.current) setLifeMemory(fresh);
+      });
+    });
     void sparks.loadSparks(uid).then((s) => {
       if (mounted.current) setSparkList(s);
       // Opening the app is the only reliable moment a device-side spark gets.
@@ -428,7 +449,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // the microphone after the opening sentence of the note — usually the one
     // saying what it is about.
     if (notesStore.isStartingNote(text)) {
-      startNote();
+      startNote(notesStore.meetingStart(text));
       return;
     }
 
@@ -563,6 +584,13 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       });
       if (mounted.current) setFacts(next);
     }
+
+    // Buffered for the long memory, and read in the background once there is
+    // enough to be worth a call. Not awaited: this turn is over.
+    void afterTurn(account, text, reply.text).then(async () => {
+      const fresh = await life.loadLife(account);
+      if (mounted.current) setLifeMemory(fresh);
+    });
 
     const entries = await transcript.record(account, {
       said: text,
@@ -938,7 +966,7 @@ function shortFailure(text: string): string {
     if (!started) void finishNote();
   };
 
-  const startNote = () => {
+  const startNote = (meetingWith: string[] | null = null) => {
     stopSpeaking();
     // A buzz, not a sentence. Anything spoken now plays into the glasses while
     // the microphone opens, and gets written into the note as its first line.
@@ -950,9 +978,14 @@ function shortFailure(text: string): string {
       finishing: false,
       endTimer: null,
       quietTimer: null,
+      ...(meetingWith ? { meeting: true, people: meetingWith } : { people: [] }),
     };
     setHeard('');
-    setCaption('Taking notes. Press when you are done.');
+    setCaption(
+      meetingWith
+        ? `Logging the meeting${meetingWith.length > 0 ? ` with ${meetingWith.join(' and ')}` : ''}. Press when you are done.`
+        : 'Taking notes. Press when you are done.'
+    );
     setState('noting');
     armNoteQuiet();
     void listenForNote();
@@ -997,22 +1030,52 @@ function shortFailure(text: string): string {
       points: [],
       actions: [],
     };
-    const next = await notesStore.saveNote(live.current.uid, {
+    const { notes: next, saved } = await notesStore.saveNote(live.current.uid, {
       ...note,
       transcript: said,
       createdAt: new Date().toISOString(),
       seconds,
+      ...(m.meeting ? { kind: 'meeting' as const, people: m.people } : {}),
     });
     if (!mounted.current) return;
     setNoteList(next);
 
+    // Read into the long memory behind the reply: who was there, what was
+    // decided, what anyone promised. One model call, and nobody waits on it.
+    const account = live.current.uid;
+    void rememberNote(account, saved, saved.id).then(async () => {
+      const fresh = await life.loadLife(account);
+      if (mounted.current) setLifeMemory(fresh);
+    });
+
+    if (!shape) {
+      utter("Saved the recording, but I couldn't write it up just now. It's all in your notes.");
+      return;
+    }
+
     const todo = note.actions.length;
+    const batch = abilityById('reminders.batch');
+    if (todo === 0 || !batch) {
+      utter(`Saved: ${note.title}.`);
+      return;
+    }
+
+    // The things to do are offered, not created. Four reminders appearing in
+    // your list because a meeting mentioned four things is the kind of
+    // helpfulness you spend a morning undoing.
+    awaitingYes.current = { ability: batch, args: { items: note.actions.join('\n') }, at: Date.now() };
     utter(
-      shape
-        ? `Saved: ${note.title}.${todo > 0 ? ` ${todo === 1 ? 'One thing' : `${todo} things`} to do in there.` : ''}`
-        : "Saved the recording, but I couldn't write it up just now. It's all in your notes."
+      `Saved: ${note.title}. ${todo === 1 ? 'One thing' : `${todo} things`} to do in there. Press once to put ${todo === 1 ? 'it' : 'them'} in your reminders, twice to leave ${todo === 1 ? 'it' : 'them'}.`
     );
   };
+
+  const forgetEntity = useCallback(async (id: string) => {
+    setLifeMemory(await life.updateLife(live.current.uid, (now) => life.forgetEntity(now, id)));
+  }, []);
+
+  const forgetEpisode = useCallback(async (id: string) => {
+    setLifeMemory(await life.updateLife(live.current.uid, (now) => life.forgetEpisode(now, id)));
+  }, []);
 
   const forgetNote = useCallback(async (id: string) => {
     setNoteList(await notesStore.deleteNote(live.current.uid, id));
@@ -1381,6 +1444,9 @@ function shortFailure(text: string): string {
       editSpark,
       deleteSpark,
       notes: noteList,
+      life: lifeMemory,
+      forgetEntity,
+      forgetEpisode,
       forgetNote,
       press,
       say,
@@ -1409,6 +1475,9 @@ function shortFailure(text: string): string {
       deleteSpark,
       noteList,
       forgetNote,
+      lifeMemory,
+      forgetEntity,
+      forgetEpisode,
       press,
       say,
     ]

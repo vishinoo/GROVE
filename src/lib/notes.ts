@@ -31,6 +31,10 @@ export type Note = {
   createdAt: string;
   /** How long the person spoke for, in seconds. */
   seconds: number;
+  /** Who was there, when it was logged as a meeting rather than a thought. */
+  people?: string[];
+  /** A meeting log reads differently from a note to self, and is briefed on. */
+  kind?: 'meeting';
 };
 
 /**
@@ -64,14 +68,14 @@ async function write(uid: string, notes: Note[]): Promise<void> {
   }
 }
 
-export async function saveNote(uid: string, note: Omit<Note, 'id'>): Promise<Note[]> {
+export async function saveNote(uid: string, note: Omit<Note, 'id'>): Promise<{ notes: Note[]; saved: Note }> {
   const made: Note = {
     ...note,
     id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
   };
   const next = [made, ...(await loadNotes(uid))].slice(0, LIMIT);
   await write(uid, next);
-  return next;
+  return { notes: next, saved: made };
 }
 
 export async function deleteNote(uid: string, id: string): Promise<Note[]> {
@@ -140,7 +144,29 @@ const START_PHRASES =
   /^\s*(?:(?:hey|ok|okay)\s+)?(?:[a-z]{2,14},?\s+)?(?:please\s+)?(?:listen to this|listen up|take (?:a )?notes?|take this down|start (?:a )?(?:memo|note|voice note)|record (?:this|a note|a memo)|write this down|note this down|voice (?:memo|note))\s*[.!]?\s*$/i;
 
 export function isStartingNote(text: string): boolean {
-  return START_PHRASES.test(text);
+  return START_PHRASES.test(text) || meetingStart(text) !== null;
+}
+
+/**
+ * "Log the meeting", "log this meeting with Jason and Priya".
+ *
+ * A meeting log is a note that knows who was in the room, which is what makes
+ * it worth briefing on later: "what did Jason say about the build" is a
+ * question about a person, and a note with no names in it cannot answer it.
+ *
+ * Returns the names, possibly empty, or null when this is not a meeting at all.
+ */
+const MEETING_PHRASES =
+  /^\s*(?:(?:hey|ok|okay)\s+)?(?:[a-z]{2,14},?\s+)?(?:please\s+)?(?:log|take|record|start|minute)\s+(?:the\s+|this\s+|a\s+|our\s+)?meeting(?:\s+notes?)?(?:\s+(?:with|and)\s+(.{2,80}))?\s*[.!]?\s*$/i;
+
+export function meetingStart(text: string): string[] | null {
+  const hit = MEETING_PHRASES.exec(text);
+  if (!hit) return null;
+  const who = (hit[1] ?? '')
+    .split(/\s*(?:,|\band\b|&)\s*/i)
+    .map((n) => n.trim().replace(/[.!?]+$/, ''))
+    .filter((n) => n.length > 1 && n.length < 40);
+  return who;
 }
 
 /**

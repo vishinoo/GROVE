@@ -366,6 +366,50 @@ function preferredList(
 }
 
 /**
+ * Reminders still to do, soonest first.
+ *
+ * The other half of `addReminder`, and the reason "what am I supposed to be
+ * doing" could not be answered before: Grove could write to the list and never
+ * read it, so its idea of what was outstanding was whatever it had been told
+ * in the last few minutes.
+ */
+export async function openReminders(
+  limit = 20
+): Promise<{ title: string; due: Date | null; overdue: boolean }[] | null> {
+  const m = mod();
+  if (!m || !(await ensureRemindersAccess())) return null;
+  try {
+    const lists = await m.getCalendarsAsync(m.EntityTypes.REMINDER);
+    if (lists.length === 0) return [];
+    // A wide window rather than a precise one: an undated reminder and one due
+    // in three months are both things someone may be asked about.
+    const from = new Date(Date.now() - 180 * 86_400_000);
+    const to = new Date(Date.now() + 180 * 86_400_000);
+    const found = await m.getRemindersAsync(
+      lists.map((c) => c.id),
+      m.ReminderStatus.INCOMPLETE,
+      from,
+      to
+    );
+    const now = Date.now();
+    return found
+      .map((r) => {
+        const due = r.dueDate ? new Date(r.dueDate) : null;
+        return {
+          title: (r.title ?? '').trim(),
+          due: due && Number.isFinite(due.getTime()) ? due : null,
+          overdue: !!due && due.getTime() < now,
+        };
+      })
+      .filter((r) => r.title)
+      .sort((a, b) => (a.due?.getTime() ?? Infinity) - (b.due?.getTime() ?? Infinity))
+      .slice(0, limit);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Saves a reminder, and says which list it went into.
  *
  * The list name is returned so the reply can name it. "Added to your reminders"

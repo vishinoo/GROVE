@@ -135,11 +135,19 @@ const QUESTION_OPENERS =
  * is upstairs" are untouched, while every phrasing people actually use —
  * turn it on, put me in, switch to, activate, set — reaches mode.set.
  */
-const MODE_COMMAND =
-  /\b(?:turn|switch|go|put|set|activate|enter|start|enable|into)\b[^.?!]{0,24}?\b(?:focus|study|wind[-\s]?down|normal)\b/i;
+/**
+ * The modes, as words. Written once: when these lived separately in two
+ * regexes, adding a mode meant remembering to edit both, and "travel mode"
+ * silently did nothing.
+ */
+const MODE_WORDS = 'focus|study|wind[-\\s]?down|normal|work|gym|social|travel|home';
 
-const BARE_MODE =
-  /^\s*(?:back to\s+)?(?:focus|study|wind[-\s]?down|normal)(?:\s+mode)?\s*[.!]?\s*$/i;
+const MODE_COMMAND = new RegExp(
+  `\\b(?:turn|switch|go|put|set|activate|enter|start|enable|into)\\b[^.?!]{0,24}?\\b(?:${MODE_WORDS})\\b(?:\\s+mode)?`,
+  'i'
+);
+
+const BARE_MODE = new RegExp(`^\\s*(?:back to\\s+)?(?:${MODE_WORDS})(?:\\s+mode)?\\s*[.!]?\\s*$`, 'i');
 
 /** Being asked outright to remember something. */
 const EXPLICIT_REMEMBER =
@@ -274,10 +282,11 @@ const NOT_A_DESTINATION =
  * Anchored to the start, so this admits "anything from Priya" and leaves
  * "I'll do anything" alone.
  */
-const ELLIPTICAL_LOOKUP = /^\s*(?:anything|any (?:mail|messages|emails|news))\b/i;
+const ELLIPTICAL_LOOKUP =
+  /^\s*(?:anything|any (?:mail|messages|emails|news)|catch me up|brief me|where am i at|remind me who)\b/i;
 
 const LOOKUP_QUESTION =
-  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|coat|umbrella|wear|traffic|how long|how far|eta|leave for|leave by|set off|get there|get home|which way|way to|route to|far is|my day|day looking|got on|first thing|last thing|next thing|what time is|what time'?s|note|notes|memo|memos|to-?do|task|tasks|my list|still have to do|number|phone number|contact|first class|last class|of the day|first class|class|appointment|meeting|event|events|booked|flight|this week|anything with|anything on|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|doc|docs|document|plan|notes|spreadsheet|drive|news|markets|happened|remind me (?:what|who|about)|supposed to|do i know about|did i say|what did i|anything from|say about|did .{2,20} say)\b/i;
+  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|coat|umbrella|wear|traffic|how long|how far|eta|leave for|leave by|set off|get there|get home|which way|way to|route to|far is|my day|day looking|got on|first thing|last thing|next thing|what time is|what time'?s|note|notes|memo|memos|to-?do|task|tasks|my list|still have to do|number|phone number|contact|first class|last class|of the day|first class|class|appointment|meeting|event|events|booked|flight|this week|anything with|anything on|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|doc|docs|document|plan|notes|spreadsheet|drive|news|markets|happened|remind me (?:what|who|about)|supposed to|do i know about|did i say|what did i|anything from|say about|did .{2,20} say|supposed to be doing|should i (?:do|work on|be doing|start)|what now|where am i at|catch me up|idea|ideas|decide|decided|decision|working on|been up to|happened|brief me|who is|who's|important|attention|urgent|deal with|needs me|need(?:s)? (?:my )?(?:attention|doing)|outstanding|promised|owe|commitment|commitments|free time|have (?:an? )?(?:hour|minutes?))\b/i;
 
 /**
  * Whether this is a question Grove should look up rather than answer offhand.
@@ -294,7 +303,11 @@ export function detectLookupIntent(text: string): boolean {
   // "Anything from Priya?" without the question mark is not question-shaped and
   // carries no verb, so both gates refused it and the mail ability could never
   // run. It is still unmistakably a request to go and look.
-  const isQuestion = QUESTION_OPENERS.test(t) || t.endsWith('?') || ELLIPTICAL_LOOKUP.test(t);
+  // "I have 40 minutes before class, what should I do" puts the question after
+  // the context it depends on, so testing only the opening word refused it.
+  const LATE_QUESTION = /,\s*(?:what|which|who|when|where|how)\b/i;
+  const isQuestion =
+    QUESTION_OPENERS.test(t) || t.endsWith('?') || ELLIPTICAL_LOOKUP.test(t) || LATE_QUESTION.test(t);
   return isQuestion && LOOKUP_QUESTION.test(t);
 }
 

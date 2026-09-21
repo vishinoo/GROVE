@@ -88,6 +88,8 @@ export const CONNECTIONS: Connection[] = [
       'mail.search',
       'mail.reply',
       'mail.summarise',
+      'mail.important',
+      'person.brief',
       'gcal.read',
       'doc.find',
       'doc.create',

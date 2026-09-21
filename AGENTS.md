@@ -199,6 +199,49 @@ refusing on an unknown is how a working setup gets declared broken.
 **If you change `SCOPES`, say in the release notes that Google must be
 disconnected and reconnected.** Nothing else can fix it.
 
+## The long memory
+
+`src/lib/memory.ts` is forty one-line facts sent with every turn. `src/lib/life.ts`
+is the other half: the people, projects, places and ideas in someone's life,
+each with its own facts, plus dated **episodes** of what happened — and it is
+sent with no turn at all. It is searched when something asks about it, by
+`memory.search` and `person.brief`. The two are not redundant: one is what must
+always be in mind, the other is what must be findable in March.
+
+**Nothing here costs a model call per turn.** A finished turn appends to a
+buffer; every dozen turns, or when Grove is next opened, `consolidate.ts` makes
+one call that reads the buffer and returns entities and episodes. A voice note
+or meeting log gets the same read as it closes. Measured: twelve turns of real
+conversation, one call, 3.6 seconds, six people and projects and six dated
+episodes out the other end.
+
+**The buffer is deleted once read.** That is the privacy line, and it is the
+same one `transcript.ts` draws at fifteen exchanges: Grove listens while you
+walk around, so it keeps what things meant and not what was said. Everything it
+keeps is readable and deletable on the Sparks screen, because a memory you
+cannot see is one you cannot correct.
+
+Details that were bugs first:
+
+- **A leading word only matches inside one kind.** "Mark" the investor was
+  merged into "MARK 312" the course, producing one entity holding a person's
+  relationship and a lecture's midterm. Unrecoverable once it happens.
+- **Facts go stale rather than being overwritten.** "Moved to Berlin" marks
+  "lives in Toronto" stale instead of deleting it or sitting alongside it.
+  Holding both as true is how you end up confidently wrong about someone.
+- **A named stretch of time never borrows from another one.** "What did I
+  decide in March" must not be answered with September's decision. When nothing
+  in the window matches the words, the episodes actually inside it are offered,
+  labelled as such — the words people use rarely match the words written down.
+
+Ideas taken from ACE, agentmemory and Memmy after reading them: batch
+consolidation rather than per-turn extraction, keyword plus name-and-alias
+lookup rather than embeddings (agentmemory's own benchmark puts BM25 alone at
+86% of full recall), time stored as a field and turned into a range before
+scoring, provenance on every fact, and supersession instead of contradiction
+detection. What was deliberately not taken: vectors, decay formulas and reward
+propagation, all of which need a server or a second model to earn their keep.
+
 ## Voice notes
 
 "Listen to this" starts a note: Grove stops replying and listens at length
@@ -222,6 +265,18 @@ Three things are deliberate:
 Notes are not memory. Facts are one sentence and go into every prompt; notes are
 long and are searched when asked about. A memory server was considered and not
 used, because it would bring back the backend Grove was made standalone to shed.
+
+## Modes, and what they are for
+
+Nine of them now: normal, work, focus, study, gym, social, travel, home and
+wind down. Adding one is three things — a palette, a manner, an allow list —
+and one trap: the mode words live in `MODE_WORDS` in grove.ts, used by both the
+keyword patterns. They were two separate regexes once, and the first mode added
+after that silently did nothing when spoken.
+
+Work and home allow everything and change the manner; the narrow ones exist for
+situations where a tool is actively wrong. Gym has no mail and no sending: out
+of breath, mid-set, is not when you deal with your inbox.
 
 ## Money
 
