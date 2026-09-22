@@ -241,6 +241,16 @@ gifts and decisions, and away from plain requests. Tested: "make me a workout
 plan" asks the goal and days; the answer produces the plan without a second
 question.
 
+**Grove's own sounds must never press the ring.** The J09 works through the
+volume fallback, and any sound Grove starts — a chime, the working pulse, speech
+starting or stopping — can move the volume on Bluetooth glasses, which the
+fallback reads as a press. Mid-task, that press abandoned the answer, opened the
+mic to nothing and fell back to Ready: "listening, ready, and it doesn't do
+anything". So every sound calls `suppressVolumeTriggers()` first, and a
+volume-fallback press while thinking or working is ignored outright. Real
+interruptions still work from the screen, a media-key ring, or while Grove is
+speaking. And a turn never ends in silence: an empty reply says so and listens.
+
 **Every state change has a sound**, synthesised natively in grove-remote the
 same way the keep-alive silence is (no bundled audio files): a rising chime when
 the mic opens, a falling one when it closes with nothing heard, a soft pulse

@@ -191,6 +191,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const soundFor = (was: AgentState, now: AgentState) => {
     const remote = remoteModule();
     if (!remote) return;
+    // Any sound Grove starts can move the volume on Bluetooth glasses, and the
+    // volume fallback would read that as a press. See the ring handler below.
+    trigger.suppressVolumeTriggers();
     const busy = (x: AgentState) => x === 'thinking' || x === 'working';
 
     if ((now === 'listening' || now === 'noting') && was !== 'listening' && was !== 'noting') {
@@ -209,6 +212,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       pulseTimer.current = setTimeout(() => {
         pulseTimer.current = null;
         if (!busy(stateNow.current)) return;
+        trigger.suppressVolumeTriggers();
         remote.workingPulse(true);
         // A cap, whatever else happens. Every path out of working stops the
         // pulse, but a loop that ticks for ever if one of them is ever missed
@@ -650,6 +654,13 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // A read says nothing until it has something to say. The holding timer
     // above covers a slow one; speaking here as well produced two "let me
     // check"s and, when the lookup failed, no answer at all.
+    // Never silence. A reply with no words and nothing to run would drop
+    // straight to Ready having said nothing — indistinguishable from the app
+    // ignoring you — so it says so instead.
+    if (!reply.ability && !reply.text.trim()) {
+      utter('I lost my train of thought there. Say that again?', true);
+      return;
+    }
     if (!reply.holdForTool) utter(reply.text, Boolean(reply.expectsReply));
 
     // Anything worth remembering was pulled locally, by keyword, from what was
@@ -893,6 +904,8 @@ function shortFailure(text: string): string {
     // interrupting took three presses and why the screen said "Ready" with the
     // old reply still under it.
     const turn = turnSeq.current;
+    // Speech starting and stopping moves the audio route on glasses too.
+    trigger.suppressVolumeTriggers();
     setState('speaking');
     // The voice picked in Settings is saved on the persona, not in `delivery`,
     // and only `delivery` was passed — so choosing a voice changed the preview
@@ -900,6 +913,7 @@ function shortFailure(text: string): string {
     const { persona: who } = live.current;
     speak(text, { ...who.delivery, voiceId: who.voiceId ?? who.delivery.voiceId }, {
       onDone: () => {
+        trigger.suppressVolumeTriggers();
         if (!mounted.current) return;
         // A newer press owns the app now; this speech is over and irrelevant.
         if (turn !== turnSeq.current) return;
@@ -1457,6 +1471,23 @@ function shortFailure(text: string): string {
       setRingSeen(true);
       switch (event.kind) {
         case 'tap':
+          // A press from the volume fallback, while an answer is on its way,
+          // is almost never a finger. Grove's own sounds — the chimes, the
+          // working pulse, speech starting — can shift the volume on Bluetooth
+          // glasses, and the fallback cannot tell that from a press. Taken as
+          // one, it abandoned the answer, opened the microphone to nothing and
+          // fell back to Ready: "listening, ready, and it doesn't do anything".
+          // So the answer is protected. A deliberate interruption still works
+          // from the screen, from a ring that sends real media keys, or by
+          // pressing once Grove starts talking.
+          if (
+            event.raw === 'volume-down' &&
+            !awaitingYes.current &&
+            (stateNow.current === 'thinking' || stateNow.current === 'working')
+          ) {
+            console.log('[grove:trigger] volume press ignored mid-turn');
+            break;
+          }
           press();
           break;
         case 'hold-start':
@@ -1615,6 +1646,7 @@ function remoteModule(): typeof import('grove-remote') | null {
  * chime on top of that is decoration.
  */
 function doneChime(): void {
+  trigger.suppressVolumeTriggers();
   remoteModule()?.chime('done');
 }
 
