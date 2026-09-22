@@ -250,6 +250,38 @@ their answer is the signal. The pulse is delayed so a fast turn makes no sound
 at all. The JS side probes for the native functions, so an update reaching an
 older binary is silent rather than broken.
 
+## A friend, not a service
+
+`persona.friend` is the relationship, beside the manner (which is only how
+Grove sounds): what it calls you, how straight it is (gentle, honest, blunt),
+swearing, how deep it goes (always brief, depends, properly), what to look out
+for, and whether it checks in. `friendDirective` and `depthRule` turn these into
+prompt; `cares` is free text and is quarantined like the manner — context,
+never instructions. `life.lately()` puts the last few days' episode titles and
+anything outstanding on every turn, which is what lets it say "you've got the
+demo tomorrow" without being asked.
+
+Length is the person's choice, not a rule about glasses: quick questions stay at
+one or two sentences, but a decision or "what do you think" gets a real opinion.
+
+**Voices.** Grove will not imitate a real person's voice — asked for Tommy Lee
+Jones or Ralph Fiennes, it offers the register instead: `characterVoice()` picks
+the best installed low British or low American voice and slows and lowers it.
+The Premium iOS voices (a free download) are what make that convincing. The
+chosen voice lives on `persona.voiceId`; speech used to read only
+`delivery.voiceId`, so choosing a voice changed the preview and nothing else.
+
+**Hearing.** The names in the long memory, Grove's name and what it calls you
+are passed to iOS as `contextualStrings`, so the recogniser stops mishearing the
+people and projects it hears about most.
+
+**Ordering** is three hand-offs, all behind a press, none holding a basket:
+`ride.request` (Uber), `food.order` (Uber Eats or DoorDash) and `shop.order`
+(Amazon, Instacart, Walmart, Costco, on the phone's own country's site). "My
+usual is…" is saved as a fact keyed by the place, so each place keeps its own
+and "order my usual" works next week, not just while the sentence is in the
+conversation.
+
 ## Email in your words, sent in better ones
 
 You give the gist — "tell them no, I'm busy" — and `lightEmail` writes the email:

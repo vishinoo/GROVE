@@ -215,7 +215,7 @@ export const MODES: Mode[] = [
       'They are out with people and talking to you between sentences of a real conversation. Be quick and quiet. Never raise work, deadlines or mail.',
     allow: [
       'mode.set', 'person.brief', 'contact.find', 'call.start', 'message.compose', 'maps.go',
-      'maps.eta', 'ride.request', 'food.order', 'calendar.read', 'calendar.find', 'calendar.add',
+      'maps.eta', 'ride.request', 'food.order', 'shop.order', 'calendar.read', 'calendar.find', 'calendar.add',
       'weather.now', 'music.play', 'music.recent', 'memory.add', 'memory.search', 'notes.search',
       'reminders.add', 'now.context',
     ],

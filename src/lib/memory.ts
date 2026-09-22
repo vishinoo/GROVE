@@ -357,6 +357,10 @@ const FACT_PATTERNS: { key: string; test: RegExp }[] = [
   { key: 'home', test: /\b(?:[Ii]'?m|[Ww]e'?re) (?:here )?in\s+([A-Z][\w' -]{1,38})/ },
   { key: 'commute', test: /\bi (?:leave|set off)(?: for work)? at\s+(.{2,20})/i },
   { key: 'watchlist', test: /\b(?:my watchlist is|i hold|i own)\s+(.{2,80})/i },
+  // "My usual is a large pepperoni from Panago." Said once, so that "order my
+  // usual" works next week — it used to work only while the sentence was still
+  // in the conversation, and was gone the next day.
+  { key: 'usual', test: /\bmy (?:usual|regular|go-?to)(?: order)?(?: (?:from|at) [\w' &-]{2,30})? is\s+(.{3,100})/i },
   // Anchored to the start of the sentence: "I usually" mid-sentence is an
   // aside, not a standing preference, and storing asides is how the list fills
   // with things nobody meant to say.
@@ -423,7 +427,17 @@ export function factFrom(text: string): Extracted | null {
     const hit = test.exec(t);
     if (hit?.[1]) {
       const value = hit[0].trim().replace(/[.?!]+$/, '');
-      return { key, subject: 'me', value: value.slice(0, VALUE_MAX), open: false };
+      // A usual belongs to a place: facts replace by key, so one "usual" key
+      // meant the Starbucks order overwrote the pizza one. Keyed by where it is
+      // from, when that was said, so each place keeps its own.
+      const place =
+        key === 'usual' ? /\b(?:from|at)\s+([A-Z][\w'&-]*(?:\s+[A-Z][\w'&-]*)*)/.exec(value)?.[1] : undefined;
+      return {
+        key: place ? `usual:${place.toLowerCase()}` : key,
+        subject: 'me',
+        value: value.slice(0, VALUE_MAX),
+        open: false,
+      };
     }
   }
   return null;

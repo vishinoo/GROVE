@@ -2560,7 +2560,10 @@ const LIFE_SEARCH: Ability = {
       }
       return {
         ok: true,
-        spoken: 'Nothing on those words exactly, but here is what has been going on.',
+        // Spoken as what it is — nothing found. The recent episodes go to the
+        // model as detail; announcing "here is what has been going on" and then
+        // saying none of it was worse than saying nothing.
+        spoken: "I don't have anything saved on that.",
         detail: [
           'Nothing matched those words. Recently, though:',
           projects.length ? `Projects: ${projects.map((p) => `${p.name} — ${p.summary}`).join('; ')}` : '',
@@ -2604,7 +2607,7 @@ const LIFE_SEARCH: Ability = {
 
     const first = found.episodes[0];
     const spoken = first
-      ? `${shortDate(first.at)}: ${first.title}.`
+      ? `${first.title}, from ${shortDate(first.at)}.`
       : `${found.entities[0].name}: ${found.entities[0].summary || 'I have a few notes.'}`;
     return { ok: true, spoken, detail };
   },
@@ -3106,7 +3109,8 @@ const DELIVERY: Ability = {
   wired: true,
   needs: [],
   args: {
-    what: { type: 'string', what: 'the food, restaurant or cuisine' },
+    what: { type: 'string', what: 'the food, restaurant or cuisine — or their usual, looked up in memory' },
+    app: { type: 'string', what: '"doordash" if they said DoorDash, otherwise Uber Eats' },
     confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
   },
   // Named foods, because the keyword fallback matches on words and "order some
@@ -3121,17 +3125,31 @@ const DELIVERY: Ability = {
     'order indian food',
     'order chinese takeaway',
     'get me a curry on uber eats',
+    'order my usual',
+    'get me a pizza on doordash',
   ],
   run: async (args) => {
     const what = (args.what || '').trim();
+    const doordash = /door ?dash/i.test(args.app || '');
+    const app = doordash ? 'DoorDash' : 'Uber Eats';
 
     if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
       return {
         ok: false,
         needsConfirming: true,
-        spoken: what ? `Opening Uber Eats for ${what}` : 'Opening Uber Eats',
-        detail: 'Uber Eats takes the payment, not Grove',
+        spoken: what ? `Opening ${app} for ${what}` : `Opening ${app}`,
+        detail: `${app} takes the payment, not Grove`,
       };
+    }
+
+    if (doordash) {
+      const url = what
+        ? `https://www.doordash.com/search/store/${encodeURIComponent(what)}/`
+        : 'https://www.doordash.com/';
+      const ok = await Linking.openURL(url).then(() => true, () => false);
+      return ok
+        ? { ok: true, spoken: what ? `DoorDash is open, searching ${what}. Order it there.` : 'DoorDash is open.' }
+        : { ok: false, spoken: 'I could not open DoorDash.' };
     }
 
     // A search, never a basket. "Order my usual" is the request people make and
@@ -3149,6 +3167,87 @@ const DELIVERY: Ability = {
             : 'Uber Eats is open.',
         }
       : { ok: false, spoken: 'I could not open Uber Eats.' };
+  },
+};
+
+/**
+ * Where they are, as a shop's country: .ca, .co.uk or .com.
+ *
+ * Read from the phone's locale rather than guessed from the home town, because
+ * the locale is what the store's own app will be set to — and an Amazon search
+ * opened on the wrong country's site shows prices you cannot pay.
+ */
+function shopRegion(): 'ca' | 'uk' | 'us' {
+  const locale = Intl.NumberFormat().resolvedOptions().locale || '';
+  if (/-CA\b/i.test(locale)) return 'ca';
+  if (/-GB\b/i.test(locale)) return 'uk';
+  return 'us';
+}
+
+const STORES: Record<string, { name: string; url: (q: string, region: 'ca' | 'uk' | 'us') => string }> = {
+  amazon: {
+    name: 'Amazon',
+    url: (q, r) => `https://www.amazon.${r === 'ca' ? 'ca' : r === 'uk' ? 'co.uk' : 'com'}/s?k=${encodeURIComponent(q)}`,
+  },
+  instacart: {
+    name: 'Instacart',
+    url: (q, r) => `https://www.instacart.${r === 'ca' ? 'ca' : 'com'}/store/s?k=${encodeURIComponent(q)}`,
+  },
+  walmart: {
+    name: 'Walmart',
+    url: (q, r) => `https://www.walmart.${r === 'ca' ? 'ca' : 'com'}/search?q=${encodeURIComponent(q)}`,
+  },
+  costco: {
+    name: 'Costco',
+    url: (q, r) => `https://www.costco.${r === 'ca' ? 'ca' : 'com'}/CatalogSearch?keyword=${encodeURIComponent(q)}`,
+  },
+};
+
+/**
+ * Buying things, the same way rides and takeaways work: Grove opens the store
+ * already searched, and the person picks, pays and confirms there.
+ *
+ * Never a basket, never a checkout. Amazon knows the card, the address and the
+ * price; Grove's part ends at the search, behind a press — see the note on
+ * money at the top of this file.
+ */
+const SHOP: Ability = {
+  id: 'shop.order',
+  name: 'Shopping',
+  what: 'Opens a store app searched for something to buy — Amazon, Instacart, Walmart or Costco. They choose and pay there.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {
+    what: { type: 'string', what: 'what they want to buy, as specific as they said', required: true },
+    store: { type: 'string', what: 'amazon, instacart (groceries), walmart or costco; amazon if they did not say' },
+    confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
+  },
+  examples: [
+    'order me a phone charger on amazon',
+    'get me paper towels from amazon',
+    'order groceries on instacart',
+    'buy protein powder on costco',
+  ],
+  run: async (args) => {
+    const what = (args.what || '').trim();
+    if (!what) return { ok: false, spoken: 'What are we buying?' };
+    const key = Object.keys(STORES).find((k) => (args.store || '').toLowerCase().includes(k)) ?? 'amazon';
+    const store = STORES[key];
+
+    if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
+      return {
+        ok: false,
+        needsConfirming: true,
+        spoken: `Opening ${store.name} for ${what}`,
+        detail: `${store.name} takes the payment, not Grove`,
+      };
+    }
+
+    const opened = await Linking.openURL(store.url(what, shopRegion())).then(() => true, () => false);
+    return opened
+      ? { ok: true, spoken: `${store.name} is open with ${what} searched. Pick one and check out there.` }
+      : { ok: false, spoken: `I could not open ${store.name}.` };
   },
 };
 
@@ -3368,6 +3467,7 @@ export const ABILITIES: Ability[] = [
   MAC_TASK,
   RIDE,
   DELIVERY,
+  SHOP,
   CONTACT_FIND,
   CALL,
   MEMORY_ADD,

@@ -31,9 +31,9 @@ import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
-import { MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona, type Preset } from '@/lib/persona';
+import { CARES_LIMIT, MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona, type Preset } from '@/lib/persona';
 import { hasOwnKey, setOwnKey } from '@/lib/lightModel';
-import { availableVoices, bestVoiceId, hasEnhancedVoice, speak } from '@/lib/speak';
+import { availableVoices, bestVoiceId, characterVoice, hasEnhancedVoice, speak } from '@/lib/speak';
 import * as trigger from '@/lib/trigger';
 import type * as SpeechTypes from 'expo-speech';
 
@@ -210,12 +210,130 @@ export default function Settings() {
         </Card>
       </Section>
 
+      {/*
+        The relationship, beside the manner rather than inside it. The manner
+        is how Grove sounds; this is how it treats you — and each choice is one
+        tap, because nobody writes a paragraph about how honest they want their
+        friends to be.
+      */}
+      <Section label="Your friend">
+        <Card>
+          <Text style={[Type.bodySm, { color: palette.muted }]}>What it calls you</Text>
+          <TextInput
+            value={persona.friend?.callMe ?? ''}
+            onChangeText={(callMe) => set({ friend: { ...persona.friend, callMe: callMe.slice(0, 40) } })}
+            placeholder="Your name, a nickname, or leave it"
+            placeholderTextColor={palette.muted}
+            style={{ fontFamily: Type.body.fontFamily, fontSize: 15, color: palette.ink, paddingVertical: 6 }}
+          />
+        </Card>
+        <Choice
+          label="How straight it is with you"
+          value={persona.friend?.candor ?? 'honest'}
+          options={[
+            ['gentle', 'Gentle'],
+            ['honest', 'Honest'],
+            ['blunt', 'Blunt'],
+          ]}
+          onChange={(candor) => set({ friend: { ...persona.friend, candor } })}
+        />
+        <Choice
+          label="How far it goes into things"
+          value={persona.friend?.depth ?? 'balanced'}
+          options={[
+            ['brief', 'Always brief'],
+            ['balanced', 'Depends'],
+            ['deep', 'Properly'],
+          ]}
+          onChange={(depth) => set({ friend: { ...persona.friend, depth } })}
+        />
+        <Card style={{ paddingVertical: 2 }}>
+          <Row
+            label="Swearing"
+            hint={persona.friend?.swearing ? 'Talks the way your mates do.' : 'Keeps it clean.'}
+            right={
+              <Switch
+                value={persona.friend?.swearing ?? false}
+                onValueChange={(swearing) => set({ friend: { ...persona.friend, swearing } })}
+                trackColor={{ true: palette.mark, false: palette.sunken }}
+                thumbColor={palette.raised}
+              />
+            }
+          />
+          <Row
+            label="Checks in on you"
+            hint="Brings up deadlines, and asks how things went."
+            right={
+              <Switch
+                value={persona.friend?.checksIn ?? true}
+                onValueChange={(checksIn) => set({ friend: { ...persona.friend, checksIn } })}
+                trackColor={{ true: palette.mark, false: palette.sunken }}
+                thumbColor={palette.raised}
+              />
+            }
+          />
+        </Card>
+        <Card>
+          <Text style={[Type.bodySm, { color: palette.muted }]}>What it should look out for</Text>
+          <TextInput
+            value={persona.friend?.cares ?? ''}
+            onChangeText={(cares) => set({ friend: { ...persona.friend, cares: cares.slice(0, CARES_LIMIT) } })}
+            placeholder="Shipping Noctus this term. My sleep. Don't let me skip the gym."
+            placeholderTextColor={palette.muted}
+            multiline
+            style={{
+              minHeight: 60,
+              fontFamily: Type.body.fontFamily,
+              fontSize: 14.5,
+              lineHeight: 21,
+              color: palette.ink,
+              paddingTop: 6,
+            }}
+          />
+          <Mono style={{ marginTop: 8 }}>
+            {(persona.friend?.cares ?? '').length}/{CARES_LIMIT}
+          </Mono>
+        </Card>
+      </Section>
+
       <Section label="Voice">
         <VoicePicker
           selected={persona.voiceId}
           onSelect={(voiceId) => set({ voiceId })}
           delivery={persona.delivery}
         />
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+          {(
+            [
+              ['measured-british', 'Measured British', 'Low, precise, unhurried'],
+              ['low-american', 'Low and slow', 'Gravelly, laconic, American'],
+            ] as const
+          ).map(([character, title, blurb]) => (
+            <Pressable
+              key={character}
+              accessibilityRole="button"
+              accessibilityLabel={`${title}. ${blurb}`}
+              onPress={() => {
+                void characterVoice(character).then(({ voiceId, rate, pitch }) => {
+                  set({ voiceId, delivery: { ...persona.delivery, rate, pitch } });
+                  speak("Right then. Tell me what you need.", { ...persona.delivery, rate, pitch, voiceId });
+                });
+              }}
+              style={({ pressed }) => ({
+                flex: 1,
+                padding: 12,
+                borderRadius: Radius.well,
+                borderWidth: 1,
+                borderColor: palette.line,
+                backgroundColor: palette.raised,
+                opacity: pressed ? 0.75 : 1,
+              })}
+            >
+              <Text style={[Type.cardTitle, { color: palette.ink, fontSize: 14 }]}>{title}</Text>
+              <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>{blurb}</Text>
+            </Pressable>
+          ))}
+        </View>
         <Card style={{ paddingVertical: 2, marginTop: 10 }}>
           <Stepper
             label="Speed"
@@ -224,6 +342,14 @@ export default function Settings() {
             max={1.5}
             step={0.05}
             onChange={(rate) => set({ delivery: { ...persona.delivery, rate } })}
+          />
+          <Stepper
+            label="Pitch"
+            value={persona.delivery.pitch}
+            min={0.7}
+            max={1.4}
+            step={0.05}
+            onChange={(pitch) => set({ delivery: { ...persona.delivery, pitch } })}
           />
           <Row
             label="Keep speech on this device"
@@ -857,5 +983,52 @@ function Stepper({
         })}
       </View>
     </View>
+  );
+}
+
+/** Three options, one tap each. */
+function Choice<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: [T, string][];
+  onChange: (value: T) => void;
+}) {
+  const palette = usePalette();
+  return (
+    <Card>
+      <Text style={[Type.bodySm, { color: palette.muted, marginBottom: 8 }]}>{label}</Text>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        {options.map(([key, text]) => {
+          const on = key === value;
+          return (
+            <Pressable
+              key={key}
+              accessibilityRole="button"
+              accessibilityState={{ selected: on }}
+              accessibilityLabel={`${label}: ${text}`}
+              onPress={() => onChange(key)}
+              style={({ pressed }) => ({
+                flex: 1,
+                minHeight: 44,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: Radius.well,
+                borderWidth: 1,
+                borderColor: on ? palette.ink : palette.line,
+                backgroundColor: on ? palette.ink : 'transparent',
+                opacity: pressed ? 0.75 : 1,
+              })}
+            >
+              <Text style={[Type.bodySm, { color: on ? palette.raised : palette.ink }]}>{text}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </Card>
   );
 }

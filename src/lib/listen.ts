@@ -73,6 +73,12 @@ export type ListenOptions = {
    */
   continuous?: boolean;
   lang?: string;
+  /**
+   * Words this person says that a general recogniser gets wrong: the names of
+   * the people and projects in their life, course codes, Grove's own name.
+   * Handed to iOS as hints, so "Noctus" stops arriving as "no tuss".
+   */
+  hints?: string[];
 };
 
 /**
@@ -132,6 +138,8 @@ export function startListening(handlers: ListenHandlers, options: ListenOptions 
       continuous: options.continuous ?? false,
       requiresOnDeviceRecognition: options.preferOnDevice ?? true,
       addsPunctuation: true,
+      // iOS caps how many it uses; the most important come first.
+      ...(options.hints && options.hints.length > 0 ? { contextualStrings: options.hints.slice(0, 100) } : {}),
       volumeChangeEventOptions: { enabled: true, intervalMillis: 100 },
     });
     running = true;

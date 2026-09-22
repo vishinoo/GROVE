@@ -38,11 +38,11 @@ import {
   type ToolHistory,
 } from './lightModel';
 import { asPromptBlock, factFrom } from './memory';
-import { loadLife, whoIsWho } from './life';
+import { lately, loadLife, whoIsWho } from './life';
 import { calculate } from './calc';
 import { abilitiesFor, modeById } from './modes';
 import { ABILITIES } from './abilities';
-import { activePreset, fallback, mannerDirective } from './persona';
+import { activePreset, depthRule, fallback, friendDirective, mannerDirective } from './persona';
 import { abilityIdFor, argsFromCall, declarationsFor } from './tools';
 
 /**
@@ -100,6 +100,7 @@ const TOOL_RULES = `How to use your tools:
 - If they gave no gist at all ("email Priya"), use ask_back to ask what it should say.
 - Always give an email a short, natural subject line of your own — a few words saying what it is about, like "Running late" or "Slides for Thursday".
 - To recap mail and then send that recap to someone, first get the recap, then send its text with the send-email tool.
+- Ordering: food goes to the food tool (Uber Eats, or DoorDash if they say so); things to buy go to the shopping tool (Amazon unless they name Instacart, Walmart or Costco). "My usual" is in what you know about them above; if it is not there, ask_back what their usual is — do not search for it.
 - For sending, booking, ordering, calling or messaging, just call the tool. The app asks the person to confirm before anything happens, so do not ask them yourself.
 - To write something they will read — an assignment, a report, a reading list, a summary — use the document tool. Pass what they want in as much detail as they gave you.
 - If they point at work they already have ("the assignment on here", "that brief"), find and read that document first and pass its text as the source, so what you write answers their actual question.
@@ -123,8 +124,9 @@ const TOOL_RULES = `How to use your tools:
 
 How to answer once tools return:
 - Answer from what came back and nothing else. If it came back empty, say so plainly.
-- You are spoken aloud through glasses. One or two sentences. No lists, no markdown, no URLs, no reading out codes or IDs.
+- You are spoken aloud through glasses. No lists, no markdown, no URLs, no reading out codes or IDs.
 - Say the useful thing first. Keep your personality — a wry line is welcome — but the answer comes before the joke, never instead of it.
+- Name the sender of each email exactly as its From line says. Two people can share a surname — "Prof. Chen" and "Mark Chen" are different people, and an email from one is never described as from the other.
 - Jokes go around the facts, never into them. Never embellish what an email, event, note or person actually said — "Jason wants the build by Friday" is the fact; "Jason is threatening to cancel your licence" is an invention they might believe.
 - Never repeat the question back, never open with "Sure" or "Let me check".
 - If a tool failed, say what failed in one short sentence, in your own voice. Never say a search or tool failed, or is being difficult, unless one actually ran and failed this turn.`;
@@ -158,7 +160,11 @@ function systemFor(context: GroveContext, available: Ability[]): string {
     `You are ${persona.name || 'Grove'}, the one assistant this person talks to, usually through glasses while they are doing something else.`,
     `It is ${clock} on ${today}, timezone ${zone}. That is the real current date and time.`,
     asPromptBlock(facts),
+    friendDirective(persona),
     [mannerDirective(persona), mode.manner].filter(Boolean).join('\n\n'),
+    // Length is theirs to choose, and it is a rule about the relationship
+    // rather than the glasses: see depthRule.
+    depthRule(persona),
     modeNote,
     TOOL_RULES,
   ]
@@ -325,7 +331,7 @@ export async function askWithTools(
   // are the same person without a lookup, and cheap enough to ride on every
   // turn. Everything else about them is a tool call away.
   const roster = await loadLife(currentAccount())
-    .then((l) => whoIsWho(l))
+    .then((l) => [whoIsWho(l), lately(l)].filter(Boolean).join('\n'))
     .catch(() => '');
   const system = [systemFor(context, available), roster].filter(Boolean).join('\n\n');
   const fact = factFrom(userText) ?? undefined;

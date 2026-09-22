@@ -237,6 +237,27 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const [facts, setFacts] = useState<memory.Fact[]>([]);
   const [noteList, setNoteList] = useState<notesStore.Note[]>([]);
   const [lifeMemory, setLifeMemory] = useState<life.Life>({ entities: [], episodes: [], pending: [] });
+  /**
+   * Words to help the recogniser hear this person's world: Grove's name, the
+   * people and projects in their life, what it calls them. Rebuilt whenever
+   * the long memory changes, so someone mentioned today is heard right tomorrow.
+   */
+  const hints = useRef<string[]>([]);
+  useEffect(() => {
+    const byRecency = [...lifeMemory.entities].sort((a, b) => b.lastSeen.localeCompare(a.lastSeen));
+    hints.current = [
+      ...new Set(
+        [
+          persona.name,
+          persona.friend?.callMe ?? '',
+          ...byRecency.flatMap((e) => [e.name, ...e.aliases]),
+          'Grove',
+        ]
+          .map((w) => w.trim())
+          .filter((w) => w.length > 1)
+      ),
+    ].slice(0, 100);
+  }, [lifeMemory, persona.name, persona.friend?.callMe]);
 
   /**
    * The voice note being taken, if one is.
@@ -873,7 +894,11 @@ function shortFailure(text: string): string {
     // old reply still under it.
     const turn = turnSeq.current;
     setState('speaking');
-    speak(text, live.current.persona.delivery, {
+    // The voice picked in Settings is saved on the persona, not in `delivery`,
+    // and only `delivery` was passed — so choosing a voice changed the preview
+    // and nothing else. Merged here, once, for every sentence Grove says.
+    const { persona: who } = live.current;
+    speak(text, { ...who.delivery, voiceId: who.voiceId ?? who.delivery.voiceId }, {
       onDone: () => {
         if (!mounted.current) return;
         // A newer press owns the app now; this speech is over and irrelevant.
@@ -1045,7 +1070,7 @@ function shortFailure(text: string): string {
           setTimeout(() => void listenForNote(), 250);
         },
       },
-      { continuous: true, preferOnDevice: live.current.persona.preferOnDevice }
+      { continuous: true, preferOnDevice: live.current.persona.preferOnDevice, hints: hints.current }
     );
 
     if (!started) void finishNote();
@@ -1255,6 +1280,7 @@ function shortFailure(text: string): string {
         {
           continuous,
           preferOnDevice: live.current.persona.preferOnDevice,
+          hints: hints.current,
         }
       );
 

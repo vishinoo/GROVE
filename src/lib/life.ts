@@ -476,6 +476,32 @@ export function whoIsWho(life: Life, limit = 10): string {
     .join(', ')}. Look one up with the memory tools before saying anything specific about them.`;
 }
 
+/**
+ * What has been going on in their life, in a line or two.
+ *
+ * This is what lets Grove behave like a friend rather than a search engine:
+ * knowing, without being asked, that the midterm is Thursday and that the build
+ * for Jason is still owed. Titles only, the last few days and anything still
+ * outstanding — a friend's working memory, not the archive, and small enough to
+ * ride on every turn.
+ */
+export function lately(life: Life, now = new Date()): string {
+  const recent = life.episodes
+    .filter((ep) => !ep.open && now.getTime() - new Date(ep.at).getTime() < 5 * 86_400_000)
+    .slice(0, 5)
+    .map((ep) => ep.title);
+  const owed = openCommitments(life)
+    .slice(0, 4)
+    .map((ep) => ep.title);
+  const parts = [
+    recent.length ? `Lately in their life: ${recent.join('; ')}.` : '',
+    owed.length ? `Still outstanding: ${owed.join('; ')}.` : '',
+  ].filter(Boolean);
+  return parts.length
+    ? `${parts.join(' ')} Background only — bring one up only when it is genuinely relevant.`
+    : '';
+}
+
 /* --------------------------------------------------------- consolidation */
 
 export function addPending(life: Life, said: string, replied: string, now = new Date()): Life {

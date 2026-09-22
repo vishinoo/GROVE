@@ -141,6 +141,50 @@ export async function bestVoiceId(): Promise<string | null> {
 }
 
 /**
+ * Two characters, built from the voices already on the phone.
+ *
+ * Asked for "the voice of Tommy Lee Jones or Ralph Fiennes", this is the line
+ * Grove holds: it will not imitate a real person's voice, but it can get the
+ * register — a measured, low British reading, or a slow, low American one —
+ * from the best matching built-in voice, pitched down and slowed. The Premium
+ * versions of these voices (a free download in iOS Settings) are what make it
+ * convincing; the compact ones only get the pace right.
+ */
+export type Character = 'measured-british' | 'low-american';
+
+const CHARACTERS: Record<Character, { langs: string[]; names: string[]; rate: number; pitch: number }> = {
+  'measured-british': {
+    langs: ['en-gb'],
+    names: ['oliver', 'arthur', 'daniel', 'malcolm', 'jamie'],
+    rate: 0.88,
+    pitch: 0.88,
+  },
+  'low-american': {
+    langs: ['en-us'],
+    names: ['evan', 'nathan', 'aaron', 'tom', 'reed', 'fred', 'alex'],
+    rate: 0.84,
+    pitch: 0.78,
+  },
+};
+
+/** The best installed voice for a character, with the delivery that goes with it. */
+export async function characterVoice(
+  character: Character
+): Promise<{ voiceId: string | undefined; rate: number; pitch: number }> {
+  const spec = CHARACTERS[character];
+  const voices = await availableVoices();
+  const inLanguage = voices.filter((v) => spec.langs.some((l) => (v.language || '').toLowerCase().startsWith(l)));
+  const byName = (v: Speech.Voice) => {
+    const i = spec.names.findIndex((n) => (v.name || '').toLowerCase().includes(n));
+    return i === -1 ? 99 : i;
+  };
+  const quality = (v: Speech.Voice) =>
+    (/premium/i.test(v.identifier || '') ? 2 : 0) + (v.quality === Speech.VoiceQuality.Enhanced ? 1 : 0);
+  const pick = [...inLanguage].sort((a, b) => quality(b) - quality(a) || byName(a) - byName(b))[0];
+  return { voiceId: pick?.identifier, rate: spec.rate, pitch: spec.pitch };
+}
+
+/**
  * Whether the good voices are actually installed.
  *
  * Drives the one piece of advice in Settings worth giving, because no amount of
