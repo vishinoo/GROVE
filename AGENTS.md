@@ -290,6 +290,14 @@ supposed to be doing" answers with the session and the time left. Durations
 times and days, and dropped every length, leaving sessions open-ended. A session
 nobody ends expires after four hours.
 
+**Asked what to do, Grove names the path of least resistance** — the smallest
+thing that can be started now, with anything overdue winning — not the biggest
+or most important. And in casual talk it may nudge about ONE thing on the list
+when the moment fits, which is why the first few open captures ride in the
+prompt: a nudge that costs a tool call to discover there was nothing to nudge
+about would not be worth having. Never mid-task, never a list, and never twice
+in a row.
+
 `memory.done` checks the inbox before commitments: "I emailed the PE guy" ticks
 off the capture. The list is on the Sparks screen, where a tap ticks off and a
 tap deletes.
@@ -471,15 +479,15 @@ used, because it would bring back the backend Grove was made standalone to shed.
 
 ## Modes, and what they are for
 
-Nine of them now: normal, work, focus, study, gym, social, travel, home and
-wind down. Adding one is three things — a palette, a manner, an allow list —
-and one trap: the mode words live in `MODE_WORDS` in grove.ts, used by both the
-keyword patterns. They were two separate regexes once, and the first mode added
-after that silently did nothing when spoken.
+Four: normal, focus, gym and wind down. There were nine; the five that only
+changed the manner were cut, because a mode earns its place by making a tool
+actively wrong, not by having an opinion. Gym has no mail and no sending: out of
+breath, mid-set, is not when you deal with your inbox.
 
-Work and home allow everything and change the manner; the narrow ones exist for
-situations where a tool is actively wrong. Gym has no mail and no sending: out
-of breath, mid-set, is not when you deal with your inbox.
+Adding one is three things — a palette, a manner, an allow list — and one trap:
+the mode words live in `MODE_WORDS` in grove.ts, used by both keyword patterns.
+They were two separate regexes once, and the first mode added after that
+silently did nothing when spoken.
 
 ## Money
 

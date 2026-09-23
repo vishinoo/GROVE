@@ -145,7 +145,7 @@ const QUESTION_OPENERS =
  * regexes, adding a mode meant remembering to edit both, and "travel mode"
  * silently did nothing.
  */
-const MODE_WORDS = 'focus|study|wind[-\\s]?down|normal|work|gym|social|travel|home';
+const MODE_WORDS = 'focus|wind[-\\s]?down|normal|gym';
 
 const MODE_COMMAND = new RegExp(
   `\\b(?:turn|switch|go|put|set|activate|enter|start|enable|into)\\b[^.?!]{0,24}?\\b(?:${MODE_WORDS})\\b(?:\\s+mode)?`,

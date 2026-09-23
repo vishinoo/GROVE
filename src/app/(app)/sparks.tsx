@@ -409,7 +409,7 @@ function ModeCard({
               }
             }}
             placeholder={
-              mode.id === 'study' ? 'put on the focus playlist and silence my reminders' : 'nothing, unless you say so'
+              mode.id === 'focus' ? 'put on something instrumental and tell me what is left today' : 'nothing, unless you say so'
             }
             placeholderTextColor={palette.muted}
             multiline

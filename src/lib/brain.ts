@@ -39,7 +39,7 @@ import {
 } from './lightModel';
 import { asPromptBlock, factFrom } from './memory';
 import { lately, loadLife, whoIsWho } from './life';
-import { loadFocus, remaining } from './inbox';
+import { loadFocus, loadInbox, open as openCaptures, remaining } from './inbox';
 import { calculate } from './calc';
 import { abilitiesFor, modeById } from './modes';
 import { ABILITIES } from './abilities';
@@ -109,7 +109,7 @@ const TOOL_RULES = `How to use your tools:
 - A document takes half a minute to write. Do not promise one and stop; call the tool.
 - To send or share a document you wrote, look it up with the documents-written tool first and put its link in the email. Never guess a link.
 - Anything about their own life — what they should be doing, what they promised, who someone is, what was decided, an idea they had — comes from the memory tools, not from this conversation. You only see the last few turns; the tools see months.
-- "What should I be doing", "I have an hour, what now", "catch me up": call the where-things-stand tool, then pick ONE thing and say why it is the one, weighing deadlines, what is promised, and how long they have.
+- "What should I be doing", "I have an hour, what now", "catch me up": call the where-things-stand tool, then name ONE thing — the path of least resistance. The smallest thing that actually moves something forward and can be started right now, not the biggest or the most important. Something overdue or due today wins; otherwise whatever takes least to begin. One line, no list of alternatives.
 - Anything they say they have to do, need to do, should do, or must not forget goes somewhere — never just a remark. With a time on it ("tomorrow", "at three", "Friday") it is a reminder. Without one ("I have to do the dishes", "I need to email the PE guy", "I should book the dentist") it is a capture. Either way: log it, say so in a few words, and move on. A joke about it instead of logging it means it is lost.
 - Capture, don't switch. A thought that is not what they are doing right now — someone to email, something to look up, a thing they promised, an idea — goes straight into their inbox with the capture tool, in their own words. Do not plan it, do not ask about it, do not offer to do it now: capture it and stop. They will deal with it later.
 - If they ask you to actually do that thing now ("email him now"), do it instead of capturing it. Capture is for the thought they are setting aside.
@@ -125,6 +125,8 @@ const TOOL_RULES = `How to use your tools:
 - For music "like" what they played before, check recently played first, then play something in that vein — the same artist or a similar one — rather than the exact song again. Never play an empty request in place of that.
 - A reminder about something you looked up says what it is about, not where it came from: "Demo with Jason, 10250 102 Ave, Friday 2pm — bring pricing slides", never "Jason's email".
 - If an email, note or event you just read has a clear deadline or to-do, you may offer once to set a reminder. Never set one they did not ask for.
+
+- Nudging: when the talk is casual — small talk, catching up, a quiet moment — and something waiting on their list fits what is being said, mention ONE of them, lightly, the way a friend would. Not a summary, never a list. Rarely: if you raised something in the last few exchanges, let it lie. Never while they are mid-task, in a focus session on something else, or in the middle of getting something done.
 
 How to answer once tools return:
 - Answer from what came back and nothing else. If it came back empty, say so plainly.
@@ -334,12 +336,21 @@ export async function askWithTools(
   // A line of names, not the archive: enough that "my cofounder" and "Jason"
   // are the same person without a lookup, and cheap enough to ride on every
   // turn. Everything else about them is a tool call away.
-  const [roster, session] = await Promise.all([
+  const [roster, session, waiting] = await Promise.all([
     loadLife(currentAccount())
       .then((l) => [whoIsWho(l), lately(l)].filter(Boolean).join('\n'))
       .catch(() => ''),
     loadFocus(currentAccount()).catch(() => null),
+    // The few things on their list, so a casual turn can mention one without
+    // spending a tool call to find out there was nothing to mention.
+    loadInbox(currentAccount())
+      .then((items) => openCaptures(items).slice(0, 4).map((i) => i.text))
+      .catch(() => [] as string[]),
   ]);
+  const list =
+    waiting.length > 0
+      ? `Waiting on their list: ${waiting.join('; ')}. Background — bring one up only when the moment genuinely fits, and only one.`
+      : '';
   // A focus session changes what a good answer is: the same thought that
   // deserves a plan on a quiet evening deserves to be caught and set aside
   // mid-session. This is the difference between an assistant that helps and
@@ -347,7 +358,7 @@ export async function askWithTools(
   const focusing = session
     ? `They are in a focus session on ${session.what}${remaining(session) ? ` — ${remaining(session)}` : ''}. Anything that is not that: capture it and point them back in one short line, and do not expand on it. Answer anything that IS about ${session.what} properly. If they ask what they should be doing, the answer is ${session.what}.`
     : '';
-  const system = [systemFor(context, available), roster, focusing].filter(Boolean).join('\n\n');
+  const system = [systemFor(context, available), roster, list, focusing].filter(Boolean).join('\n\n');
   const fact = factFrom(userText) ?? undefined;
 
   // Sums are worked out exactly and handed over as a fact; see calc.ts.

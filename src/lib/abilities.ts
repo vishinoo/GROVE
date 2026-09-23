@@ -3608,8 +3608,8 @@ const SET_MODE: Ability = {
   where: 'device',
   wired: true,
   needs: [],
-  args: { mode: { type: 'string', what: 'which one: normal, focus, study, work, gym, social, travel, home or wind down', required: true } },
-  examples: ['go into focus mode', 'switch to wind down', 'study mode', 'back to normal'],
+  args: { mode: { type: 'string', what: 'which one: normal, focus, gym or wind down', required: true } },
+  examples: ['go into focus mode', 'switch to wind down', 'gym mode', 'back to normal'],
   run: async (args) => {
     const asked = (args.mode || '').toLowerCase().replace(/\bmode\b/g, '').trim();
     if (!asked) return { ok: false, spoken: 'Which mode?' };
@@ -3622,7 +3622,7 @@ const SET_MODE: Ability = {
     if (!wanted) {
       return {
         ok: false,
-        spoken: `There's no ${asked} mode. There's work, focus, study, gym, social, travel, home, wind down, or normal.`,
+        spoken: `There's no ${asked} mode. There's focus, gym, wind down, or normal.`,
       };
     }
     if (!onModeChange) return { ok: false, spoken: 'I can\'t switch modes right now.' };

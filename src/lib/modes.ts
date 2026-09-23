@@ -30,16 +30,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { Ability } from './abilities';
 
-export type ModeId =
-  | 'normal'
-  | 'focus'
-  | 'study'
-  | 'wind-down'
-  | 'work'
-  | 'gym'
-  | 'social'
-  | 'travel'
-  | 'home';
+export type ModeId = 'normal' | 'focus' | 'gym' | 'wind-down';
 
 export type Mode = {
   id: ModeId;
@@ -132,28 +123,6 @@ export const MODES: Mode[] = [
     stuck: 'No answer right now.',
   },
   {
-    id: 'study',
-    tint: '#A78BFA',
-    palette: ['#8B5CF6', '#A78BFA', '#C4B5FD', '#D946EF'],
-    label: 'Study',
-    what: 'Explains properly instead of being terse.',
-    manner:
-      'They are learning something. Explain it properly — three or four sentences is right here, and being clipped is unhelpful. Use an example. Check they followed before moving on.',
-    allow: [
-      'mode.set', 'notes.search', 'memory.recall', 'memory.add', 'calendar.find', 'music.play',
-      'doc.find', 'reminders.add', 'calendar.read', 'gcal.read', 'calendar.add',
-      'mail.search', 'contact.find',
-      'weather.now', 'maps.eta', 'maps.go', 'music.recent', 'doc.create', 'doc.recent',
-      'now.context', 'memory.search', 'memory.done', 'person.brief', 'reminders.batch',
-      'inbox.add', 'inbox.review', 'focus.start', 'focus.end',
-    ],
-    interrupt: 'never',
-    // Study is the one mode where being asked something back is the point, so
-    // entering it opens with the question rather than an announcement.
-    onEnter: 'Ask me what I am studying, then put on something instrumental without words.',
-    stuck: "I can't reach anything to check that with at the moment.",
-  },
-  {
     id: 'wind-down',
     tint: '#FB7185',
     palette: ['#F43F5E', '#FB923C', '#FBBF24', '#E879F9'],
@@ -177,22 +146,6 @@ export const MODES: Mode[] = [
     stuck: "Can't check that just now.",
   },
   {
-    id: 'work',
-    tint: '#F59E0B',
-    palette: ['#F59E0B', '#FBBF24', '#FB923C', '#EAB308'],
-    label: 'Work',
-    what: 'Operating. Everything on, nothing volunteered mid-thought.',
-    manner:
-      'They are working. Be an operator, not a companion: the answer first, in as few words as carry it, and the next action named. Say what you did rather than what you are about to do.',
-    // Everything, because work is the mode where the whole toolkit is the
-    // point — mail, calendar, documents, the laptop. What changes is the
-    // manner and that Grove stops volunteering things mid-thought.
-    allow: null,
-    interrupt: 'sparingly',
-    onEnter: 'Tell me what needs my attention — my next meeting and anything in my inbox that actually needs me — in two sentences.',
-    stuck: "Can't reach that right now.",
-  },
-  {
     id: 'gym',
     tint: '#22C55E',
     palette: ['#16A34A', '#22C55E', '#4ADE80', '#A3E635'],
@@ -208,54 +161,6 @@ export const MODES: Mode[] = [
     interrupt: 'never',
     onEnter: 'Put on something with energy to train to.',
     stuck: 'No answer right now.',
-  },
-  {
-    id: 'social',
-    tint: '#EC4899',
-    palette: ['#EC4899', '#F472B6', '#FB7185', '#C084FC'],
-    label: 'Social',
-    what: 'Out with people. Who they are, where to go, no work.',
-    manner:
-      'They are out with people and talking to you between sentences of a real conversation. Be quick and quiet. Never raise work, deadlines or mail.',
-    allow: [
-      'mode.set', 'person.brief', 'contact.find', 'call.start', 'message.compose', 'maps.go',
-      'maps.eta', 'ride.request', 'food.order', 'shop.order', 'calendar.read', 'calendar.find', 'calendar.add',
-      'weather.now', 'music.play', 'music.recent', 'memory.add', 'memory.search', 'notes.search',
-      'reminders.add', 'now.context', 'inbox.add', 'inbox.review',
-    ],
-    interrupt: 'never',
-    stuck: "Can't check that just now.",
-  },
-  {
-    id: 'travel',
-    tint: '#06B6D4',
-    palette: ['#0891B2', '#06B6D4', '#22D3EE', '#38BDF8'],
-    label: 'Travel',
-    what: 'Moving. Times, routes, confirmations.',
-    manner:
-      'They are travelling. Logistics first: times, platforms, gates, how long, what is next. Say the number before the sentence about it.',
-    allow: [
-      'mode.set', 'maps.go', 'maps.eta', 'weather.now', 'calendar.read', 'gcal.read', 'calendar.find',
-      'calendar.add', 'mail.search', 'mail.important', 'doc.find', 'ride.request', 'contact.find',
-      'call.start', 'message.compose', 'reminders.add', 'memory.search', 'notes.search', 'music.play',
-      'music.recent', 'now.context', 'person.brief', 'brief.web', 'inbox.add', 'inbox.review',
-    ],
-    interrupt: 'sparingly',
-    onEnter: 'Tell me what is next today, how long it takes to get there, and what it is doing outside.',
-    stuck: 'Cannot reach that right now.',
-  },
-  {
-    id: 'home',
-    tint: '#A3E635',
-    palette: ['#84CC16', '#A3E635', '#FACC15', '#4ADE80'],
-    label: 'Home',
-    what: 'Off the clock, but the day is not over.',
-    manner:
-      'They are at home and off duty. Relaxed and unhurried. Work only if they raise it, and then briefly.',
-    allow: null,
-    interrupt: 'sparingly',
-    onEnter: 'Tell me anything I still need to do today, in one sentence.',
-    stuck: "Can't check that just now.",
   },
 ];
 
