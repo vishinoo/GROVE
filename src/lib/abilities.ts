@@ -2645,6 +2645,8 @@ const CAPTURE: Ability = {
   needs: [],
   args: { what: { type: 'string', what: 'the thought, in their words', required: true } },
   examples: [
+    'I have to do the dishes',
+    'I need to book the dentist',
     'capture: email the PE guy',
     'jot down that I need to book the dentist',
     'add to my list: look into thermal sensors',

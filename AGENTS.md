@@ -272,6 +272,15 @@ It is not reminders (those need a time and belong to iOS), not notes (long, and
 dictated on purpose), and not the long memory (written by a model after the
 fact). It is a queue you empty.
 
+**Everything they say they have to do goes somewhere.** With a time on it
+("tomorrow", "at three") it is a reminder; without one ("I have to do the
+dishes") it is a capture. Missing that rule, the model answered "I have to do
+the dishes" with a joke and logged nothing, which is the one outcome this
+feature exists to prevent. The keyword fallback learned the same shape
+(`TODO_STATEMENT`), deliberately without "I should": "I should probably cancel
+that" is thinking aloud, and that gate can reach the ability that cancels
+things.
+
 A focus session — "I'm on FIN 312 for the next hour" — is what makes it work.
 While one runs, brain.ts puts it in the system prompt: anything that is not the
 session gets captured and pointed back at in one line; anything that IS the

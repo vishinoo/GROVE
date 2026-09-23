@@ -325,10 +325,24 @@ export function detectLookupIntent(text: string): boolean {
 const FOCUS_SESSION =
   /^\s*(?:(?:hey|ok|okay)\s+)?(?:[a-z]{2,14},?\s+)?(?:(?:i(?:'m| am) (?:working on|studying|on|focusing on)|focus on|let'?s focus on|start (?:a )?focus session)\b|(?:i(?:'m| am) )?(?:done|finished) (?:focusing|studying|with that)\b|(?:end|stop) (?:the )?focus session\b)/i;
 
+/**
+ * "I have to do the dishes." A thing they have to do, said out loud.
+ *
+ * Not a question and not a request, which is why both gates refused it — and
+ * refusing it meant the thing was lost, which is the one outcome a capture
+ * inbox exists to prevent. Anchored to the start so "he said I need to check"
+ * stays a remark, and "I should" is left out on purpose: "I should probably
+ * cancel that" is someone thinking aloud, and this gate can reach the ability
+ * that cancels things.
+ */
+const TODO_STATEMENT =
+  /^\s*(?:(?:hey|ok|okay)\s+)?(?:[a-z]{2,14},?\s+)?(?:oh,?\s+)?(?:and\s+)?(?:i (?:have|need) to|i'?ve got to|i gotta|i must)\s+\S/i;
+
 export function detectActIntent(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
   if (FOCUS_SESSION.test(t)) return true;
+  if (TODO_STATEMENT.test(t)) return true;
   // A bare go-ahead beats the question test, because it is the whole sentence.
   if (BARE_GO_AHEAD.test(t) || BARE_YES.test(t)) return true;
   // "Study mode." "Back to normal." No verb anywhere, and unmistakably an
