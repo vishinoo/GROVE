@@ -268,9 +268,11 @@ NOT do: no date, no list, no category, no question back, and a two-word reply â€
 "Got it. Back to FIN 312." Anything that turns a capture into a small
 conversation has already cost more attention than the thought was worth.
 
-It is not reminders (those need a time and belong to iOS), not notes (long, and
-dictated on purpose), and not the long memory (written by a model after the
-fact). It is a queue you empty.
+**Everything caught also goes to the Reminders app**, dated when a time was
+given. Two homes on purpose and by request: the phone is the thing that shouts
+at you, and the inbox is the copy Grove can see when it asks what you should be
+doing. Notes are different again (long, dictated on purpose), as is the long
+memory (written by a model after the fact).
 
 **Everything they say they have to do goes somewhere.** With a time on it
 ("tomorrow", "at three") it is a reminder; without one ("I have to do the

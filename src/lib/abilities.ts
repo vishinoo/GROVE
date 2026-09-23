@@ -2643,10 +2643,14 @@ const CAPTURE: Ability = {
   where: 'device',
   wired: true,
   needs: [],
-  args: { what: { type: 'string', what: 'the thought, in their words', required: true } },
+  args: {
+    what: { type: 'string', what: 'the thought or task, in their words', required: true },
+    when: { type: 'string', what: 'when it is due, if they said: "tomorrow", "Friday", "at 3"' },
+  },
   examples: [
     'I have to do the dishes',
     'I need to book the dentist',
+    'I have to hand in the lab report by Friday',
     'capture: email the PE guy',
     'jot down that I need to book the dentist',
     'add to my list: look into thermal sensors',
@@ -2658,12 +2662,24 @@ const CAPTURE: Ability = {
     const focus = await loadFocus(CURRENT_UID);
     const next = await inbox.capture(CURRENT_UID, what, focus?.what);
     const waiting = inbox.open(next).length;
+
+    // Everything caught also goes to the Reminders app, dated when they gave a
+    // time. Two homes on purpose: the phone is what shouts at you, and the
+    // inbox is what Grove can see when it asks what you should be doing.
+    const due = readWhen(args.when || '');
+    const reminded = await addReminder(inbox.tidy(what).slice(0, 200), due).catch(() => ({ ok: false }));
     // Two or three words. A capture that gets a sentence back has already
     // cost more attention than the thought was worth.
     return {
       ok: true,
-      spoken: focus ? `Got it. Back to ${focus.what}.` : 'Got it.',
-      detail: `Captured: ${inbox.tidy(what)}\n${waiting} waiting in the inbox.`,
+      spoken: focus
+        ? `Got it. Back to ${focus.what}.`
+        : reminded.ok
+          ? due
+            ? `Got it — reminders, ${sayWhen(due)}.`
+            : 'Got it — in your reminders.'
+          : 'Got it.',
+      detail: `Captured: ${inbox.tidy(what)}${due ? ` (due ${sayWhen(due)})` : ''}\n${waiting} waiting in the inbox${reminded.ok ? ', and in the Reminders app' : ''}.`,
     };
   },
 };
