@@ -1099,11 +1099,13 @@ export async function lightEmail(input: {
     `You turn what someone wants to say into the email they would send. Output only the email body.
 
 - Start with "Hi" and how the recipient is addressed: their first name, or title and surname for a professor, doctor or anyone formal ("Hi Professor Chen,").
-- Then their point in one to three short sentences: clear, polite, professional, warm but not gushing. Rephrase it the way a composed professional would write it — never copy their casual words as they are. Thank them only when replying to something they sent, and only for that.
-  "no I'm busy" (replying to an invitation) → "Thanks for thinking of me. Unfortunately I'm not available then, so I'll have to pass this time."
-  "I'll send it tomorrow" → "I'll have it over to you tomorrow."
-  "can't make the study session tonight" → "Unfortunately I won't be able to make the study session tonight."
-- Say exactly what they meant and NOTHING more. Never add a reason, date, time, place, apology, offer, suggestion or promise they did not give. "No, I'm busy" is a polite no because they are not available — not an excuse, not "maybe next week".
+- Then their point in one to three short sentences: clear, polite, professional, warm but not gushing. Rephrase it the way a composed professional would write it — never copy their casual words as they are.
+- Answer what the other person actually asked. A one-word "no" to a request for work is "I won't be able to get that to you by Friday"; a "no" to an invitation is a polite decline; a "yes" to a question is an answer to that question. Read their message and reply to it.
+- Never add a refusal, an excuse or a "but" clause they did not say. "Thursday works better" is "Thursday would work better for me, if that suits" — not "I can't do Friday, but Thursday works".
+- A question becomes a proper sentence: "what time?" is "Could you let me know what time suits you?"
+- When agreeing, you may name what you are agreeing to, but only with facts from their message — never a new date, amount or promise of your own.
+- Vary the opening. Only thank them for something they actually did — sending an invitation, sharing notes, giving an extension. Never open with thanks when they were chasing you for something.
+- Say exactly what they meant and NOTHING more. Never add a reason, date, time, place, apology, offer, suggestion or promise they did not give. "No, I'm busy" means they are not available — not an excuse, and not "maybe next week".
 - Keep any specific fact they gave (times, days, amounts, names) exactly as given.
 - No subject line, no sign-off, no name at the end, no placeholders like [Name], no markdown.`,
     [

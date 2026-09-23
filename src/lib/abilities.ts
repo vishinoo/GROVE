@@ -1325,7 +1325,14 @@ const MAIL_REPLY: Ability = {
       return { ok: false, spoken: google.explain('sending mail') };
     }
 
-    const found = await google.searchMail({ from: args.to, about: args.about, limit: 3 });
+    const pronoun = /^(?:him|her|them|they|it|that|this|he|she|the sender|that guy|that one)$/i.test(
+      (args.to || '').trim()
+    );
+    const found = await google.searchMail({
+      from: pronoun ? undefined : args.to,
+      about: args.about,
+      limit: 3,
+    });
     if (found === null) {
       return { ok: false, spoken: google.explain('that reply') };
     }
@@ -1333,7 +1340,7 @@ const MAIL_REPLY: Ability = {
     // this to that person, and a new email does it. "Email Priya that…" routed
     // here and stopped at "I could not find the message from Priya", which is
     // true and useless. Same draft, same read-back, same press.
-    if (found.length === 0 && (args.to || '').trim()) {
+    if (found.length === 0 && !pronoun && (args.to || '').trim()) {
       return MAIL_SEND.run({ to: args.to, body, ...(args.draft ? { draft: args.draft } : {}), ...(args.confirmed ? { confirmed: args.confirmed } : {}) });
     }
     if (found.length === 0) {
@@ -1360,7 +1367,13 @@ const MAIL_REPLY: Ability = {
     // Gmail ranked highest, not a guarantee about the sender. When a name was
     // given, only a message actually from that person qualifies, and none is
     // an answer rather than a reason to fall back to the top of the list.
-    const named = (args.to || '').trim();
+    // "Respond to him and say no": a pronoun is not a name. Left in, it
+    // matches no sender, and the fallback then hunts the contacts for someone
+    // called "him". Treated as unsaid, so the message just read wins.
+    const asked = (args.to || '').trim();
+    const named = /^(?:him|her|them|they|it|that|this|he|she|the sender|that guy|that one)$/i.test(asked)
+      ? ''
+      : asked;
     const target = named ? found.find((m) => isFrom(m.from, named)) : found[0];
     if (!target) {
       return MAIL_SEND.run({ to: named, body, ...(args.draft ? { draft: args.draft } : {}), ...(args.confirmed ? { confirmed: args.confirmed } : {}) });

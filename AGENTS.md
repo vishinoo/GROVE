@@ -326,6 +326,16 @@ model, which invents names. Texts are left in your own voice.
 
 - **Its own call, not a rule in the turn's prompt.** The same instruction in the
   big system prompt was followed one time and ignored the next.
+- **It answers the message, not the word.** "No" to a request for work is "I
+  won't be able to get the build to you before Friday"; "no" to an invitation
+  is a decline; "what time?" becomes a sentence. Reply wording that ignored the
+  message read as a form letter — every reply opened "Thanks for thinking of
+  me", including to someone chasing a deadline, because an example in the
+  prompt said so.
+- **A pronoun is not a name.** "Respond to him and say no" passed "him" as the
+  recipient, which matched no sender and sent the fallback hunting contacts for
+  a person called "him". Pronouns are treated as unsaid, so the message just
+  discussed wins.
 - **It may polish, never add.** No reasons, dates, promises or offers you didn't
   give. The approver is listening, not reading, and will not catch an extra
   sentence. The prompt's own examples leak: "thanks for your patience" in an
