@@ -33,13 +33,15 @@ import { MODES, loadOverrides, setOnEnter, type Mode } from '@/lib/modes';
 import { VALUE_MAX } from '@/lib/memory';
 import type { Note as NoteItem } from '@/lib/notes';
 import type { Entity as LifeEntity, Episode as LifeEpisode } from '@/lib/life';
+import { open as openCaptures, remaining } from '@/lib/inbox';
 import { shortDate } from '@/lib/when';
 import { when as transcriptWhen } from '@/lib/transcript';
 
 export default function Sparks() {
   const palette = usePalette();
-  const { sparks, setSparkEnabled, editSpark, deleteSpark, facts, editFact, forgetFact, forgetEverything, notes, forgetNote, life, forgetEntity, forgetEpisode, persona, updatePersona } =
+  const { captures, tickOff, dropCapture, focus, endFocus, sparks, setSparkEnabled, editSpark, deleteSpark, facts, editFact, forgetFact, forgetEverything, notes, forgetNote, life, forgetEntity, forgetEpisode, persona, updatePersona } =
     useAgent();
+  const waiting = openCaptures(captures);
   // Goals and facts are shown apart because they are read differently: a goal
   // is something you check on, a fact is something you correct.
   const goals = facts.filter((f) => f.kind === 'goal');
@@ -78,6 +80,76 @@ export default function Sparks() {
         "Every time I'm studying, put this on" is the same kind of standing
         instruction as "every weekday at eight" — so it belongs beside them.
       */}
+      {/*
+        The inbox first, because it is the one list that is meant to be emptied.
+        Everything else on this screen is a record; this is a queue.
+      */}
+      {focus ? (
+        <Card style={{ marginBottom: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={[Type.cardTitle, { color: palette.ink }]}>Focused on {focus.what}</Text>
+              <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
+                {remaining(focus) || `since ${new Date(focus.startedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`}
+                . Anything else gets caught for later.
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="End the focus session"
+              onPress={() => void endFocus()}
+              hitSlop={8}
+              style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+            >
+              <Text style={[Type.bodySm, { color: palette.alert }]}>End</Text>
+            </Pressable>
+          </View>
+        </Card>
+      ) : null}
+
+      <Section label="Inbox">
+        {waiting.length === 0 ? (
+          <Card>
+            <Text style={[Type.bodySm, { color: palette.muted }]}>
+              Nothing caught. Say &ldquo;capture&rdquo; and the thought — &ldquo;email the PE guy&rdquo; — and it lands
+              here in five seconds, without pulling you off what you were doing.
+            </Text>
+          </Card>
+        ) : (
+          waiting.slice(0, 30).map((item) => (
+            <Card key={item.id} style={{ marginBottom: 6 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Tick off ${item.text}`}
+                  onPress={() => void tickOff(item.id)}
+                  hitSlop={8}
+                  style={({ pressed }) => ({ paddingTop: 1, opacity: pressed ? 0.5 : 1 })}
+                >
+                  <Icon name="check" size={15} color={palette.muted} />
+                </Pressable>
+                <View style={{ flex: 1 }}>
+                  <Text style={[Type.body, { color: palette.ink }]}>{item.text}</Text>
+                  <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
+                    {transcriptWhen(item.at)}
+                    {item.during ? ` · caught during ${item.during}` : ''}
+                  </Text>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete ${item.text}`}
+                  onPress={() => void dropCapture(item.id)}
+                  hitSlop={8}
+                  style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+                >
+                  <Text style={[Type.bodySm, { color: palette.alert }]}>Delete</Text>
+                </Pressable>
+              </View>
+            </Card>
+          ))
+        )}
+      </Section>
+
       <Section label="Modes">
         {MODES.filter((m) => m.id !== 'normal').map((mode) => (
           <ModeCard

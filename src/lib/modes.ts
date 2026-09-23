@@ -122,6 +122,7 @@ export const MODES: Mode[] = [
       'calendar.add', 'weather.now', 'memory.recall', 'memory.add', 'music.play', 'music.recent',
       'mail.search', 'mail.summarise', 'mail.important', 'contact.find',
       'now.context', 'memory.search', 'memory.done', 'person.brief', 'reminders.batch',
+      'inbox.add', 'inbox.review', 'focus.start', 'focus.end',
     ],
     interrupt: 'never',
     // Something happens on the way in, rather than the mode being a label on a
@@ -144,6 +145,7 @@ export const MODES: Mode[] = [
       'mail.search', 'contact.find',
       'weather.now', 'maps.eta', 'maps.go', 'music.recent', 'doc.create', 'doc.recent',
       'now.context', 'memory.search', 'memory.done', 'person.brief', 'reminders.batch',
+      'inbox.add', 'inbox.review', 'focus.start', 'focus.end',
     ],
     interrupt: 'never',
     // Study is the one mode where being asked something back is the point, so
@@ -165,6 +167,7 @@ export const MODES: Mode[] = [
       'mode.set', 'notes.search', 'music.play', 'music.recent', 'weather.now', 'reminders.add', 'memory.recall',
       'memory.add', 'day.brief', 'calendar.read', 'gcal.read', 'calendar.find',
       'mail.search', 'now.context', 'memory.search', 'memory.done', 'person.brief', 'reminders.batch',
+      'inbox.add', 'inbox.review', 'focus.start', 'focus.end',
     ],
     interrupt: 'sparingly',
     // The evening version of a brief: what is coming tomorrow, said once, and
@@ -200,6 +203,7 @@ export const MODES: Mode[] = [
     allow: [
       'mode.set', 'music.play', 'music.recent', 'weather.now', 'reminders.add', 'reminders.batch',
       'memory.add', 'memory.search', 'notes.search', 'calendar.read', 'calendar.find', 'now.context',
+      'inbox.add', 'inbox.review', 'focus.start', 'focus.end',
     ],
     interrupt: 'never',
     onEnter: 'Put on something with energy to train to.',
@@ -217,7 +221,7 @@ export const MODES: Mode[] = [
       'mode.set', 'person.brief', 'contact.find', 'call.start', 'message.compose', 'maps.go',
       'maps.eta', 'ride.request', 'food.order', 'shop.order', 'calendar.read', 'calendar.find', 'calendar.add',
       'weather.now', 'music.play', 'music.recent', 'memory.add', 'memory.search', 'notes.search',
-      'reminders.add', 'now.context',
+      'reminders.add', 'now.context', 'inbox.add', 'inbox.review',
     ],
     interrupt: 'never',
     stuck: "Can't check that just now.",
@@ -234,7 +238,7 @@ export const MODES: Mode[] = [
       'mode.set', 'maps.go', 'maps.eta', 'weather.now', 'calendar.read', 'gcal.read', 'calendar.find',
       'calendar.add', 'mail.search', 'mail.important', 'doc.find', 'ride.request', 'contact.find',
       'call.start', 'message.compose', 'reminders.add', 'memory.search', 'notes.search', 'music.play',
-      'music.recent', 'now.context', 'person.brief', 'brief.web',
+      'music.recent', 'now.context', 'person.brief', 'brief.web', 'inbox.add', 'inbox.review',
     ],
     interrupt: 'sparingly',
     onEnter: 'Tell me what is next today, how long it takes to get there, and what it is doing outside.',

@@ -39,6 +39,7 @@ import {
 } from './lightModel';
 import { asPromptBlock, factFrom } from './memory';
 import { lately, loadLife, whoIsWho } from './life';
+import { loadFocus, remaining } from './inbox';
 import { calculate } from './calc';
 import { abilitiesFor, modeById } from './modes';
 import { ABILITIES } from './abilities';
@@ -109,7 +110,9 @@ const TOOL_RULES = `How to use your tools:
 - To send or share a document you wrote, look it up with the documents-written tool first and put its link in the email. Never guess a link.
 - Anything about their own life — what they should be doing, what they promised, who someone is, what was decided, an idea they had — comes from the memory tools, not from this conversation. You only see the last few turns; the tools see months.
 - "What should I be doing", "I have an hour, what now", "catch me up": call the where-things-stand tool, then pick ONE thing and say why it is the one, weighing deadlines, what is promised, and how long they have.
-- When they say they finished something that was outstanding ("I sent Jason the build"), mark it done.
+- Capture, don't switch. A thought that is not what they are doing right now — someone to email, something to look up, a thing they promised, an idea — goes straight into their inbox with the capture tool, in their own words. Do not plan it, do not ask about it, do not offer to do it now: capture it and stop. They will deal with it later.
+- If they ask you to actually do that thing now ("email him now"), do it instead of capturing it. Capture is for the thought they are setting aside.
+- When they say they finished something that was outstanding ("I sent Jason the build", "emailed the PE guy"), mark it done.
 - "Brief me on someone" or "who is X": use the person tool. Never assemble a person from memory of this conversation.
 - "Anything important" about mail: use the tool that filters it. Name who and what they want, not how many are unread.
 - A question about when something happened, or about something from a named stretch of time, goes to the long-memory search with that time passed as the when argument.
@@ -330,10 +333,20 @@ export async function askWithTools(
   // A line of names, not the archive: enough that "my cofounder" and "Jason"
   // are the same person without a lookup, and cheap enough to ride on every
   // turn. Everything else about them is a tool call away.
-  const roster = await loadLife(currentAccount())
-    .then((l) => [whoIsWho(l), lately(l)].filter(Boolean).join('\n'))
-    .catch(() => '');
-  const system = [systemFor(context, available), roster].filter(Boolean).join('\n\n');
+  const [roster, session] = await Promise.all([
+    loadLife(currentAccount())
+      .then((l) => [whoIsWho(l), lately(l)].filter(Boolean).join('\n'))
+      .catch(() => ''),
+    loadFocus(currentAccount()).catch(() => null),
+  ]);
+  // A focus session changes what a good answer is: the same thought that
+  // deserves a plan on a quiet evening deserves to be caught and set aside
+  // mid-session. This is the difference between an assistant that helps and
+  // one that keeps you on the thing you sat down to do.
+  const focusing = session
+    ? `They are in a focus session on ${session.what}${remaining(session) ? ` — ${remaining(session)}` : ''}. Anything that is not that: capture it and point them back in one short line, and do not expand on it. Answer anything that IS about ${session.what} properly. If they ask what they should be doing, the answer is ${session.what}.`
+    : '';
+  const system = [systemFor(context, available), roster, focusing].filter(Boolean).join('\n\n');
   const fact = factFrom(userText) ?? undefined;
 
   // Sums are worked out exactly and handed over as a fact; see calc.ts.

@@ -184,7 +184,7 @@ const BARE_YES =
  * Address forms are allowed in front of it, because people say "please" and
  * "hey Grove" and mean the imperative that follows.
  */
-const VERBS = String.raw`make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up|play|read|brief|tell me about|email|text|message|call|switch to|switch into|go into|turn on|turn off|open|handle|push|reschedule|delay|shift|dim|start|stop|queue|skip|pause|resume|let .{2,20} know|give me|reply|respond|answer|forward|let'?s go|take me|drive me|directions|navigate|which way|delete|remove|take|summari[sz]e|catch me up|recap|digest|remember|note|jot|keep in mind|don'?t let me forget|tick|mark|ring|dial|complete|finished|get me|order|uber|book me|share`;
+const VERBS = String.raw`make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up|play|read|brief|tell me about|email|text|message|call|switch to|switch into|go into|turn on|turn off|open|handle|push|reschedule|delay|shift|dim|start|stop|queue|skip|pause|resume|let .{2,20} know|give me|reply|respond|answer|forward|let'?s go|take me|drive me|directions|navigate|which way|delete|remove|take|summari[sz]e|catch me up|recap|digest|remember|note|jot|keep in mind|don'?t let me forget|tick|mark|ring|dial|complete|finished|get me|order|uber|book me|share|capture|focus(?: on)?|jot`;
 
 /** "hey Grove, please …" — anything that can precede an instruction. */
 /**
@@ -291,7 +291,7 @@ const ELLIPTICAL_LOOKUP =
   /^\s*(?:anything|any (?:mail|messages|emails|news)|catch me up|brief me|where am i at|remind me who)\b/i;
 
 const LOOKUP_QUESTION =
-  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|coat|umbrella|wear|traffic|how long|how far|eta|leave for|leave by|set off|get there|get home|which way|way to|route to|far is|my day|day looking|got on|first thing|last thing|next thing|what time is|what time'?s|note|notes|memo|memos|to-?do|task|tasks|my list|still have to do|number|phone number|contact|first class|last class|of the day|first class|class|appointment|meeting|event|events|booked|flight|this week|anything with|anything on|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|doc|docs|document|plan|notes|spreadsheet|drive|document|documents|report|reports|written|news|markets|happened|remind me (?:what|who|about)|supposed to|do i know about|did i say|what did i|anything from|say about|did .{2,20} say|supposed to be doing|should i (?:do|work on|be doing|start)|what now|where am i at|catch me up|idea|ideas|decide|decided|decision|working on|been up to|happened|brief me|who is|who's|important|attention|urgent|deal with|needs me|need(?:s)? (?:my )?(?:attention|doing)|outstanding|promised|owe|commitment|commitments|free time|have (?:an? )?(?:hour|minutes?)|did .{2,20} do|score|won|win|lose|lost|game|match|free online|free to|how much|cost|costs|price|open|opens|close|closes|hours|where can i|where do i|buy|available)\b/i;
+  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|coat|umbrella|wear|traffic|how long|how far|eta|leave for|leave by|set off|get there|get home|which way|way to|route to|far is|my day|day looking|got on|first thing|last thing|next thing|what time is|what time'?s|note|notes|memo|memos|to-?do|task|tasks|my list|still have to do|number|phone number|contact|first class|last class|of the day|first class|class|appointment|meeting|event|events|booked|flight|this week|anything with|anything on|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|doc|docs|document|plan|notes|spreadsheet|drive|document|documents|report|reports|written|inbox|captured|capture|news|markets|happened|remind me (?:what|who|about)|supposed to|do i know about|did i say|what did i|anything from|say about|did .{2,20} say|supposed to be doing|should i (?:do|work on|be doing|start)|what now|where am i at|catch me up|idea|ideas|decide|decided|decision|working on|been up to|happened|brief me|who is|who's|important|attention|urgent|deal with|needs me|need(?:s)? (?:my )?(?:attention|doing)|outstanding|promised|owe|commitment|commitments|free time|have (?:an? )?(?:hour|minutes?)|did .{2,20} do|score|won|win|lose|lost|game|match|free online|free to|how much|cost|costs|price|open|opens|close|closes|hours|where can i|where do i|buy|available)\b/i;
 
 /**
  * Whether this is a question Grove should look up rather than answer offhand.
@@ -316,9 +316,19 @@ export function detectLookupIntent(text: string): boolean {
   return isQuestion && LOOKUP_QUESTION.test(t);
 }
 
+/**
+ * Starting or ending a focus session, said as people say it.
+ *
+ * Checked before the mode words, because "focus on the Noctus build" is a
+ * session on a thing and "focus mode" is a mode, and the words overlap.
+ */
+const FOCUS_SESSION =
+  /^\s*(?:(?:hey|ok|okay)\s+)?(?:[a-z]{2,14},?\s+)?(?:(?:i(?:'m| am) (?:working on|studying|on|focusing on)|focus on|let'?s focus on|start (?:a )?focus session)\b|(?:i(?:'m| am) )?(?:done|finished) (?:focusing|studying|with that)\b|(?:end|stop) (?:the )?focus session\b)/i;
+
 export function detectActIntent(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
+  if (FOCUS_SESSION.test(t)) return true;
   // A bare go-ahead beats the question test, because it is the whole sentence.
   if (BARE_GO_AHEAD.test(t) || BARE_YES.test(t)) return true;
   // "Study mode." "Back to normal." No verb anywhere, and unmistakably an

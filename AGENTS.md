@@ -260,6 +260,31 @@ their answer is the signal. The pulse is delayed so a fast turn makes no sound
 at all. The JS side probes for the native functions, so an update reaching an
 older binary is silent rather than broken.
 
+## Capture, don't switch
+
+`src/lib/inbox.ts` is a flat list of raw thoughts, written the instant they are
+said, plus the focus session that defends it. The point is what capture does
+NOT do: no date, no list, no category, no question back, and a two-word reply —
+"Got it. Back to FIN 312." Anything that turns a capture into a small
+conversation has already cost more attention than the thought was worth.
+
+It is not reminders (those need a time and belong to iOS), not notes (long, and
+dictated on purpose), and not the long memory (written by a model after the
+fact). It is a queue you empty.
+
+A focus session — "I'm on FIN 312 for the next hour" — is what makes it work.
+While one runs, brain.ts puts it in the system prompt: anything that is not the
+session gets captured and pointed back at in one line; anything that IS the
+session gets answered properly. `now.context` leads with it, so "what am I
+supposed to be doing" answers with the session and the time left. Durations
+("40 minutes", "half an hour") are parsed by `endsIn` — `readWhen` reads clock
+times and days, and dropped every length, leaving sessions open-ended. A session
+nobody ends expires after four hours.
+
+`memory.done` checks the inbox before commitments: "I emailed the PE guy" ticks
+off the capture. The list is on the Sparks screen, where a tap ticks off and a
+tap deletes.
+
 ## A friend, not a service
 
 `persona.friend` is the relationship, beside the manner (which is only how

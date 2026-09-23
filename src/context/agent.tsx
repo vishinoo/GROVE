@@ -57,6 +57,7 @@ import * as memory from '@/lib/memory';
 import * as life from '@/lib/life';
 import { afterTurn, consolidateNow, rememberNote } from '@/lib/consolidate';
 import * as notesStore from '@/lib/notes';
+import * as inbox from '@/lib/inbox';
 import * as sparks from '@/lib/sparks';
 import * as transcript from '@/lib/transcript';
 import * as trigger from '@/lib/trigger';
@@ -124,6 +125,14 @@ type AgentValue = {
   /** Voice notes, newest first. */
   notes: notesStore.Note[];
   forgetNote: (id: string) => Promise<void>;
+
+  /** Thoughts caught on the way past, newest first. */
+  captures: inbox.Capture[];
+  tickOff: (id: string) => Promise<void>;
+  dropCapture: (id: string) => Promise<void>;
+  /** What they are focused on, if anything. */
+  focus: inbox.Focus | null;
+  endFocus: () => Promise<void>;
 
   /** The long memory: who and what is in their life, and what happened. */
   life: life.Life;
@@ -241,6 +250,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const [facts, setFacts] = useState<memory.Fact[]>([]);
   const [noteList, setNoteList] = useState<notesStore.Note[]>([]);
   const [lifeMemory, setLifeMemory] = useState<life.Life>({ entities: [], episodes: [], pending: [] });
+  const [captures, setCaptures] = useState<inbox.Capture[]>([]);
+  const [focus, setFocus] = useState<inbox.Focus | null>(null);
   /**
    * Words to help the recogniser hear this person's world: Grove's name, the
    * people and projects in their life, what it calls them. Rebuilt whenever
@@ -432,6 +443,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     });
     void notesStore.loadNotes(uid).then((n) => {
       if (mounted.current) setNoteList(n);
+    });
+    void inbox.loadInbox(uid).then((items) => {
+      if (mounted.current) setCaptures(items);
+    });
+    void inbox.loadFocus(uid).then((f) => {
+      if (mounted.current) setFocus(f);
     });
     void life.loadLife(uid).then((l) => {
       if (mounted.current) setLifeMemory(l);
@@ -800,6 +817,14 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
     rememberQuestion(ability, reply.args, outcome);
     if (outcome.ok && !ability.reads) doneChime();
+    // The inbox and the session are shown on screen, so they refresh as soon
+    // as something changes them rather than on the next launch.
+    if (outcome.ok && ability.id.startsWith('inbox.')) {
+      void inbox.loadInbox(account).then((items) => mounted.current && setCaptures(items));
+    }
+    if (outcome.ok && (ability.id.startsWith('focus.') || ability.id === 'inbox.add')) {
+      void inbox.loadFocus(account).then((f) => mounted.current && setFocus(f));
+    }
 
     const heard = outcome.ok ? outcome.spoken : shortFailure(outcome.spoken);
 
@@ -1192,6 +1217,19 @@ function shortFailure(text: string): string {
       `Saved: ${note.title}. ${todo === 1 ? 'One thing' : `${todo} things`} to do in there. Press once to put ${todo === 1 ? 'it' : 'them'} in your reminders, twice to leave ${todo === 1 ? 'it' : 'them'}.`
     );
   };
+
+  const tickOff = useCallback(async (id: string) => {
+    setCaptures(await inbox.complete(live.current.uid, id));
+  }, []);
+
+  const dropCapture = useCallback(async (id: string) => {
+    setCaptures(await inbox.remove(live.current.uid, id));
+  }, []);
+
+  const endFocus = useCallback(async () => {
+    await inbox.setFocus(live.current.uid, null);
+    if (mounted.current) setFocus(null);
+  }, []);
 
   const forgetEntity = useCallback(async (id: string) => {
     setLifeMemory(await life.updateLife(live.current.uid, (now) => life.forgetEntity(now, id)));
@@ -1587,6 +1625,11 @@ function shortFailure(text: string): string {
       editSpark,
       deleteSpark,
       notes: noteList,
+      captures,
+      tickOff,
+      dropCapture,
+      focus,
+      endFocus,
       life: lifeMemory,
       forgetEntity,
       forgetEpisode,
@@ -1618,6 +1661,11 @@ function shortFailure(text: string): string {
       deleteSpark,
       noteList,
       forgetNote,
+      captures,
+      tickOff,
+      dropCapture,
+      focus,
+      endFocus,
       lifeMemory,
       forgetEntity,
       forgetEpisode,

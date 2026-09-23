@@ -42,6 +42,8 @@ import { loadFacts, recall,
 import { loadNotes, searchNotes } from './notes';
 import { loadPlayed, playedLines, recordPlayed } from './listening';
 import { loadDocs, rememberDoc } from './docs';
+import * as inbox from './inbox';
+import { loadFocus } from './inbox';
 import {
   closeEpisode,
   entityLines,
@@ -2614,6 +2616,142 @@ const LIFE_SEARCH: Ability = {
 };
 
 /**
+ * Capture, don't switch.
+ *
+ * The whole value is in what this does not do: no date, no list, no category,
+ * no question back, and a reply short enough that the thought is gone in five
+ * seconds and the person is back on what they were doing. Anything that turns
+ * a capture into a small conversation defeats the point.
+ */
+const CAPTURE: Ability = {
+  id: 'inbox.add',
+  name: 'Capture',
+  what: 'Puts a passing thought straight into their inbox to deal with later — an idea, someone to contact, something they promised, a thing to look up. Instant, no questions.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: { what: { type: 'string', what: 'the thought, in their words', required: true } },
+  examples: [
+    'capture: email the PE guy',
+    'jot down that I need to book the dentist',
+    'add to my list: look into thermal sensors',
+    'note down ask Priya about the survey',
+  ],
+  run: async (args) => {
+    const what = (args.what || '').trim();
+    if (!what) return { ok: false, spoken: 'Capture what?' };
+    const focus = await loadFocus(CURRENT_UID);
+    const next = await inbox.capture(CURRENT_UID, what, focus?.what);
+    const waiting = inbox.open(next).length;
+    // Two or three words. A capture that gets a sentence back has already
+    // cost more attention than the thought was worth.
+    return {
+      ok: true,
+      spoken: focus ? `Got it. Back to ${focus.what}.` : 'Got it.',
+      detail: `Captured: ${inbox.tidy(what)}\n${waiting} waiting in the inbox.`,
+    };
+  },
+};
+
+/** Everything caught and not yet dealt with. */
+const INBOX_REVIEW: Ability = {
+  id: 'inbox.review',
+  name: 'Inbox',
+  what: 'Reads back what they have captured and not yet dealt with.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  reads: true,
+  args: {},
+  examples: ["what's in my inbox", 'what did I capture today', 'read me my list', 'what is on my list'],
+  run: async () => {
+    const items = inbox.open(await inbox.loadInbox(CURRENT_UID));
+    if (items.length === 0) return { ok: true, spoken: 'Your inbox is empty.' };
+    return {
+      ok: true,
+      spoken: `${items.length} thing${items.length === 1 ? '' : 's'} waiting. Newest: ${items[0].text}.`,
+      detail: inbox.inboxLines(items),
+    };
+  },
+};
+
+/**
+ * "I'm on FIN 312 for the next hour."
+ *
+ * The session is what makes capture work: while one is running Grove knows
+ * what they are meant to be doing, so a thought about something else is caught
+ * and handed back at the end rather than becoming the next half hour.
+ */
+const FOCUS_START: Ability = {
+  id: 'focus.start',
+  name: 'Focus on something',
+  what: 'Starts a focus session on one thing, so anything unrelated gets captured for later instead of pursued.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {
+    what: { type: 'string', what: 'what they are working on, in their words', required: true },
+    how_long: { type: 'string', what: 'how long, if they said: "an hour", "40 minutes", "until 3"' },
+  },
+  examples: [
+    'I am working on FIN 312 for the next hour',
+    'focus on the Noctus build for 40 minutes',
+    'start a focus session on my assignment',
+  ],
+  run: async (args) => {
+    const what = (args.what || '').trim();
+    if (!what) return { ok: false, spoken: 'Focusing on what?' };
+    // A length ("40 minutes") first, then a clock time ("until 3").
+    const until = inbox.endsIn(args.how_long || '') ?? readWhen(args.how_long || '');
+    await inbox.setFocus(CURRENT_UID, {
+      what,
+      startedAt: new Date().toISOString(),
+      ...(until ? { until: until.toISOString() } : {}),
+    });
+    const waiting = inbox.open(await inbox.loadInbox(CURRENT_UID)).length;
+    return {
+      ok: true,
+      spoken: until
+        ? `${what} until ${clockOnly(until)}. Anything else I'll catch for later.`
+        : `${what} it is. Anything else I'll catch for later.`,
+      detail: waiting > 0 ? `${waiting} already in the inbox for afterwards.` : undefined,
+    };
+  },
+};
+
+/** The end of a session, and what got caught during it. */
+const FOCUS_END: Ability = {
+  id: 'focus.end',
+  name: 'Done focusing',
+  what: 'Ends the focus session and reads back anything caught during it.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {},
+  examples: ['I am done focusing', 'end the focus session', 'stop focus mode', 'finished studying'],
+  run: async () => {
+    const focus = await loadFocus(CURRENT_UID);
+    await inbox.setFocus(CURRENT_UID, null);
+    if (!focus) return { ok: true, spoken: 'You were not focusing on anything.' };
+
+    const caught = inbox
+      .open(await inbox.loadInbox(CURRENT_UID))
+      .filter((i) => new Date(i.at).getTime() >= new Date(focus.startedAt).getTime());
+    const minutes = Math.round((Date.now() - new Date(focus.startedAt).getTime()) / 60_000);
+    // "0 minutes on FIN 312" is what a stopwatch says, not a person.
+    const spent = minutes < 1 ? `on ${focus.what}` : `${minutes} minutes on ${focus.what}`;
+    if (caught.length === 0) {
+      return { ok: true, spoken: `Done ${spent}, nothing caught.` };
+    }
+    return {
+      ok: true,
+      spoken: `Done ${spent}. ${caught.length} thing${caught.length === 1 ? '' : 's'} came up: ${caught[0].text}${caught.length > 1 ? ', and more' : ''}.`,
+      detail: inbox.inboxLines(caught),
+    };
+  },
+};
+
+/**
  * "I sent Jason the build."
  *
  * A promise the long memory recorded stays outstanding until something says
@@ -2630,10 +2768,23 @@ const COMMITMENT_DONE: Ability = {
   wired: true,
   needs: [],
   args: { what: { type: 'string', what: 'what they finished, in their words', required: true } },
-  examples: ['mark the build for Jason as done', 'tick off handing in the draft', 'mark the pricing page as done'],
+  examples: [
+    'mark the build for Jason as done',
+    'tick off handing in the draft',
+    'mark the pricing page as done',
+    'tick off emailing the PE guy',
+  ],
   run: async (args) => {
     const what = (args.what || '').trim();
     if (!what) return { ok: false, spoken: 'What did you finish?' };
+    // The inbox first: a captured thought is the thing most likely to be
+    // finished and said out loud, and it is cheaper to match than an episode.
+    const caught = inbox.bestMatch(await inbox.loadInbox(CURRENT_UID), what);
+    if (caught) {
+      await inbox.complete(CURRENT_UID, caught.id);
+      return { ok: true, spoken: `Ticked off: ${caught.text}.` };
+    }
+
     const life = await loadLife(CURRENT_UID);
     const open = openCommitments(life);
     if (open.length === 0) return { ok: true, spoken: 'Nothing was outstanding — noted all the same.' };
@@ -2742,6 +2893,10 @@ const NOW: Ability = {
   ],
   run: async () => {
     const now = new Date();
+    const [focus, caught] = await Promise.all([
+      loadFocus(CURRENT_UID),
+      inbox.loadInbox(CURRENT_UID).then(inbox.open),
+    ]);
     const [events, reminders, life, facts, notes] = await Promise.all([
       google.readCalendar(2).catch(() => null),
       openReminders(15).catch(() => null),
@@ -2770,6 +2925,12 @@ const NOW: Ability = {
 
     const detail = [
       `Now: ${now.toLocaleString('en-GB', { weekday: 'long', hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'long' })}`,
+      focus
+        ? `They are in a focus session on ${focus.what}${inbox.remaining(focus) ? ` — ${inbox.remaining(focus)}` : ''}. That is what they should be doing.`
+        : '',
+      caught.length
+        ? `Captured and not dealt with (${caught.length}):\n${inbox.inboxLines(caught)}`
+        : '',
       on ? `Happening now: ${on.title} until ${new Date(on.end || on.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : 'Nothing on right now.',
       next
         ? `Next: ${next.title} at ${new Date(next.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}${gap !== null ? ` — ${gap} minutes from now` : ''}`
@@ -2788,7 +2949,9 @@ const NOW: Ability = {
       .filter(Boolean)
       .join('\n');
 
-    const spoken = on
+    const spoken = focus
+      ? `You are meant to be on ${focus.what}${inbox.remaining(focus) ? `, ${inbox.remaining(focus)}` : ''}.`
+      : on
       ? `${on.title} is on now.`
       : next && gap !== null && gap < 180
         ? `${next.title} in ${gap} minutes.`
@@ -3458,6 +3621,10 @@ const SET_MODE: Ability = {
 
 export const ABILITIES: Ability[] = [
   NOW,
+  CAPTURE,
+  INBOX_REVIEW,
+  FOCUS_START,
+  FOCUS_END,
   COMMITMENT_DONE,
   LIFE_SEARCH,
   PERSON_BRIEF,
