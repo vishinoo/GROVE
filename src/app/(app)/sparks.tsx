@@ -107,16 +107,14 @@ export default function Sparks() {
         </Card>
       ) : null}
 
-      <Section label="Inbox">
-        {waiting.length === 0 ? (
-          <Card>
-            <Text style={[Type.bodySm, { color: palette.muted }]}>
-              Nothing caught. Say &ldquo;capture&rdquo; and the thought — &ldquo;email the PE guy&rdquo; — and it lands
-              here in five seconds, without pulling you off what you were doing.
-            </Text>
-          </Card>
-        ) : (
-          waiting.slice(0, 30).map((item) => (
+      {/*
+        Shown only when there is something in it. An empty queue with a
+        paragraph explaining itself is the ugliest thing on this screen, and the
+        feature explains itself the first time you say "I have to do the dishes".
+      */}
+      {waiting.length > 0 ? (
+        <Section label="Inbox">
+          {waiting.slice(0, 30).map((item) => (
             <Card key={item.id} style={{ marginBottom: 6 }}>
               <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
                 <Pressable
@@ -146,9 +144,9 @@ export default function Sparks() {
                 </Pressable>
               </View>
             </Card>
-          ))
-        )}
-      </Section>
+          ))}
+        </Section>
+      ) : null}
 
       <Section label="Modes">
         {MODES.filter((m) => m.id !== 'normal').map((mode) => (

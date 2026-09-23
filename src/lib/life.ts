@@ -103,6 +103,8 @@ export type Life = {
   /** Turns waiting to be consolidated. Deleted once they have been. */
   pending: { at: string; said: string; replied: string }[];
   lastConsolidated?: string;
+  /** How many consolidations have run since the memory was last tidied. */
+  sinceCompacted?: number;
 };
 
 /**
@@ -500,6 +502,136 @@ export function lately(life: Life, now = new Date()): string {
   return parts.length
     ? `${parts.join(' ')} Background only — bring one up only when it is genuinely relevant.`
     : '';
+}
+
+/* ---------------------------------------------------------- compaction */
+
+/** Facts worth tidying: enough of them that they have started to overlap. */
+const CLUTTERED = 6;
+
+/**
+ * The subjects worth a tidy-up, densest first.
+ *
+ * Only ones that have collected enough separate facts to be repeating
+ * themselves — tidying a person you have mentioned twice costs a call and
+ * changes nothing.
+ */
+export function needsCompacting(life: Life, limit = 5): Entity[] {
+  return [...life.entities]
+    .filter((e) => current(e).length >= CLUTTERED)
+    .sort((a, b) => current(b).length - current(a).length)
+    .slice(0, limit);
+}
+
+/** What the model is given: each subject, and what is known about it. */
+export function compactionBlock(entities: Entity[]): string {
+  return entities
+    .map((e) =>
+      [
+        `Subject: ${e.name}${e.relation ? ` (${e.relation})` : ''} [${e.kind}]`,
+        e.summary ? `Summary: ${e.summary}` : '',
+        ...current(e).map((f) => `- ${f.text}`),
+      ]
+        .filter(Boolean)
+        .join('\n')
+    )
+    .join('\n\n');
+}
+
+/**
+ * Folds a tidied subject back in.
+ *
+ * The merged facts replace the current ones and keep the oldest timestamp
+ * among them, because a fact learned in March that was merged in September is
+ * still something known since March — and the date is what "what did I decide
+ * back then" searches on. Stale facts are left exactly as they were.
+ */
+export function applyCompaction(
+  life: Life,
+  tidied: { name: string; summary?: string; facts?: string[] }[],
+  now = new Date()
+): Life {
+  const stamp = now.toISOString();
+  const entities = life.entities.map((entity) => {
+    const match = tidied.find((t) => norm(t.name) === norm(entity.name));
+    const facts = (match?.facts ?? []).map((f) => String(f).trim()).filter(Boolean);
+    if (!match || facts.length === 0) return entity;
+
+    const was = current(entity);
+    // Good tidying is meant to shrink the list — seven facts into three is the
+    // point — so length is the wrong thing to guard. What must survive is the
+    // specifics: every name, number and date that was there before has to
+    // still be there after, or this was a summariser losing information rather
+    // than a tidier merging it.
+    if (facts.length === 0 || facts.length > was.length) return entity;
+    // Proper nouns and numbers, ignoring the first word of a sentence — which
+    // is capitalised for grammar, not because it is a name. Without that,
+    // "Taking MARK 312" losing its capital T counted as lost information and
+    // every tidy-up was refused.
+    const specifics = (text: string) =>
+      (text.replace(/^\W*\w+/, '').match(/[A-Z][\w&.'-]+|\d[\d:/.,-]*/g) ?? []).map((w) => w.toLowerCase());
+    const kept = facts.join(' ').toLowerCase();
+    const lost = [...new Set(was.flatMap((f) => specifics(f.text)))].filter((w) => !kept.includes(w));
+    if (lost.length > 0) return entity;
+
+    const oldest = was.map((f) => f.at).sort()[0] ?? stamp;
+    return {
+      ...entity,
+      summary: match.summary?.trim() ? match.summary.trim().slice(0, 400) : entity.summary,
+      facts: [
+        ...facts.map((text) => ({ text: text.slice(0, 200), at: oldest, source: 'compacted' })),
+        ...entity.facts.filter((f) => f.stale),
+      ],
+      updatedAt: stamp,
+    };
+  });
+  return { ...life, entities, sinceCompacted: 0 };
+}
+
+/**
+ * The same subject, learned twice under one name.
+ *
+ * Done locally because it needs no judgement: identical names, same kind, one
+ * of them holding everything both knew. Two "Jason" entities is the shape that
+ * makes a brief read like it is about two different people.
+ */
+export function mergeDuplicates(life: Life): Life {
+  const kept = new Map<string, Entity>();
+  const moved = new Map<string, string>();
+
+  for (const entity of life.entities) {
+    const key = `${entity.kind}:${norm(entity.name)}`;
+    const existing = kept.get(key);
+    if (!existing) {
+      kept.set(key, entity);
+      continue;
+    }
+    // The one seen most often wins the id, so episodes mostly stay pointed
+    // where they already point.
+    const [winner, loser] = existing.mentions >= entity.mentions ? [existing, entity] : [entity, existing];
+    moved.set(loser.id, winner.id);
+    const held = new Set(winner.facts.map((f) => norm(f.text)));
+    kept.set(key, {
+      ...winner,
+      aliases: [...new Set([...winner.aliases, ...loser.aliases])],
+      relation: winner.relation ?? loser.relation,
+      summary: winner.summary || loser.summary,
+      facts: [...winner.facts, ...loser.facts.filter((f) => !held.has(norm(f.text)))].slice(0, FACTS_PER_ENTITY),
+      mentions: winner.mentions + loser.mentions,
+      firstSeen: winner.firstSeen < loser.firstSeen ? winner.firstSeen : loser.firstSeen,
+      lastSeen: winner.lastSeen > loser.lastSeen ? winner.lastSeen : loser.lastSeen,
+    });
+  }
+
+  if (moved.size === 0) return life;
+  return {
+    ...life,
+    entities: [...kept.values()],
+    episodes: life.episodes.map((ep) => ({
+      ...ep,
+      about: [...new Set(ep.about.map((id) => moved.get(id) ?? id))],
+    })),
+  };
 }
 
 /* --------------------------------------------------------- consolidation */

@@ -425,6 +425,20 @@ walk around, so it keeps what things meant and not what was said. Everything it
 keeps is readable and deletable on the Sparks screen, because a memory you
 cannot see is one you cannot correct.
 
+**Memory is compacted, not just appended.** Every third consolidation,
+`compact()` merges duplicate entities locally (no judgement needed) and, for
+any subject that has collected six or more facts, one call rewrites them into
+fewer, denser ones: "interested in a job at Meta" plus "interested in a job at
+Palantir" becomes one fact naming both. Measured: seven facts into three, in
+1.4 seconds, with every specific kept.
+
+The guard on that is the interesting part. Length is the wrong thing to check —
+shrinking the list is the point — so what must survive is the specifics: every
+proper noun and number present before must be present after, or the result is
+thrown away and the memory left as it was. Sentence-initial words are ignored,
+because they are capitalised for grammar; counting them made "Taking MARK 312"
+look like lost information and refused every tidy-up.
+
 Details that were bugs first:
 
 - **A failed read keeps the buffer.** Clearing it whether or not the model

@@ -13,11 +13,15 @@
  * delete on the Sparks screen.
  */
 
-import { lightConsolidate } from './lightModel';
+import { lightCompact, lightConsolidate } from './lightModel';
 import {
   absorb,
   addPending,
+  applyCompaction,
+  compactionBlock,
   current,
+  mergeDuplicates,
+  needsCompacting,
   loadLife,
   readyToConsolidate,
   updateLife,
@@ -98,6 +102,39 @@ async function learn(uid: string, material: string, source: string): Promise<'ke
 /** How long unread turns are kept for another try before being let go. */
 const RETRY_FOR_MS = 48 * 3_600_000;
 
+/** Consolidations between tidy-ups: roughly every thirty-odd turns. */
+const COMPACT_EVERY = 3;
+
+/**
+ * Keeps the memory dense rather than merely long.
+ *
+ * Duplicates are merged locally first, because that needs no judgement. Then,
+ * if any subject has collected enough overlapping facts to be worth it, one
+ * call rewrites them into fewer, denser ones. Both are safe to fail: the
+ * memory is left exactly as it was.
+ */
+export async function compact(uid: string): Promise<void> {
+  const merged = await updateLife(uid, (life) => mergeDuplicates(life));
+  const cluttered = needsCompacting(merged);
+  if (cluttered.length === 0) {
+    await updateLife(uid, (life) => ({ ...life, sinceCompacted: 0 }));
+    return;
+  }
+
+  const raw = await lightCompact(compactionBlock(cluttered));
+  if (!raw) return;
+  try {
+    const parsed = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, '')) as {
+      subjects?: { name: string; summary?: string; facts?: string[] }[];
+    };
+    const subjects = Array.isArray(parsed.subjects) ? parsed.subjects : [];
+    if (subjects.length === 0) return;
+    await updateLife(uid, (life) => applyCompaction(life, subjects));
+  } catch {
+    // A tidy-up that cannot be read changes nothing.
+  }
+}
+
 /**
  * One read of the buffer at a time, per account.
  *
@@ -151,11 +188,16 @@ async function readBuffer(uid: string): Promise<void> {
   // the buffer for ever. Only the turns that were read are removed; any that
   // arrived meanwhile have not been looked at.
   if (outcome === 'failed' && Date.now() - oldest < RETRY_FOR_MS) return;
-  await updateLife(uid, (now) => ({
+  const after = await updateLife(uid, (now) => ({
     ...now,
     pending: now.pending.slice(taken),
     lastConsolidated: new Date().toISOString(),
+    sinceCompacted: (now.sinceCompacted ?? 0) + 1,
   }));
+
+  // Tidying is the same job's second half, and it runs on the same schedule as
+  // everything else here: in the background, with nobody waiting.
+  if ((after.sinceCompacted ?? 0) >= COMPACT_EVERY) await compact(uid);
 }
 
 /** Reads a finished voice note or meeting log into the long memory. */

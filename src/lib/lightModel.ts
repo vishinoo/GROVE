@@ -1134,6 +1134,43 @@ export async function lightEmail(input: {
 }
 
 /**
+ * Memory, made denser.
+ *
+ * Facts arrive one sentence at a time — "interested in a job at Meta" on
+ * Monday, "interested in a job at Palantir" on Thursday — and a memory that
+ * only ever appends ends up with twelve overlapping lines about the same
+ * thing. That costs prompt on every lookup and, worse, reads as a list of
+ * fragments rather than something known: "interested in jobs at Meta and
+ * Palantir" is one fact, and it is the one a friend would have.
+ *
+ * Runs rarely — every third consolidation, or when a subject has collected
+ * enough facts to be worth tidying — so it is a fraction of a call per day.
+ * It may merge and drop restatements; it may never invent, and it must keep
+ * every specific it was given.
+ */
+export async function lightCompact(block: string): Promise<string | null> {
+  const text = block.trim();
+  if (!text) return null;
+  return complete(
+    `You keep someone's long-term memory tidy. You are given what is known about a few subjects, as lists of separate facts.
+
+Merge them. For each subject return the same knowledge in as few facts as it honestly takes:
+- Combine facts about the same thing into one denser fact — "interested in a job at Meta" plus "interested in a job at Palantir" becomes "interested in jobs at Meta and Palantir".
+- Keep every specific: names, numbers, dates, places, amounts, who said what.
+- Drop exact duplicates, and drop a fact that is only a weaker restatement of another.
+- Never invent anything, never generalise away a detail, and never drop something that is still true and specific.
+- Rewrite the summary to one sentence that fits the merged facts.
+
+Return JSON: {"subjects": [{"name": "<exactly as given>", "summary": "...", "facts": ["...", "..."]}]}`,
+    [{ role: 'user', content: text.slice(0, 12_000) }],
+    true,
+    false,
+    false,
+    1500
+  );
+}
+
+/**
  * What is worth remembering in a stretch of someone's life.
  *
  * One call over a batch — a dozen turns, or one finished note — rather than one
