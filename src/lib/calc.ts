@@ -87,7 +87,29 @@ function evaluate(expr: string): number {
  * The exact answer to any arithmetic in a sentence, as a line for the model,
  * or null when there is none.
  */
+/**
+ * Whether this sentence is asking for a sum at all.
+ *
+ * Without this, every sentence went through the parser and the parser is happy
+ * to find arithmetic in things that are not arithmetic: "move my 2 - 3 pm
+ * meeting" came out as -1, "book it for 9/23" as 0.39, "1/2 cup" as 0.5. A
+ * calculation is asked for, in words, or is the whole sentence.
+ */
+const ASKS_FOR_MATHS =
+  /\b(?:what(?:'s| is)|how much is|how many is|calculate|work out|equals?)\b|\bpercent\b|\b%\b|\b(?:times|multiplied by|divided by|plus|minus|squared|cubed|to the power of)\b/i;
+
+/** A date, a time range, a fraction with a unit — numbers that are not a sum. */
+const NOT_A_SUM = [
+  /\b\d{1,2}\s*[-–]\s*\d{1,2}\s*(?:am|pm|o'?clock)\b/i,
+  /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/,
+  /\b\d+\s*\/\s*\d+\s*(?:cup|cups|tsp|tbsp|inch|inches|mile|miles|kg|lb|lbs|litre|liter|split|ratio)\b/i,
+  /\b\d{1,2}[:.]\d{2}\b/,
+];
+
 export function calculate(text: string): string | null {
+  if (!ASKS_FOR_MATHS.test(text)) return null;
+  if (NOT_A_SUM.some((pattern) => pattern.test(text))) return null;
+
   let t = text;
   for (const [pattern, to] of WORDS) t = t.replace(pattern, to);
 

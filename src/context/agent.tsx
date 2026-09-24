@@ -757,7 +757,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // and the answer is guaranteed to follow it.
     if (ability.slow) {
       setCaption('Writing…');
-      if (mine()) utter('Writing it now.');
+      // stillWorking, or the screen drops to Ready two seconds into a write
+      // that runs for a minute — and the mid-turn press guard, which only
+      // covers thinking and working, stops protecting the turn.
+      if (mine()) utter('Writing it now.', false, true);
     }
 
     // Bounded, so a hung ability can never leave a promise unanswered.
@@ -811,7 +814,19 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       // "Send" was right for mail and wrong for everything added since —
       // deleting an event, moving one, ordering food. The instruction has to
       // match the thing being decided, or the press means something else.
-      if (mine()) utter(`${outcome.spoken.replace(/[.!?\s]+$/, '')}. Press once to go ahead, twice to cancel.`);
+      // The twenty-five seconds start when the reading stops, not when it
+      // starts: a long draft read aloud takes most of that window, and the
+      // press that followed was being thrown away as stale.
+      if (mine()) {
+        utter(
+          `${outcome.spoken.replace(/[.!?\s]+$/, '')}. Press once to go ahead, twice to cancel.`,
+          false,
+          false,
+          () => {
+            if (awaitingYes.current) awaitingYes.current.at = Date.now();
+          }
+        );
+      }
       return;
     }
 
@@ -920,7 +935,8 @@ function shortFailure(text: string): string {
    * person to press again — which, wearing glasses with the phone in a pocket,
    * is the moment a conversation stops being hands-free.
    */
-  const utter = useCallback((text: string, listenAfter = false, stillWorking = false) => {
+  const utter = useCallback(
+    (text: string, listenAfter = false, stillWorking = false, afterSpeaking?: () => void) => {
     // Claimed at the moment of speaking, because stopSpeaking() also fires
     // onDone — an interruption and a natural ending are the same callback.
     // Unguarded, barging in went: press, stop the speech, start listening, and
@@ -939,6 +955,7 @@ function shortFailure(text: string): string {
     speak(text, { ...who.delivery, voiceId: who.voiceId ?? who.delivery.voiceId }, {
       onDone: () => {
         trigger.suppressVolumeTriggers();
+        afterSpeaking?.();
         if (!mounted.current) return;
         // A newer press owns the app now; this speech is over and irrelevant.
         if (turn !== turnSeq.current) return;
@@ -993,8 +1010,10 @@ function shortFailure(text: string): string {
       // marked required — it usually comes from memory — so when it did have to
       // ask, nothing was recorded as missing, the answer was routed as a fresh
       // sentence, and Grove asked where you were again. And again.
+      // Never `confirmed` or `draft`: they are filled by the turn, not by the
+      // person, and picking one as the gap makes the question unanswerable.
       const empty = Object.entries(ability.args).filter(
-        ([name]) => !(args[name] ?? '').trim()
+        ([name]) => !(args[name] ?? '').trim() && name !== 'confirmed' && name !== 'draft'
       );
       const gap =
         empty.find(([, spec]) => spec.required === true)?.[0] ?? empty[0]?.[0];
@@ -1379,7 +1398,9 @@ function shortFailure(text: string): string {
     await whenQuiet();
     utter(outcome.ok ? outcome.spoken : shortFailure(outcome.spoken));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    },
+    []
+  );
 
   const press = useCallback(() => {
     // While a note is being taken, the press is how it ends. Nothing else a

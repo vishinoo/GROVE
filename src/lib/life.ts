@@ -141,6 +141,10 @@ export async function loadLife(uid: string): Promise<Life> {
       episodes: Array.isArray(parsed.episodes) ? parsed.episodes : [],
       pending: Array.isArray(parsed.pending) ? parsed.pending : [],
       lastConsolidated: parsed.lastConsolidated,
+      // Dropped here once, which reset the counter on every load and meant
+      // compaction never reached its threshold — the whole tidy-up path was
+      // dead code that type-checked and passed the harness.
+      sinceCompacted: typeof parsed.sinceCompacted === 'number' ? parsed.sinceCompacted : 0,
     };
   } catch {
     // A corrupt archive is a forgetful assistant, not a broken app.

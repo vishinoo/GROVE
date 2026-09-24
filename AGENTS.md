@@ -367,6 +367,38 @@ model, which invents names. Texts are left in your own voice.
   even when they are not in contacts. And a reply with nothing to reply to
   becomes a new email to the person named, through the same read-back and press.
 
+## Bugs that type-checked and passed the harness
+
+A review of the last twenty commits found eight; all are fixed, and each is the
+kind `tsc` and `npm run verify` cannot see:
+
+- **A dropped field killed a whole feature.** `loadLife` rebuilt `Life` without
+  `sinceCompacted`, so the counter reset on every load and compaction never
+  reached its threshold. Rebuilding a type field by field means every new field
+  has to be added twice.
+- **A holding line ended the turn.** The "Writing it now" line for a slow
+  ability omitted `stillWorking`, so the screen dropped to Ready two seconds
+  into a document write and the mid-turn press guard stopped applying.
+- **The confirmation expired while being read.** Twenty-five seconds started
+  when the draft began being spoken, and a long draft takes most of that. The
+  clock now starts when the speech stops.
+- **The maths parser ran on every sentence.** "Move my 2 - 3 pm meeting" became
+  -1, "book it for 9/23" became 0.39. It now needs the sentence to ask for a
+  calculation, and refuses dates, clock times and fractions with units.
+- **A press could send something other than what was approved.** A reply with
+  no thread falls back to a new email; the confirmed re-run searched again,
+  found a message, and sent a threaded reply instead. The decision now travels
+  with the confirmation in `new_email`.
+- **All-day events were read as UTC midnight** and filtered out of today by a
+  two-hour window. Google sends them as a bare date; `localTime()` reads that
+  as local, and all-day entries count for the whole day rather than being
+  announced as "happening now until 18:00".
+- **Gmail quotes display names.** `"Chen, Mark" <…>` failed both person tests
+  in `mail.important`, so a real person's mail scored below the cut.
+- **A From line can be a bare address**, with no angle brackets — which the new
+  inbox-address lookup discarded, producing "I have no address for Mark" for
+  precisely the case it was written for.
+
 ## Failing honestly
 
 - **A thrown error is not "offline" unless it says so.** `failure.ts` sorts

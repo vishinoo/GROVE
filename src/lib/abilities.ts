@@ -826,7 +826,16 @@ const MAIL_SEND: Ability = {
           ...new Map(
             recent
               .filter((m) => isFrom(m.from, asked))
-              .map((m) => [/<([^>]+)>/.exec(m.from)?.[1]?.toLowerCase() ?? '', m.from] as const)
+              // "Mark Chen <mark@x.com>" or a bare "mark@x.com": both are an
+              // address, and keying only on the bracketed form threw the bare
+              // one away — the exact case this lookup was added for.
+              .map(
+                (m) =>
+                  [
+                    (/<([^>]+)>/.exec(m.from)?.[1] ?? /[^\s<>"]+@[^\s<>"]+/.exec(m.from)?.[0] ?? '').toLowerCase(),
+                    m.from,
+                  ] as const
+              )
               .filter(([address]) => address.includes('@'))
           ).entries(),
         ];
@@ -919,7 +928,21 @@ const MAIL_SEND: Ability = {
  * out of Google — because Google events cannot be touched through EventKit and
  * never appear there at all.
  */
-type Dated = { id: string; title: string; start: Date; source: 'google' | 'phone' };
+type Dated = { id: string; title: string; start: Date; allDay: boolean; source: 'google' | 'phone' };
+
+/**
+ * A Google start or end, as a local time.
+ *
+ * An all-day event arrives as "2026-09-23" with no timezone, and `new Date()`
+ * reads that as UTC midnight — which in Edmonton is 6pm the evening before.
+ * Today's all-day events were filtered out of "what's on today" entirely, and
+ * tomorrow's were announced as happening now.
+ */
+function localTime(value: string): Date {
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!dateOnly) return new Date(value);
+  return new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]));
+}
 
 async function readGoogleCalendar(days: number): Promise<Dated[] | null> {
   const events = await google.readCalendar(days);
@@ -928,7 +951,8 @@ async function readGoogleCalendar(days: number): Promise<Dated[] | null> {
     .map((e) => ({
       id: e.id,
       title: e.title,
-      start: new Date(e.start),
+      start: localTime(e.start),
+      allDay: e.allDay,
       source: 'google' as const,
     }))
     .filter((e) => !Number.isNaN(e.start.getTime()))
@@ -1325,6 +1349,12 @@ const MAIL_REPLY: Ability = {
       return { ok: false, spoken: google.explain('sending mail') };
     }
 
+    // Already decided to be a new email before the press: go straight there.
+    // Without this the confirmed run searched again, found something, and sent
+    // a threaded "Re:" reply instead of the new email that was read out and
+    // agreed to — the one case where a press does something it did not say.
+    if (/^yes$/i.test((args.new_email || '').trim())) return asNewEmail(args, body);
+
     const pronoun = /^(?:him|her|them|they|it|that|this|he|she|the sender|that guy|that one)$/i.test(
       (args.to || '').trim()
     );
@@ -1341,7 +1371,7 @@ const MAIL_REPLY: Ability = {
     // here and stopped at "I could not find the message from Priya", which is
     // true and useless. Same draft, same read-back, same press.
     if (found.length === 0 && !pronoun && (args.to || '').trim()) {
-      return MAIL_SEND.run({ to: args.to, body, ...(args.draft ? { draft: args.draft } : {}), ...(args.confirmed ? { confirmed: args.confirmed } : {}) });
+      return asNewEmail(args, body);
     }
     if (found.length === 0) {
       const which = args.about ? ` about ${args.about}` : '';
@@ -1375,9 +1405,7 @@ const MAIL_REPLY: Ability = {
       ? ''
       : asked;
     const target = named ? found.find((m) => isFrom(m.from, named)) : found[0];
-    if (!target) {
-      return MAIL_SEND.run({ to: named, body, ...(args.draft ? { draft: args.draft } : {}), ...(args.confirmed ? { confirmed: args.confirmed } : {}) });
-    }
+    if (!target) return asNewEmail({ ...args, to: named }, body);
 
     // A reply is sent mail, and sent mail is not taken back. mail.send always
     // asked; this did not, which was survivable while a keyword gate stood in
@@ -1416,6 +1444,25 @@ const MAIL_REPLY: Ability = {
  * answered "which one?". A missing ability does not fail cleanly; it gets
  * mistaken for a broken one.
  */
+/**
+ * A reply with nothing to reply to, sent as a new email instead.
+ *
+ * The decision travels with the confirmation (`new_email`), so the press sends
+ * what was read back rather than re-deciding from a fresh search.
+ */
+async function asNewEmail(args: Record<string, string>, body: string): Promise<AbilityResult> {
+  const outcome = await MAIL_SEND.run({
+    to: args.to ?? '',
+    body,
+    ...(args.subject ? { subject: args.subject } : {}),
+    ...(args.draft ? { draft: args.draft } : {}),
+    ...(args.confirmed ? { confirmed: args.confirmed } : {}),
+  });
+  return outcome.confirmArgs
+    ? { ...outcome, confirmArgs: { ...args, ...outcome.confirmArgs, new_email: 'yes' } }
+    : outcome;
+}
+
 const CALENDAR_ADD: Ability = {
   id: 'calendar.add',
   name: 'Add to calendar',
@@ -2318,8 +2365,12 @@ const DAY: Ability = {
     const now = Date.now();
     const endOfDay = new Date();
     endOfDay.setHours(23, 59, 59, 999);
-    const today = (upcoming ?? []).filter(
-      (e) => e.start.getTime() >= now - 30 * 60_000 && e.start.getTime() <= endOfDay.getTime()
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const today = (upcoming ?? []).filter((e) =>
+      e.allDay
+        ? e.start.getTime() >= startOfDay.getTime() && e.start.getTime() <= endOfDay.getTime()
+        : e.start.getTime() >= now - 30 * 60_000 && e.start.getTime() <= endOfDay.getTime()
     );
 
     const parts: string[] = [];
@@ -2330,7 +2381,7 @@ const DAY: Ability = {
       parts.push('Nothing else on today.');
     } else {
       const [first, second] = today;
-      let line = `${today.length} thing${today.length === 1 ? '' : 's'} left today — ${first.title} at ${clockOnly(first.start)}`;
+      let line = `${today.length} thing${today.length === 1 ? '' : 's'} left today — ${first.title}${first.allDay ? ', all day' : ` at ${clockOnly(first.start)}`}`;
       if (second) line += `, then ${second.title}`;
       parts.push(`${line}.`);
     }
@@ -2936,14 +2987,26 @@ const NOW: Ability = {
       loadNotes(CURRENT_UID),
     ]);
 
+    // An all-day event starts at midnight, so the "last two hours" window drops
+    // it for the rest of the day — today's reading week vanished from "what's
+    // on". All-day entries count for the whole day they fall on.
+    const midnight = new Date(now);
+    midnight.setHours(0, 0, 0, 0);
     const soon = (events ?? [])
-      .filter((e) => new Date(e.start).getTime() > now.getTime() - 2 * 3_600_000)
+      .filter((e) =>
+        e.allDay
+          ? localTime(e.start).getTime() >= midnight.getTime()
+          : localTime(e.start).getTime() > now.getTime() - 2 * 3_600_000
+      )
       .slice(0, 6);
-    const on = soon.find(
-      (e) => new Date(e.start).getTime() <= now.getTime() && new Date(e.end || e.start).getTime() > now.getTime()
+    // All-day entries are not "on now until six": they have no clock time, so
+    // they are listed with the day rather than treated as something in progress.
+    const timed = soon.filter((e) => !e.allDay);
+    const on = timed.find(
+      (e) => localTime(e.start).getTime() <= now.getTime() && localTime(e.end || e.start).getTime() > now.getTime()
     );
-    const next = soon.find((e) => new Date(e.start).getTime() > now.getTime());
-    const gap = next ? Math.round((new Date(next.start).getTime() - now.getTime()) / 60000) : null;
+    const next = timed.find((e) => localTime(e.start).getTime() > now.getTime());
+    const gap = next ? Math.round((localTime(next.start).getTime() - now.getTime()) / 60000) : null;
 
     const goals = facts.filter((f) => f.kind === 'goal').map((f) => f.value);
     const owed = facts.filter((f) => f.open).map((f) => f.value);
@@ -2962,11 +3025,18 @@ const NOW: Ability = {
       caught.length
         ? `Captured and not dealt with (${caught.length}):\n${inbox.inboxLines(caught)}`
         : '',
-      on ? `Happening now: ${on.title} until ${new Date(on.end || on.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : 'Nothing on right now.',
+      on ? `Happening now: ${on.title} until ${localTime(on.end || on.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : 'Nothing on right now.',
       next
-        ? `Next: ${next.title} at ${new Date(next.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}${gap !== null ? ` — ${gap} minutes from now` : ''}`
+        ? `Next: ${next.title} at ${localTime(next.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}${gap !== null ? ` — ${gap} minutes from now` : ''}`
         : 'Nothing else in the calendar today or tomorrow.',
-      soon.length ? `Coming up:\n${soon.map((e) => `- ${shortDate(e.start)} ${new Date(e.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}: ${e.title}`).join('\n')}` : '',
+      soon.length
+        ? `Coming up:\n${soon
+            .map(
+              (e) =>
+                `- ${shortDate(e.start)}${e.allDay ? ' (all day)' : ` ${localTime(e.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`}: ${e.title}`
+            )
+            .join('\n')}`
+        : '',
       reminders === null
         ? 'Reminders: no access.'
         : reminders.length
@@ -3026,7 +3096,7 @@ const MAIL_IMPORTANT: Ability = {
 
     const scored = messages
       .map((m) => {
-        const from = m.from.toLowerCase();
+        const from = m.from.replace(/"/g, '').toLowerCase();
         const text = `${m.subject} ${m.snippet}`.toLowerCase();
         let score = 0;
         const why: string[] = [];
@@ -3041,7 +3111,7 @@ const MAIL_IMPORTANT: Ability = {
         // "LinkedIn" does not, which is the whole distinction being drawn.
         if (
           !/@(?:no-?reply|mailer|bounce)/.test(from) &&
-          /^[A-Za-z][\w.'-]*(?:\s+[A-Za-z][\w.'-]*)+\s*</.test(m.from.trim())
+          /^[A-Za-z][\w.,'-]*(?:\s+[A-Za-z][\w.,'-]*)+\s*</.test(m.from.replace(/"/g, '').trim())
         ) {
           score += 2;
           why.push('a person, not a service');

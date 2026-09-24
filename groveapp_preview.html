@@ -324,6 +324,86 @@ section{padding:var(--s8) 0;border-top:1px solid var(--line)}
 .tier .what{color:var(--ink-soft);font-size:15px}
 .tier .cost{font-size:13px;color:var(--muted);text-align:right}
 
+
+/* ------------------------------------------------------- configurator */
+
+/* The one place on the page where colour is the subject rather than the
+   decoration: the drawing takes its fill from whatever swatch is chosen, so
+   picking is the demonstration. */
+.kit{
+  background:var(--card);border-radius:var(--r-xl);
+  box-shadow:0 1px 2px rgba(22,24,29,.04),0 8px 30px rgba(22,24,29,.06);
+  display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);
+  overflow:hidden;
+}
+.kit .stage{
+  background:var(--field);padding:var(--s8) var(--s6);
+  display:grid;place-items:center;gap:var(--s5);
+  --frame:#EFEEEA;--frame-edge:#D9D8D2;--ring:#1E2024;
+}
+.kit .stage svg{width:min(100%,360px);height:auto;display:block}
+.kit .stage .lens{fill:#16181D;opacity:.10}
+.kit .stage .frame{fill:var(--frame);stroke:var(--frame-edge);stroke-width:2}
+.kit .stage .band{fill:var(--ring)}
+.kit .choose{padding:var(--s6);display:flex;flex-direction:column;gap:var(--s5)}
+.kit h3{margin:0;font-size:20px;font-weight:600;letter-spacing:-.022em}
+.kit .note{margin:0;color:var(--ink-soft);font-size:15px;line-height:1.55;max-width:44ch}
+
+.option{display:flex;flex-direction:column;gap:var(--s3)}
+.option .label{font-size:13px;color:var(--muted)}
+.swatches{display:flex;gap:var(--s4);flex-wrap:wrap;margin:0;padding:0;border:0}
+.swatch{
+  background:none;border:0;padding:0;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:6px;
+  font:inherit;font-size:13px;color:var(--ink-soft);
+}
+.swatch .chip{
+  width:34px;height:34px;border-radius:50%;
+  box-shadow:inset 0 0 0 1px rgba(22,24,29,.14);
+  transition:box-shadow .16s ease,transform .16s ease;
+}
+.swatch:hover .chip{transform:translateY(-1px)}
+.swatch[aria-checked="true"] .chip{box-shadow:inset 0 0 0 1px rgba(22,24,29,.14),0 0 0 2px var(--card),0 0 0 4px var(--ink)}
+.swatch[aria-checked="true"]{color:var(--ink);font-weight:600}
+.swatch:focus-visible{outline:2px solid var(--ink);outline-offset:4px;border-radius:var(--r-sm)}
+
+.kit .price{
+  border-top:1px solid var(--line);padding-top:var(--s5);margin-top:auto;
+  display:flex;align-items:baseline;justify-content:space-between;gap:var(--s4);flex-wrap:wrap;
+}
+.kit .price .amount{font-size:28px;font-weight:700;letter-spacing:-.03em}
+.kit .price .chosen{font-size:14px;color:var(--ink-soft)}
+.buy{
+  border:0;border-radius:var(--r-md);background:var(--ink);color:#fff;
+  font:inherit;font-weight:600;font-size:15px;padding:13px var(--s5);cursor:pointer;
+  transition:background-color .18s ease;
+}
+.buy:hover{background:#2A2D34}
+.buy:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+
+/* ---------------------------------------------------------------- plans */
+
+.plans{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s4)}
+.plan{
+  background:var(--card);border-radius:var(--r-lg);padding:var(--s5);
+  display:flex;flex-direction:column;gap:var(--s3);
+  box-shadow:0 1px 2px rgba(22,24,29,.04);
+}
+.plan.picked{box-shadow:0 0 0 1.5px var(--ink),0 8px 30px rgba(22,24,29,.07)}
+.plan .name{font-weight:600;font-size:16px}
+.plan .cost{font-size:26px;font-weight:700;letter-spacing:-.03em;line-height:1.1}
+.plan .cost span{font-size:14px;font-weight:500;color:var(--muted);letter-spacing:0}
+.plan ul{margin:var(--s2) 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:var(--s2)}
+.plan li{font-size:14.5px;color:var(--ink-soft);display:flex;gap:var(--s2);align-items:flex-start}
+.plan li .tickmark{width:14px;height:14px;flex:none;margin-top:3px;color:var(--ink)}
+.plan li.off{color:var(--muted)}
+
+@media (max-width:860px){
+  .kit{grid-template-columns:1fr}
+  .kit .stage{padding:var(--s6) var(--s5)}
+  .plans{grid-template-columns:1fr}
+}
+
 /* ------------------------------------------------------------- footer */
 
 footer{
@@ -400,6 +480,7 @@ footer .built{font-size:12.5px;color:var(--muted)}
   <symbol id="u-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="u-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></symbol>
   <symbol id="u-glasses" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="14" r="3.5"/><circle cx="18.5" cy="14" r="3.5"/><path d="M9 14c0-1.5 1.3-2.5 3-2.5s3 1 3 2.5"/><path d="M2 11l2.5-4h4M22 11l-2.5-4h-4"/></symbol>
+  <symbol id="u-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5.5 5.5L20 6.5"/></symbol>
   <symbol id="u-ring" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="7.5"/></symbol>
   <symbol id="u-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></symbol>
   <symbol id="u-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 4v5h-5"/></symbol>
@@ -922,6 +1003,129 @@ footer .built{font-size:12.5px;color:var(--muted)}
 <section>
 <div class="wrap">
   <div class="section-head">
+    <h2>Choose your pair.</h2>
+    <p>
+      Glasses and ring come in one box. The frame colour is yours; the ring is
+      black unless you would rather it disappeared against a lighter frame.
+    </p>
+  </div>
+
+  <div class="kit">
+    <div class="stage" id="stage">
+      <!-- Front view. The frame takes its fill from the chosen swatch, the
+           ring band from the other — so the choice is shown, not described. -->
+      <svg viewBox="0 0 320 168" role="img" aria-labelledby="kit-alt">
+        <title id="kit-alt">Grove glasses and ring in the colours you have chosen</title>
+        <!-- Temples first, so the fronts sit over where they join. -->
+        <path class="frame" d="M20 52 4 40c-3-2-6 3-3 5l17 13Z"/>
+        <path class="frame" d="M300 52l16-12c3-2 6 3 3 5l-17 13Z"/>
+        <rect class="frame" x="14" y="38" width="132" height="64" rx="22"/>
+        <rect class="lens" x="24" y="47" width="112" height="46" rx="16"/>
+        <rect class="frame" x="174" y="38" width="132" height="64" rx="22"/>
+        <rect class="lens" x="184" y="47" width="112" height="46" rx="16"/>
+        <rect class="frame" x="140" y="54" width="40" height="11" rx="5"/>
+        <!-- The ring, set apart so it reads as the second thing in the box. -->
+        <g transform="translate(138 122)">
+          <circle class="band" cx="22" cy="22" r="21"/>
+          <circle cx="22" cy="22" r="12.5" fill="#F6F7F9"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="choose">
+      <h3>Grove, in a box</h3>
+      <p class="note">
+        The glasses are an ordinary Bluetooth headset, so your phone routes
+        sound to them the moment they pair. The ring is the button.
+      </p>
+
+      <div class="option">
+        <span class="label" id="frame-label">Frame</span>
+        <div class="swatches" role="radiogroup" aria-labelledby="frame-label" id="frames">
+          <button class="swatch" role="radio" aria-checked="true" data-name="Grove white" data-fill="#EFEEEA" data-edge="#D9D8D2">
+            <span class="chip" style="background:#EFEEEA"></span>White
+          </button>
+          <button class="swatch" role="radio" aria-checked="false" data-name="Grove blue" data-fill="#3D5A80" data-edge="#2F4763">
+            <span class="chip" style="background:#3D5A80"></span>Blue
+          </button>
+          <button class="swatch" role="radio" aria-checked="false" data-name="Grove beige" data-fill="#D8C9B2" data-edge="#BFAE93">
+            <span class="chip" style="background:#D8C9B2"></span>Beige
+          </button>
+        </div>
+      </div>
+
+      <div class="option">
+        <span class="label" id="ring-label">Ring</span>
+        <div class="swatches" role="radiogroup" aria-labelledby="ring-label" id="rings">
+          <button class="swatch" role="radio" aria-checked="true" data-name="black ring" data-fill="#1E2024">
+            <span class="chip" style="background:#1E2024"></span>Black
+          </button>
+          <button class="swatch" role="radio" aria-checked="false" data-name="white ring" data-fill="#F0EFEC">
+            <span class="chip" style="background:#F0EFEC"></span>White
+          </button>
+        </div>
+      </div>
+
+      <div class="price">
+        <div>
+          <div class="amount">$79.99</div>
+          <div class="chosen" id="chosen">Grove white, black ring</div>
+        </div>
+        <button class="buy" type="button">Reserve a pair</button>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<section>
+<div class="wrap">
+  <div class="section-head">
+    <h2>What it costs to run.</h2>
+    <p>
+      Talking is cheap; looking things up on the web and writing documents are
+      not. So those are what the plans count, and the free one is a real one.
+    </p>
+  </div>
+
+  <div class="plans">
+    <div class="plan">
+      <span class="name">Free</span>
+      <span class="cost">$0</span>
+      <ul>
+        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>15 turns a day</li>
+        <li class="off">No web search</li>
+        <li class="off">No documents</li>
+        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>Calendar, mail and memory</li>
+      </ul>
+    </div>
+    <div class="plan picked">
+      <span class="name">Plus</span>
+      <span class="cost">$9.99 <span>a month</span></span>
+      <ul>
+        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>50 turns a day</li>
+        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>150 web searches a month</li>
+        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>15 documents a month</li>
+        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>Everything in Free</li>
+      </ul>
+    </div>
+    <div class="plan">
+      <span class="name">Pro</span>
+      <span class="cost">$19.99 <span>a month</span></span>
+      <ul>
+        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>150 turns a day</li>
+        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>500 web searches a month</li>
+        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>60 documents a month</li>
+        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>Research reports with sources</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</section>
+
+<section>
+<div class="wrap">
+  <div class="section-head">
     <h2>What it cannot do.</h2>
     <p>Constraints the product is shaped around, not gaps waiting to be filled.</p>
   </div>
@@ -1009,6 +1213,54 @@ footer .built{font-size:12.5px;color:var(--muted)}
 
   paint();
 })();
+
+(function () {
+  // The configurator. Picking a swatch repaints the drawing, because the point
+  // of choosing a colour is seeing it — and the selection reads back in words
+  // under the price, so the choice is never colour-only.
+  var stage  = document.getElementById('stage');
+  var chosen = document.getElementById('chosen');
+  if (!stage || !chosen) return;
+
+  var picked = { frame: 'Grove white', ring: 'black ring' };
+
+  function select(group, button) {
+    group.querySelectorAll('.swatch').forEach(function (other) {
+      other.setAttribute('aria-checked', String(other === button));
+      other.tabIndex = other === button ? 0 : -1;
+    });
+    if (group.id === 'frames') {
+      stage.style.setProperty('--frame', button.dataset.fill);
+      stage.style.setProperty('--frame-edge', button.dataset.edge);
+      picked.frame = button.dataset.name;
+    } else {
+      stage.style.setProperty('--ring', button.dataset.fill);
+      picked.ring = button.dataset.name;
+    }
+    chosen.textContent = picked.frame + ', ' + picked.ring;
+  }
+
+  ['frames', 'rings'].forEach(function (id) {
+    var group = document.getElementById(id);
+    if (!group) return;
+    var swatches = Array.prototype.slice.call(group.querySelectorAll('.swatch'));
+    swatches.forEach(function (button, index) {
+      button.tabIndex = button.getAttribute('aria-checked') === 'true' ? 0 : -1;
+      button.addEventListener('click', function () { select(group, button); });
+      // Arrow keys move between swatches, which is what a radio group does.
+      button.addEventListener('keydown', function (event) {
+        var step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
+                 : event.key === 'ArrowLeft'  || event.key === 'ArrowUp'   ? -1 : 0;
+        if (!step) return;
+        event.preventDefault();
+        var next = swatches[(index + step + swatches.length) % swatches.length];
+        select(group, next);
+        next.focus();
+      });
+    });
+  });
+})();
+
 </script>
 
 </body>
