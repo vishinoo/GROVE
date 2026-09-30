@@ -172,6 +172,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
   /** Delays the working pulse, so a fast answer never makes a sound at all. */
   const pulseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** When the recogniser last opened, to spot one that dies on the spot. */
+  const openedAt = useRef(0);
+  /** When Grove last made a sound, which is when a phantom press can arrive. */
+  const lastSound = useRef(0);
+  /** So a listen can retry itself without `press` being rebuilt. */
+  const beginListeningRef = useRef<((continuous: boolean, retrying?: boolean) => void) | null>(null);
 
   const setState = useCallback(
     (next: AgentState | ((current: AgentState) => AgentState)) => {
@@ -198,10 +204,18 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    * heard you, and the pulse that follows says so without a third sound.
    */
   const soundFor = (was: AgentState, now: AgentState) => {
+    // Haptics first: they work on every build, and the chimes only exist on one
+    // that has the native half.
+    if ((now === 'listening' || now === 'noting') && was !== 'listening' && was !== 'noting') {
+      buzz('open');
+    } else if ((was === 'listening' || was === 'noting') && (now === 'idle' || now === 'asleep')) {
+      buzz('closed');
+    }
     const remote = remoteModule();
     if (!remote) return;
     // Any sound Grove starts can move the volume on Bluetooth glasses, and the
     // volume fallback would read that as a press. See the ring handler below.
+    lastSound.current = Date.now();
     trigger.suppressVolumeTriggers();
     const busy = (x: AgentState) => x === 'thinking' || x === 'working';
 
@@ -946,6 +960,7 @@ function shortFailure(text: string): string {
     // old reply still under it.
     const turn = turnSeq.current;
     // Speech starting and stopping moves the audio route on glasses too.
+    lastSound.current = Date.now();
     trigger.suppressVolumeTriggers();
     setState('speaking');
     // The voice picked in Settings is saved on the persona, not in `delivery`,
@@ -1270,7 +1285,7 @@ function shortFailure(text: string): string {
   }, []);
 
   const beginListening = useCallback(
-    async (continuous: boolean) => {
+    async (continuous: boolean, retrying = false) => {
       // Re-taking the session is asynchronous, and the state says 'listening'
       // for that whole window — so a second press arrives, stops a recogniser
       // that has not started, and the original start then runs anyway against
@@ -1337,6 +1352,13 @@ function shortFailure(text: string): string {
           },
           onEnd: () => {
             clearSilence();
+            const instant = Date.now() - openedAt.current < 700;
+            if (instant && !retrying && mounted.current && turn === listenSeq.current) {
+              console.log('[grove:listen] ended instantly — one more go');
+              void trigger.setKeepAlive(true).catch(() => undefined);
+              void beginListeningRef.current?.(continuous, true);
+              return;
+            }
             // Unconditional, and not guarded by `mounted`: leaving the silence
             // paused is what would let iOS suspend Grove and kill the ring.
             void trigger.setKeepAlive(true).catch(() => undefined);
@@ -1358,9 +1380,32 @@ function shortFailure(text: string): string {
       console.log('[grove:listen] startListening returned', started);
       if (!started) {
         void trigger.setKeepAlive(true).catch(() => undefined);
+        // One retry, after handing the audio graph back and taking it again.
+        // The recogniser refusing to start is usually the session still being
+        // held by the silence after a spell in the background — and a press
+        // that silently does nothing is why people press twice.
+        if (!retrying) {
+          console.log('[grove:listen] retrying once');
+          try {
+            await trigger.reactivate();
+            await trigger.setKeepAlive(false);
+          } catch {
+            // The retry below is the thing that matters, not this.
+          }
+          if (!mounted.current || turn !== listenSeq.current) return;
+          void beginListeningRef.current?.(continuous, true);
+          return;
+        }
+        buzz('failed');
         setState(restingState());
+        utter("I couldn't open the microphone. Try me again.");
         return;
       }
+
+      // A recogniser that starts and ends within a blink did not really start.
+      // That happens coming back from the background, and the person hears
+      // nothing at all — so it is worth exactly one more go.
+      openedAt.current = Date.now();
 
       // Nothing said at all: close the recogniser rather than leave it holding
       // the microphone with the UI insisting it is listening.
@@ -1371,9 +1416,14 @@ function shortFailure(text: string): string {
         abortListening();
         setState(restingState());
       }, SILENCE_TIMEOUT_MS);
+      // utter is a useCallback with no deps, so it is stable; listing it would
+      // rebuild this and, through `press`, resubscribe the ring on every render.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     },
     [exchange, clearSilence, setState]
   );
+
+  beginListeningRef.current = beginListening;
 
   /**
    * The trigger.
@@ -1397,10 +1447,9 @@ function shortFailure(text: string): string {
     setCaption(outcome.spoken);
     await whenQuiet();
     utter(outcome.ok ? outcome.spoken : shortFailure(outcome.spoken));
+    // setState and utter are both stable (useCallback with no deps).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    },
-    []
-  );
+  }, []);
 
   const press = useCallback(() => {
     // While a note is being taken, the press is how it ends. Nothing else a
@@ -1539,12 +1588,18 @@ function shortFailure(text: string): string {
           // So the answer is protected. A deliberate interruption still works
           // from the screen, from a ring that sends real media keys, or by
           // pressing once Grove starts talking.
+          // Only in the seconds right after a sound Grove made. A press is a
+          // phantom because a chime or speech just moved the volume, not
+          // because Grove happens to be busy — and ignoring every volume press
+          // while thinking or working meant a turn that stalled swallowed real
+          // presses too, leaving the ring dead in a pocket.
           if (
             event.raw === 'volume-down' &&
             !awaitingYes.current &&
+            Date.now() - lastSound.current < 4000 &&
             (stateNow.current === 'thinking' || stateNow.current === 'working')
           ) {
-            console.log('[grove:trigger] volume press ignored mid-turn');
+            console.log('[grove:trigger] volume press ignored — Grove just made a sound');
             break;
           }
           press();
@@ -1580,8 +1635,21 @@ function shortFailure(text: string): string {
     };
     const appSub = AppState.addEventListener('change', onAppState);
 
+    // A quiet heartbeat, because the ring going dead in a pocket is the worst
+    // failure this app has: you press, nothing happens, and there is no screen
+    // to tell you why. Losing the audio session to another app is silent, and
+    // until now only opening Grove took it back. This re-arms only when it has
+    // genuinely been lost, so an armed Grove — or another app's music — is
+    // never disturbed.
+    const heartbeat = setInterval(() => {
+      if (!mounted.current || trigger.isArmed()) return;
+      console.log('[grove:trigger] lost the session — re-arming');
+      void arm();
+    }, 4 * 60_000);
+
     return () => {
       cancelled = true;
+      clearInterval(heartbeat);
       offTrigger();
       offRoute();
       appSub.remove();
@@ -1715,6 +1783,7 @@ function remoteModule(): typeof import('grove-remote') | null {
  * chime on top of that is decoration.
  */
 function doneChime(): void {
+  buzz('done');
   trigger.suppressVolumeTriggers();
   remoteModule()?.chime('done');
 }
@@ -1725,12 +1794,48 @@ function doneChime(): void {
  * Loaded lazily and swallowed on failure for the same reason as everything
  * else native here: this must never be the thing that stops Grove listening.
  */
-function buzz(): void {
+/**
+ * A tap you can feel through a pocket, and a different one per event.
+ *
+ * With the phone pocketed and the glasses on, the screen says nothing and the
+ * chimes only exist on a build that has them. One Light tap for everything was
+ * indistinguishable from the phone's own notifications, so pressing and having
+ * nothing happen felt the same as pressing and being heard — which is why the
+ * habit became pressing twice.
+ *
+ *   press    a press registered
+ *   open     the microphone is actually open — talk now
+ *   closed   it closed without hearing anything
+ *   done     something was changed
+ *   failed   it could not do the thing
+ */
+function buzz(kind: 'press' | 'open' | 'closed' | 'done' | 'failed' = 'press'): void {
   if (!capabilities().haptics) return;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const haptics = require('expo-haptics');
-    void haptics.impactAsync(haptics.ImpactFeedbackStyle.Light);
+    const tap = (style: 'Light' | 'Medium' | 'Heavy') =>
+      haptics.impactAsync(haptics.ImpactFeedbackStyle[style]);
+    if (kind === 'open') {
+      // Two rising taps: the one signal that has to be unmistakable.
+      void tap('Medium');
+      setTimeout(() => void tap('Heavy').catch(() => undefined), 90);
+      return;
+    }
+    if (kind === 'closed') {
+      void tap('Light');
+      setTimeout(() => void tap('Light').catch(() => undefined), 110);
+      return;
+    }
+    if (kind === 'done') {
+      void haptics.notificationAsync(haptics.NotificationFeedbackType.Success);
+      return;
+    }
+    if (kind === 'failed') {
+      void haptics.notificationAsync(haptics.NotificationFeedbackType.Warning);
+      return;
+    }
+    void tap('Light');
   } catch {
     // No haptics is not a failure worth surfacing.
   }

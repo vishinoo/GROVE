@@ -241,6 +241,26 @@ gifts and decisions, and away from plain requests. Tested: "make me a workout
 plan" asks the goal and days; the answer produces the plan without a second
 question.
 
+**A press that does nothing is the worst failure this app has**, because there
+is no screen to explain it, and the habit it teaches is pressing twice. Three
+paths used to end in silence and all three now recover:
+
+- The recogniser refusing to start returned quietly to Ready. It now hands the
+  audio graph back, takes it again and tries once more; only then does it say
+  it could not open the microphone.
+- A recogniser that starts and ends within 700ms never really started — the
+  usual shape coming back from the background — and gets exactly one more go.
+- The session can be lost silently to another app, and only opening Grove took
+  it back. A four-minute heartbeat re-arms, but only when `isArmed()` says it
+  has genuinely been lost, so an armed Grove and another app's music are never
+  disturbed.
+
+**Haptics say which thing happened**, because the chimes only exist on a build
+that has them and a pocket has no screen: two rising taps when the microphone
+actually opens, two light taps when it closes having heard nothing, a success
+tap when something was changed, a warning tap when it could not. One Light tap
+for everything was indistinguishable from the phone's own notifications.
+
 **Grove's own sounds must never press the ring.** The J09 works through the
 volume fallback, and any sound Grove starts — a chime, the working pulse, speech
 starting or stopping — can move the volume on Bluetooth glasses, which the
@@ -406,6 +426,13 @@ kind `tsc` and `npm run verify` cannot see:
   abort with a DOMException that is not always an `Error`, and
   `AbortSignal.timeout` names it TimeoutError — so the old test announced every
   slow answer as "I have no connection right now", on full signal.
+- **Nothing is one-shot any more.** A Google call is retried once on a timeout,
+  a dropped connection, a 429 or a 5xx — and never on a 401, 403 or bad
+  request, where the second attempt only doubles the wait before the same
+  honest answer. The weather retries each of its two calls, caches coordinates
+  (places do not move), and falls back to the last reading within half an hour
+  rather than saying it cannot reach anything. The model is told to try twice
+  too: a different argument or a different tool before giving up.
 - **The tool turn is retried once** on timeout, network, 429 or 5xx, then falls
   back to a plain answer with the conversation and search (`lightFallback`),
   which is told to answer public questions and to say plainly when it could not

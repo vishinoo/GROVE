@@ -132,7 +132,27 @@ export function explain(what = 'that'): string {
   }
 }
 
+/**
+ * A Google call, tried twice when the first failure was worth retrying.
+ *
+ * One shot was the whole complaint: a blip on the way out of a pocket meant
+ * "I can't reach your calendar", and asking again a second later worked. A
+ * timeout, a dropped connection, a 429 or a 5xx is gone by the next attempt; a
+ * 401, a 403 or a bad request is not, and retrying those only doubles the wait
+ * before the same honest answer.
+ */
 async function call<T>(
+  url: string,
+  init: { method?: string; body?: unknown; timeoutMs?: number } = {}
+): Promise<T | null> {
+  const first = await callOnce<T>(url, init);
+  if (first !== null) return first;
+  if (!['timeout', 'offline', 'rate-limited', 'server'].includes(lastReason)) return null;
+  await new Promise((done) => setTimeout(done, lastReason === 'rate-limited' ? 1200 : 400));
+  return callOnce<T>(url, init);
+}
+
+async function callOnce<T>(
   url: string,
   init: { method?: string; body?: unknown; timeoutMs?: number } = {}
 ): Promise<T | null> {

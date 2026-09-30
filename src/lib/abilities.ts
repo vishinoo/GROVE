@@ -2071,6 +2071,33 @@ const MUSIC_RECENT: Ability = {
  * "what's the weather" resolves without asking. When it cannot be resolved,
  * Grove asks rather than guessing a city.
  */
+/**
+ * Somewhere's coordinates, remembered.
+ *
+ * The geocoder is a second network call before a word of weather is written,
+ * and on a phone leaving a pocket it is the one that blips — which came out as
+ * "I can't reach the weather" for a town Grove has looked up fifty times.
+ * Places do not move.
+ */
+const placeCache = new Map<string, { latitude: number; longitude: number; name: string }>();
+
+/** The last answer, so a blip repeats yesterday's minute rather than failing. */
+let lastWeather: { at: number; place: string; spoken: string; detail: string } | null = null;
+
+/** A fetch that gets a second go at a network that dropped the first. */
+async function fetchTwice(url: string, timeoutMs = 8000): Promise<Response | null> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+      if (response.ok) return response;
+    } catch {
+      // Falls through to the retry, then to null.
+    }
+    if (attempt === 0) await new Promise((done) => setTimeout(done, 400));
+  }
+  return null;
+}
+
 const WEATHER: Ability = {
   id: 'weather.now',
   name: 'Weather',
@@ -2101,20 +2128,41 @@ const WEATHER: Ability = {
     try {
       // Bounded even though runAbility bounds the whole run: failing at 8
       // seconds with a usable sentence beats failing at 20 with a generic one.
-      const geo = await fetch(
-        'https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name=' +
-          encodeURIComponent(place),
-        { signal: AbortSignal.timeout(8000) }
-      );
-      const found = (await geo.json())?.results?.[0];
-      if (!found) return { ok: false, spoken: `I could not find ${place}.` };
+      let found = placeCache.get(place.toLowerCase());
+      if (!found) {
+        const geo = await fetchTwice(
+          'https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name=' +
+            encodeURIComponent(place)
+        );
+        const hit = geo ? (await geo.json())?.results?.[0] : null;
+        if (!hit) {
+          // A geocoder that will not answer is not the same as a town that
+          // does not exist, and saying the second when it is the first sends
+          // someone looking for a typo in a place they have used for months.
+          return geo
+            ? { ok: false, spoken: `I could not find ${place}.` }
+            : { ok: false, spoken: 'The weather service is not answering. Try me again in a moment.' };
+        }
+        found = { latitude: hit.latitude, longitude: hit.longitude, name: hit.name };
+        placeCache.set(place.toLowerCase(), found);
+      }
 
       const url =
         `https://api.open-meteo.com/v1/forecast?latitude=${found.latitude}` +
         `&longitude=${found.longitude}&current=temperature_2m,weather_code` +
         '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max' +
         '&forecast_days=1&timezone=auto';
-      const data = await (await fetch(url, { signal: AbortSignal.timeout(8000) })).json();
+      const response = await fetchTwice(url);
+      if (!response) {
+        // Ten minutes old and honest about it beats nothing at all: the
+        // temperature outside has not moved much, and the alternative is the
+        // answer people were getting, which was no answer.
+        if (lastWeather && Date.now() - lastWeather.at < 30 * 60_000 && lastWeather.place === place) {
+          return { ok: true, spoken: `${lastWeather.spoken} (from a few minutes ago)`, detail: lastWeather.detail };
+        }
+        return { ok: false, spoken: 'The weather service is not answering. Try me again in a moment.' };
+      }
+      const data = await response.json();
 
       // Kept only once the geocoder has confirmed it is a real place, so a
       // misheard word never becomes where Grove thinks you live. This is what
@@ -2136,13 +2184,16 @@ const WEATHER: Ability = {
       // Written to be heard: the number, the sky, and the one thing you would
       // actually change your mind about on the way out of the door.
       const coat = rain >= 50 ? ' Take a coat.' : rain >= 25 ? ' Might catch a shower.' : '';
-      return {
-        ok: true,
-        spoken: `${now} degrees and ${sky} in ${found.name}, up to ${high}.${coat}`,
-        detail: `${rain}% chance of rain`,
-      };
+      const spoken = `${now} degrees and ${sky} in ${found.name}, up to ${high}.${coat}`;
+      const detail = `${rain}% chance of rain`;
+      lastWeather = { at: Date.now(), place, spoken, detail };
+      return { ok: true, spoken, detail };
     } catch {
-      return { ok: false, spoken: 'Could not reach the weather just then.' };
+      // Same reasoning as the fetch above: a recent answer beats none.
+      if (lastWeather && Date.now() - lastWeather.at < 30 * 60_000 && lastWeather.place === place) {
+        return { ok: true, spoken: `${lastWeather.spoken} (from a few minutes ago)`, detail: lastWeather.detail };
+      }
+      return { ok: false, spoken: 'Could not reach the weather just then. Ask me again.' };
     }
   },
 };
