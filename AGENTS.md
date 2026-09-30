@@ -593,6 +593,19 @@ misheard word.
 
 ## Checks
 
+Two kinds, and the difference matters. `npm run verify` and the live harness
+run on a laptop, where Gmail, Calendar, Drive and Contacts are stubbed —
+because the token that reaches them only ever exists in the Keychain on the
+phone. Anything those say about Google is a statement about our code, not about
+the account.
+
+So the account is tested on the phone: **Settings → Does it all work?** runs
+`selfCheck.ts` against the real connections and reports each one. Reads only —
+a self-check that sends an email to prove it can send email is one nobody dares
+run twice — and permission to write is tested by asking what the sign-in was
+granted rather than by using it. Failures name the API and carry Google's own
+activation link.
+
 ```bash
 npm run verify      # does Grove actually reach its own abilities?
 ```

@@ -1416,10 +1416,10 @@ function shortFailure(text: string): string {
         abortListening();
         setState(restingState());
       }, SILENCE_TIMEOUT_MS);
-      // utter is a useCallback with no deps, so it is stable; listing it would
-      // rebuild this and, through `press`, resubscribe the ring on every render.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     },
+    // utter is a useCallback with no deps, so it is stable; listing it would
+    // rebuild this and, through `press`, resubscribe the ring on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [exchange, clearSilence, setState]
   );
 

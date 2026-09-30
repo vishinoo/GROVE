@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, Switch, Text, TextInput, View } from 'react-native';
+import { Linking, Pressable, Switch, Text, TextInput, View } from 'react-native';
 
 import * as Updates from 'expo-updates';
 
@@ -31,6 +31,7 @@ import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
+import { runSelfCheck, type CheckResult } from '@/lib/selfCheck';
 import { CARES_LIMIT, MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona, type Preset } from '@/lib/persona';
 import { hasOwnKey, setOwnKey } from '@/lib/lightModel';
 import { availableVoices, bestVoiceId, characterVoice, hasEnhancedVoice, speak } from '@/lib/speak';
@@ -375,6 +376,16 @@ export default function Settings() {
       </Section>
 
       {/* --------------------------------------------------------- hardware */}
+
+      <Section label="Does it all work?">
+        <Card>
+          <Text style={[Type.bodySm, { color: palette.muted }]}>
+            Runs every connection against your real account — reading only, nothing sent or
+            created — and says which one is broken.
+          </Text>
+          <SelfCheck />
+        </Card>
+      </Section>
 
       <Section label="Hardware">
         <Card style={{ paddingVertical: 2 }}>
@@ -801,6 +812,75 @@ function StartAgain() {
  * can press each button, read this, and know for certain whether their hardware
  * works and which gesture does what.
  */
+/**
+ * "Does any of this actually work?"
+ *
+ * The answer used to be "try it and see", one feature at a time, out loud, in
+ * public. This runs every integration against the real account and says which
+ * one is broken and what to do about it — including the link when a Google API
+ * is simply switched off.
+ */
+function SelfCheck() {
+  const palette = usePalette();
+  const [results, setResults] = useState<CheckResult[]>([]);
+  const [running, setRunning] = useState(false);
+
+  const run = async () => {
+    setResults([]);
+    setRunning(true);
+    await runSelfCheck((result) => setResults((all) => [...all, result]));
+    setRunning(false);
+  };
+
+  const failed = results.filter((r) => !r.ok).length;
+
+  return (
+    <View style={{ marginTop: 10 }}>
+      <Button
+        label={running ? 'Checking…' : results.length > 0 ? 'Check again' : 'Check everything'}
+        tone="quiet"
+        onPress={() => void run()}
+      />
+
+      {results.map((result) => (
+        <View key={result.name} style={{ flexDirection: 'row', gap: 10, paddingVertical: 8 }}>
+          <Icon
+            name={result.ok ? 'check' : 'alert'}
+            size={14}
+            color={result.ok ? palette.ink : palette.alert}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={[Type.body, { color: palette.ink }]}>{result.name}</Text>
+            <Text style={[Type.bodySm, { color: result.ok ? palette.muted : palette.inkSoft, marginTop: 2 }]}>
+              {result.detail}
+            </Text>
+            {result.link ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Switch on the API for ${result.name}`}
+                onPress={() => void Linking.openURL(result.link as string)}
+                style={({ pressed }) => ({ paddingVertical: 6, opacity: pressed ? 0.6 : 1 })}
+              >
+                <Text style={[Type.bodySm, { color: palette.ink, textDecorationLine: 'underline' }]}>
+                  Switch it on in Google Cloud
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      ))}
+
+      {!running && results.length > 0 ? (
+        <Text style={[Type.bodySm, { color: palette.muted, marginTop: 8 }]}>
+          {failed === 0
+            ? 'Everything answered.'
+            : `${failed} of ${results.length} need attention.`}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 function Diagnostics() {
   const palette = usePalette();
   const [signals, setSignals] = useState(() => trigger.recentSignals());
