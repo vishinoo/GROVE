@@ -280,6 +280,69 @@ their answer is the signal. The pulse is delayed so a fast turn makes no sound
 at all. The JS side probes for the native functions, so an update reaching an
 older binary is silent rather than broken.
 
+## Speaking first
+
+Everything else in Grove waits to be asked. `src/lib/attention.ts` is the part
+that speaks unprompted, which makes it the part most likely to get the app
+switched off, so the rule is not "what could Grove say" but **"what would a
+person regret not being told"**. That is a short list: you need to leave now,
+the thing you are about to walk into starts in minutes, something you said you
+would do today is late. A pleasant fact, or a summary of your day, is not on it
+and is left for when you ask.
+
+Rules, not a model. It runs every ninety seconds all day; a model call per check
+would cost more than the rest of the app together and be wrong in a more
+interesting way. Each moment carries a **stable id** so a warning is said once
+and not once a minute, and a journey gets two — a nudge while there is still
+time to act, and a "go now" when there is not.
+
+Both this and the Talk screen's card run on timers, and asked straight through
+they would make a calendar request and a route lookup every minute for as long
+as Grove is open. The diary is held for two and a half minutes and a route for
+five, which are shorter than either can meaningfully change.
+
+`src/lib/reveal.ts` is the first week: one discovery a day, each about the
+person's own life — the names from their intro, a promise they have not closed,
+a thought that has sat in the list, the thing that has come up most this week.
+**None of these lines is about what Grove can do.** A feature tour read into
+someone's ear by the thing they are paying for is worse than silence, which is
+why the harness asserts every line interpolates something of theirs. Each needs
+its evidence to exist or the day passes quietly; one a day, once ever, nothing
+after the first week and a bit.
+
+**Nothing unprompted opens the microphone**, even the lines that end in a
+question. Grove started it, the phone is in a pocket, and a mic that hears
+nothing closes with a second sound. Urgency always wins over a discovery: being
+told what you talk about most while you should be leaving the house is the wrong
+order.
+
+## The first run teaches it about you
+
+`src/app/onboarding.tsx` has one step that is not setup: a box asking who is in
+your life and what you are working on. Typed, not spoken, and this is the one
+place in the app where that is the right way round — it is a paragraph, it is
+full of proper nouns a recogniser has never heard, and people edit themselves
+when they write.
+
+`rememberIntro` sends it to **two places in two parallel calls**, because asking
+for both at once got neither right: the people, projects and places into
+`life.ts`, which is searched, and what is true about the person into `memory.ts`,
+which is in every prompt — split into facts and goals, because "wants a summer
+internship" and "studying finance at UAlberta" are not the same kind of sentence
+and a model that cannot tell them apart congratulates you on things you have not
+done.
+
+The read starts when they move on, and the two steps after it are hardware, so
+by the last screen it has long finished and that screen shows their own names
+back to them.
+
+**The person is not a person in their own life.** Told not to file them as an
+entity, the model did it anyway from a first-person intro, which put
+"Vishnu (self)" at the head of a roster of the people in Vishnu's life. So
+`absorb` drops any entity whose relation says it is the user *and refuses that
+name for the rest of the pass* — skipping only the entity meant the name arrived
+again from an episode's `about` list and was minted as a bare topic.
+
 ## Capture, don't switch
 
 `src/lib/inbox.ts` is a flat list of raw thoughts, written the instant they are
