@@ -39,13 +39,14 @@ import { when as transcriptWhen } from '@/lib/transcript';
 
 export default function Sparks() {
   const palette = usePalette();
-  const { captures, tickOff, dropCapture, focus, endFocus, sparks, setSparkEnabled, editSpark, deleteSpark, facts, editFact, forgetFact, forgetEverything, notes, forgetNote, life, forgetEntity, forgetEpisode, persona, updatePersona } =
+  const { captures, tickOff, dropCapture, focus, endFocus, sparks, setSparkEnabled, editSpark, deleteSpark, facts, editFact, forgetFact, forgetEverything, notes, forgetNote, life, forgetEntity, forgetEpisode, struggles, gotStruggle, forgetStruggle, persona, updatePersona } =
     useAgent();
   const waiting = openCaptures(captures);
   // Goals and facts are shown apart because they are read differently: a goal
   // is something you check on, a fact is something you correct.
   const goals = facts.filter((f) => f.kind === 'goal');
   const plain = facts.filter((f) => f.kind !== 'goal');
+  const stuck = struggles.filter((x) => !x.gotItAt);
 
 
   return (
@@ -193,6 +194,54 @@ export default function Sparks() {
           ))
         )}
       </Section>
+
+      {/*
+        The one list here that is about something you cannot do yet, which is
+        why it is shown at all: a gap you can see is a gap you can close, and
+        the count beside each one is the part no other app can tell you.
+        Hidden when empty, like the inbox — a tutor with nothing to teach does
+        not need a panel.
+      */}
+      {stuck.length > 0 ? (
+        <Section label="Not clicking yet">
+          {stuck.slice(0, 20).map((item) => (
+            <Card key={item.id} style={{ marginBottom: 6 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`I understand ${item.what} now`}
+                  onPress={() => void gotStruggle(item.id)}
+                  hitSlop={8}
+                  style={({ pressed }) => ({ paddingTop: 1, opacity: pressed ? 0.5 : 1 })}
+                >
+                  <Icon name="check" size={15} color={palette.muted} />
+                </Pressable>
+                <View style={{ flex: 1 }}>
+                  <Text style={[Type.body, { color: palette.ink }]}>{item.what}</Text>
+                  <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
+                    {item.about ? `${item.about} · ` : ''}
+                    {item.raised === 1 ? 'once' : `${item.raised} times`}
+                    {item.right > 0 ? ' · one right answer so far' : ''}
+                  </Text>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete ${item.what}`}
+                  onPress={() => void forgetStruggle(item.id)}
+                  hitSlop={8}
+                  style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+                >
+                  <Text style={[Type.bodySm, { color: palette.alert }]}>Delete</Text>
+                </Pressable>
+              </View>
+            </Card>
+          ))}
+          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 6 }]}>
+            Say &ldquo;quiz me&rdquo; and these are the questions. Two right answers in a row and
+            one comes off the list.
+          </Text>
+        </Section>
+      ) : null}
 
       {/*
         Notes above memory, because they are what you made on purpose. Memory is

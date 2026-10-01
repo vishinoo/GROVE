@@ -40,6 +40,7 @@ import {
 import { asPromptBlock, factFrom } from './memory';
 import { lately, loadLife, whoIsWho } from './life';
 import { rhythmLines, rhythms } from './rhythms';
+import { loadQuiz, quizDirective } from './struggles';
 import { loadFocus, loadInbox, open as openCaptures, remaining } from './inbox';
 import { calculate } from './calc';
 import { abilitiesFor, modeById } from './modes';
@@ -339,7 +340,7 @@ export async function askWithTools(
   // A line of names, not the archive: enough that "my cofounder" and "Jason"
   // are the same person without a lookup, and cheap enough to ride on every
   // turn. Everything else about them is a tool call away.
-  const [roster, session, waiting, usual] = await Promise.all([
+  const [roster, session, waiting, usual, quiz] = await Promise.all([
     loadLife(currentAccount())
       .then((l) => [whoIsWho(l), lately(l)].filter(Boolean).join('\n'))
       .catch(() => ''),
@@ -354,6 +355,7 @@ export async function askWithTools(
     rhythms(currentAccount())
       .then((r) => rhythmLines(r))
       .catch(() => ''),
+    loadQuiz(currentAccount()).catch(() => null),
   ]);
   const list =
     waiting.length > 0
@@ -366,7 +368,12 @@ export async function askWithTools(
   const focusing = session
     ? `They are in a focus session on ${session.what}${remaining(session) ? ` — ${remaining(session)}` : ''}. Anything that is not that: capture it and point them back in one short line, and do not expand on it. Answer anything that IS about ${session.what} properly. If they ask what they should be doing, the answer is ${session.what}.`
     : '';
-  const system = [systemFor(context, available), roster, usual, list, focusing]
+  // A quiz in progress rewrites what a good reply is more completely than
+  // anything else here: their next sentence is an answer to a question, not a
+  // request, and routing it as a request is how "the chain rule" became a web
+  // search. So it goes last, where it has the most say.
+  const quizzing = quiz ? quizDirective(quiz) : '';
+  const system = [systemFor(context, available), roster, usual, list, focusing, quizzing]
     .filter(Boolean)
     .join('\n\n');
   const fact = factFrom(userText) ?? undefined;

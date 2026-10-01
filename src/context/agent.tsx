@@ -58,6 +58,7 @@ import * as life from '@/lib/life';
 import { whatMatters, nextUp, type Attention, type NextUp } from '@/lib/attention';
 import { nextDiscovery } from '@/lib/reveal';
 import { learnWeek, noteTurn } from '@/lib/rhythms';
+import * as struggles from '@/lib/struggles';
 import { afterTurn, consolidateNow, rememberNote } from '@/lib/consolidate';
 import * as notesStore from '@/lib/notes';
 import * as inbox from '@/lib/inbox';
@@ -145,6 +146,12 @@ type AgentValue = {
   /** The next thing in the day, and when to leave for it. Shown, never spoken. */
   next: NextUp;
 
+  /** Things they said they did not understand, hardest first. */
+  struggles: struggles.Struggle[];
+  /** Tick one off by hand, when a quiz is not how they found out. */
+  gotStruggle: (id: string) => Promise<void>;
+  forgetStruggle: (id: string) => Promise<void>;
+
   /** The trigger, however it was pressed — ring, screen or keyboard. */
   press: () => void;
   /** Skip the microphone entirely. Used by the typed fallback. */
@@ -185,6 +192,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   /** What has already been volunteered, so nothing is said twice. */
   const attention = useRef<Attention>({ said: new Set<string>() });
   const [next, setNext] = useState<NextUp>(null);
+  const [stuck, setStuck] = useState<struggles.Struggle[]>([]);
   /** So a listen can retry itself without `press` being rebuilt. */
   const beginListeningRef = useRef<((continuous: boolean, retrying?: boolean) => void) | null>(null);
 
@@ -490,6 +498,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // What their week normally looks like. Held for a day inside rhythms.ts, so
     // this is a network call on the first open of the day and free after that.
     void learnWeek(uid);
+    void struggles.loadStruggles(uid).then((list) => {
+      if (mounted.current) setStuck(list);
+    });
     // catchUp is declared below and is stable (useCallback with no deps), so
     // naming it here would be a forward reference for no benefit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -667,7 +678,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       rememberQuestion(waiting.ability, filled, answered);
       await whenQuiet();
       if (mine()) {
-        utter(answered.ok ? answered.spoken : shortFailure(answered.spoken), pending.current !== null);
+        utter(
+          answered.ok ? answered.spoken : shortFailure(answered.spoken),
+          pending.current !== null || answered.listenAfter === true
+        );
       }
       return;
     }
@@ -871,6 +885,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     if (outcome.ok && (ability.id.startsWith('focus.') || ability.id === 'inbox.add')) {
       void inbox.loadFocus(account).then((f) => mounted.current && setFocus(f));
     }
+    if (outcome.ok && ability.id.startsWith('study.')) {
+      void struggles.loadStruggles(account).then((list) => mounted.current && setStuck(list));
+    }
 
     const heard = outcome.ok ? outcome.spoken : shortFailure(outcome.spoken);
 
@@ -878,7 +895,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // out — you have already moved on and asked something else.
     // An ability that asked for a missing detail — "what's your home address?"
     // — is waiting on the answer, so the microphone opens for it.
-    if (mine()) utter(heard, pending.current !== null);
+    if (mine()) utter(heard, pending.current !== null || outcome.listenAfter === true);
 
     // The song starts when the sentence ends. Anything else means a few seconds
     // of music, an interruption, and a track that has lost its opening.
@@ -1339,6 +1356,14 @@ function shortFailure(text: string): string {
 
   const forgetEpisode = useCallback(async (id: string) => {
     setLifeMemory(await life.updateLife(live.current.uid, (now) => life.forgetEpisode(now, id)));
+  }, []);
+
+  const gotStruggle = useCallback(async (id: string) => {
+    setStuck(await struggles.gotIt(live.current.uid, id));
+  }, []);
+
+  const forgetStruggle = useCallback(async (id: string) => {
+    setStuck(await struggles.forget(live.current.uid, id));
   }, []);
 
   const forgetNote = useCallback(async (id: string) => {
@@ -1806,6 +1831,9 @@ function shortFailure(text: string): string {
       focus,
       endFocus,
       next,
+      struggles: stuck,
+      gotStruggle,
+      forgetStruggle,
       life: lifeMemory,
       forgetEntity,
       forgetEpisode,
@@ -1843,6 +1871,9 @@ function shortFailure(text: string): string {
       focus,
       endFocus,
       next,
+      stuck,
+      gotStruggle,
+      forgetStruggle,
       lifeMemory,
       forgetEntity,
       forgetEpisode,

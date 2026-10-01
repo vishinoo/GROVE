@@ -184,7 +184,7 @@ const BARE_YES =
  * Address forms are allowed in front of it, because people say "please" and
  * "hey Grove" and mean the imperative that follows.
  */
-const VERBS = String.raw`make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up|play|read|brief|tell me about|email|text|message|call|switch to|switch into|go into|turn on|turn off|open|handle|push|reschedule|delay|shift|dim|start|stop|queue|skip|pause|resume|let .{2,20} know|give me|reply|respond|answer|forward|let'?s go|take me|drive me|directions|navigate|which way|delete|remove|take|summari[sz]e|catch me up|recap|digest|remember|note|jot|keep in mind|don'?t let me forget|tick|mark|ring|dial|complete|finished|get me|order|uber|book me|share|capture|focus(?: on)?|jot`;
+const VERBS = String.raw`make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up|play|read|brief|tell me about|email|text|message|call|switch to|switch into|go into|turn on|turn off|open|handle|push|reschedule|delay|shift|dim|start|stop|queue|skip|pause|resume|let .{2,20} know|give me|reply|respond|answer|forward|let'?s go|take me|drive me|directions|navigate|which way|delete|remove|take|summari[sz]e|catch me up|recap|digest|remember|note|jot|keep in mind|don'?t let me forget|tick|mark|ring|dial|complete|finished|get me|order|uber|book me|share|capture|focus(?: on)?|jot|quiz|test|forget`;
 
 /** "hey Grove, please …" — anything that can precede an instruction. */
 /**
@@ -246,6 +246,30 @@ const NAV_COMMAND = new RegExp(
  */
 const ORDER_COMMAND = new RegExp(
   `^\\s*${ADDRESS}(?:i(?:'d| would)? (?:want|need|like) to |i'?m going to )(?:order|get)\\s+\\S`,
+  'i'
+);
+
+/**
+ * Saying you did not understand something.
+ *
+ * Shaped like ordinary conversation rather than like an instruction, which is
+ * why it needs its own gate: "I don't get integration by parts" leads with
+ * "I", carries no verb the imperative test knows, and is the single most
+ * important sentence in the whole study feature. Without this it reached
+ * nothing, and Grove explained the concept again and wrote nothing down —
+ * which is exactly the version of an AI tutor that is worth nothing.
+ *
+ * The last branch is the opposite statement, because "I actually get beta now"
+ * has to be able to close one. A false positive here costs a question on a
+ * quiz, which is also what a true positive costs.
+ */
+const STRUGGLE_STATEMENT = new RegExp(
+  `^\\s*${ADDRESS}(?:` +
+    String.raw`i (?:don'?t|do not|didn'?t|did not|cannot|can'?t|still don'?t) (?:understand|get|follow|grasp|see)\b` +
+    String.raw`|i'?m (?:confused|lost|stuck|not following)\b` +
+    String.raw`|(?:this|that|it|none of (?:this|it)) (?:still )?(?:isn'?t|is not|doesn'?t|does not|never) (?:click|clicking|clicks|mak(?:e|ing) sense|land|landing)\b` +
+    String.raw`|i (?:actually |finally |think i )?(?:get|understand|follow) \S.{0,40}\bnow\b` +
+    ')',
   'i'
 );
 
@@ -343,6 +367,9 @@ export function detectActIntent(text: string): boolean {
   if (!t) return false;
   if (FOCUS_SESSION.test(t)) return true;
   if (TODO_STATEMENT.test(t)) return true;
+  // "I don't get this" is a request to write it down, however little it looks
+  // like one. See STRUGGLE_STATEMENT.
+  if (STRUGGLE_STATEMENT.test(t)) return true;
   // A bare go-ahead beats the question test, because it is the whole sentence.
   if (BARE_GO_AHEAD.test(t) || BARE_YES.test(t)) return true;
   // "Study mode." "Back to normal." No verb anywhere, and unmistakably an
