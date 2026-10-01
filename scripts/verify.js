@@ -505,6 +505,63 @@ section('Nothing speaks first without having earned it');
   );
 }
 
+/*
+ * 13. The memory stays sealed.
+ *
+ * A source check, because the failure is an import: swap vault.ts back for
+ * AsyncStorage in any one of these and that store silently returns to plain
+ * text in a SQLite file, with nothing anywhere to say so. It type-checks, it
+ * passes every other check here, and the only visible symptom is a sentence in
+ * Settings quietly becoming untrue.
+ */
+section('Everything about someone\'s life is stored sealed');
+{
+  const SEALED = [
+    'life',       // people, episodes, and the verbatim buffer
+    'memory',     // the facts in every prompt
+    'inbox',      // thoughts caught on the way past
+    'notes',      // dictated at length, on purpose
+    'struggles',  // what they could not do
+    'money',      // what they have and what they spent
+    'transcript', // the last fifteen exchanges
+    'docs',
+    'rhythms',
+    'reveal',
+  ];
+  for (const name of SEALED) {
+    const source = fs.readFileSync(path.join(ROOT, `src/lib/${name}.ts`), 'utf8');
+    check(
+      /from '\.\/vault'/.test(source),
+      `${name}.ts stores through the vault`,
+      'this store holds part of someone\'s life and must not reach AsyncStorage directly'
+    );
+    check(
+      !/async-storage/.test(source),
+      `${name}.ts never touches AsyncStorage directly`,
+      'one import away from writing it all in plain text again'
+    );
+  }
+
+  // The flags on the key are the whole reason this is worth doing: without
+  // them the key rides a backup to another phone alongside the data.
+  const vaultSource = fs.readFileSync(path.join(ROOT, 'src/lib/vault.ts'), 'utf8');
+  check(
+    /WHEN_UNLOCKED_THIS_DEVICE_ONLY/.test(vaultSource),
+    'the key never leaves this device or rides a backup'
+  );
+  check(
+    /startsWith\(TAG\)/.test(vaultSource),
+    'a store written before this existed is still readable'
+  );
+
+  // Start again has to mean it. It cleared three stores and left five.
+  const agent = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
+  const wipe = agent.slice(agent.indexOf('const startAgain'), agent.indexOf('const forgetFact'));
+  for (const gone of ['forgetAllLife', 'forgetAllNotes', 'forgetAllCaptures', 'forgetAllStruggles', 'forgetAllMoney']) {
+    check(wipe.includes(gone), `starting again clears ${gone.replace('forgetAll', '').toLowerCase()}`);
+  }
+}
+
 /* ------------------------------------------------------------- verdict */
 
 console.log(

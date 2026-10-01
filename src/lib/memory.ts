@@ -20,7 +20,7 @@
  *   Nothing is inferred silently and stored where you cannot see it.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { vault } from './vault';
 
 export type Fact = {
   id: string;
@@ -88,7 +88,7 @@ function storageKey(uid: string): string {
 
 export async function loadFacts(uid: string): Promise<Fact[]> {
   try {
-    const raw = await AsyncStorage.getItem(storageKey(uid));
+    const raw = await vault.getItem(storageKey(uid));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Fact[];
     if (!Array.isArray(parsed)) return [];
@@ -102,7 +102,7 @@ export async function loadFacts(uid: string): Promise<Fact[]> {
 
 async function write(uid: string, facts: Fact[]): Promise<void> {
   try {
-    await AsyncStorage.setItem(storageKey(uid), JSON.stringify(facts));
+    await vault.setItem(storageKey(uid), JSON.stringify(facts));
   } catch {
     // Losing one fact costs a sentence next time, not the conversation.
   }
@@ -193,7 +193,7 @@ export async function forget(uid: string, id: string): Promise<Fact[]> {
 
 export async function forgetAll(uid: string): Promise<Fact[]> {
   try {
-    await AsyncStorage.removeItem(storageKey(uid));
+    await vault.removeItem(storageKey(uid));
   } catch {
     // Nothing stored is the desired end state anyway.
   }

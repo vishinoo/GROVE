@@ -12,7 +12,7 @@
  * only the receipt.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { vault } from './vault';
 
 export type WrittenDoc = { title: string; url: string; at: string };
 
@@ -27,7 +27,7 @@ function storageKey(uid: string): string {
 
 export async function loadDocs(uid: string): Promise<WrittenDoc[]> {
   try {
-    const raw = await AsyncStorage.getItem(storageKey(uid));
+    const raw = await vault.getItem(storageKey(uid));
     const parsed = raw ? (JSON.parse(raw) as WrittenDoc[]) : [];
     return Array.isArray(parsed) ? parsed : [];
   } catch {
@@ -38,7 +38,7 @@ export async function loadDocs(uid: string): Promise<WrittenDoc[]> {
 export async function rememberDoc(uid: string, title: string, url: string): Promise<void> {
   try {
     const next = [{ title, url, at: new Date().toISOString() }, ...(await loadDocs(uid))].slice(0, LIMIT);
-    await AsyncStorage.setItem(storageKey(uid), JSON.stringify(next));
+    await vault.setItem(storageKey(uid), JSON.stringify(next));
   } catch {
     // The document exists either way; losing the receipt costs a follow-up.
   }

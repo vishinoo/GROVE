@@ -42,7 +42,7 @@
  * worse than a count.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { vault } from './vault';
 
 import * as google from './google';
 
@@ -133,7 +133,7 @@ function median(values: number[]): number | null {
 
 async function load(uid: string): Promise<Store> {
   try {
-    const raw = await AsyncStorage.getItem(storageKey(uid));
+    const raw = await vault.getItem(storageKey(uid));
     if (!raw) return { days: [] };
     const parsed = JSON.parse(raw) as Partial<Store>;
     return {
@@ -154,7 +154,7 @@ function update(uid: string, change: (store: Store) => Store): Promise<Store> {
     const store = change(await load(uid));
     const next: Store = { ...store, days: store.days.slice(-KEEP_DAYS) };
     try {
-      await AsyncStorage.setItem(storageKey(uid), JSON.stringify(next));
+      await vault.setItem(storageKey(uid), JSON.stringify(next));
     } catch {
       // Losing one day costs a little accuracy in a median.
     }

@@ -22,7 +22,7 @@
  * On the phone, per account, like notes and memory.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { vault } from './vault';
 
 export type Capture = {
   id: string;
@@ -58,7 +58,7 @@ function newId(): string {
 
 export async function loadInbox(uid: string): Promise<Capture[]> {
   try {
-    const raw = await AsyncStorage.getItem(storageKey(uid));
+    const raw = await vault.getItem(storageKey(uid));
     const parsed = raw ? (JSON.parse(raw) as Capture[]) : [];
     return Array.isArray(parsed) ? parsed : [];
   } catch {
@@ -68,7 +68,7 @@ export async function loadInbox(uid: string): Promise<Capture[]> {
 
 async function write(uid: string, items: Capture[]): Promise<void> {
   try {
-    await AsyncStorage.setItem(storageKey(uid), JSON.stringify(items.slice(0, LIMIT)));
+    await vault.setItem(storageKey(uid), JSON.stringify(items.slice(0, LIMIT)));
   } catch {
     // A capture that fails to save is a lost thought, not a broken app — and
     // the caller has already said it out loud, which is the usual backup.
@@ -78,6 +78,14 @@ async function write(uid: string, items: Capture[]): Promise<void> {
 /** Words people put in front of a thought that are not part of it. */
 const FILLER =
   /^\s*(?:(?:hey|ok|okay)\s+)?(?:[a-z]{2,14},?\s+)?(?:please\s+)?(?:capture|jot down|jot|note down|note|write down|add|remember|put down|log)\b(?:\s+(?:this|that|it|down))?(?:\s*[:,-]\s*|\s+)/i;
+
+/** Every captured thought and any running session, gone. */
+export async function forgetAllCaptures(uid: string): Promise<void> {
+  await Promise.all([
+    vault.removeItem(storageKey(uid)).catch(() => {}),
+    vault.removeItem(`${FOCUS_KEY}:${uid}`).catch(() => {}),
+  ]);
+}
 
 export function tidy(said: string): string {
   return said.replace(FILLER, '').trim().replace(/^[:,-]\s*/, '') || said.trim();
@@ -163,7 +171,7 @@ export function endsIn(said: string, now = new Date()): Date | null {
 
 export async function loadFocus(uid: string): Promise<Focus | null> {
   try {
-    const raw = await AsyncStorage.getItem(`${FOCUS_KEY}:${uid}`);
+    const raw = await vault.getItem(`${FOCUS_KEY}:${uid}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Focus;
     if (!parsed?.what) return null;
@@ -181,8 +189,8 @@ export async function loadFocus(uid: string): Promise<Focus | null> {
 
 export async function setFocus(uid: string, focus: Focus | null): Promise<void> {
   try {
-    if (focus) await AsyncStorage.setItem(`${FOCUS_KEY}:${uid}`, JSON.stringify(focus));
-    else await AsyncStorage.removeItem(`${FOCUS_KEY}:${uid}`);
+    if (focus) await vault.setItem(`${FOCUS_KEY}:${uid}`, JSON.stringify(focus));
+    else await vault.removeItem(`${FOCUS_KEY}:${uid}`);
   } catch {
     // Losing the session means Grove stops defending it, not that it breaks.
   }

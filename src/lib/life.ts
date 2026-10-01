@@ -39,7 +39,7 @@
  * confidence is worse than none.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { vault } from './vault';
 
 import { shortDate, within, type Window } from './when';
 
@@ -133,7 +133,7 @@ const EMPTY: Life = { entities: [], episodes: [], pending: [] };
 
 export async function loadLife(uid: string): Promise<Life> {
   try {
-    const raw = await AsyncStorage.getItem(storageKey(uid));
+    const raw = await vault.getItem(storageKey(uid));
     if (!raw) return { ...EMPTY };
     const parsed = JSON.parse(raw) as Partial<Life>;
     return {
@@ -165,7 +165,7 @@ export function updateLife(uid: string, change: (life: Life) => Life): Promise<L
   const run = queue.then(async () => {
     const next = trim(change(await loadLife(uid)));
     try {
-      await AsyncStorage.setItem(storageKey(uid), JSON.stringify(next));
+      await vault.setItem(storageKey(uid), JSON.stringify(next));
     } catch {
       // Losing one write costs a detail, not the archive.
     }
@@ -201,6 +201,11 @@ function norm(s: string): string {
  * finds "Jason Park". Never the reverse on people: "Jason Park" arriving when
  * two Jasons are known is a new person rather than a guess.
  */
+/** Everything Grove worked out about someone's life, gone. */
+export async function forgetAllLife(uid: string): Promise<void> {
+  await vault.removeItem(storageKey(uid)).catch(() => {});
+}
+
 export function findEntity(entities: Entity[], name: string, kind?: EntityKind): Entity | undefined {
   const n = norm(name);
   if (!n) return undefined;

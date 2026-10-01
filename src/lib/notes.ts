@@ -14,7 +14,7 @@
  * does perfectly well.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { vault } from './vault';
 
 export type Note = {
   id: string;
@@ -51,7 +51,7 @@ function storageKey(uid: string): string {
 
 export async function loadNotes(uid: string): Promise<Note[]> {
   try {
-    const raw = await AsyncStorage.getItem(storageKey(uid));
+    const raw = await vault.getItem(storageKey(uid));
     const parsed = raw ? (JSON.parse(raw) as Note[]) : [];
     return Array.isArray(parsed) ? parsed : [];
   } catch {
@@ -62,7 +62,7 @@ export async function loadNotes(uid: string): Promise<Note[]> {
 
 async function write(uid: string, notes: Note[]): Promise<void> {
   try {
-    await AsyncStorage.setItem(storageKey(uid), JSON.stringify(notes));
+    await vault.setItem(storageKey(uid), JSON.stringify(notes));
   } catch {
     // Saving failed; the caller still has the note in hand and says so.
   }
@@ -105,6 +105,11 @@ function words(text: string): string[] {
     .split(/[^a-z0-9']+/)
     .map((w) => w.replace(/'s$/, ''))
     .filter((w) => w.length > 2 && !IGNORED.has(w));
+}
+
+/** Every note, gone. */
+export async function forgetAllNotes(uid: string): Promise<void> {
+  await vault.removeItem(storageKey(uid)).catch(() => {});
 }
 
 export function searchNotes(notes: Note[], query: string): Note[] {

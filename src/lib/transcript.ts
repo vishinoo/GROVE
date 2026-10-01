@@ -11,7 +11,7 @@
  * spoken conversation onto a server is a privacy cost with no product benefit.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { vault } from './vault';
 
 import type { TurnTool } from './grove';
 
@@ -46,7 +46,7 @@ function key(uid: string): string {
 
 export async function loadActivity(uid: string): Promise<Entry[]> {
   try {
-    const raw = await AsyncStorage.getItem(key(uid));
+    const raw = await vault.getItem(key(uid));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Entry[];
     return Array.isArray(parsed) ? parsed : [];
@@ -91,7 +91,7 @@ export async function attachTool(uid: string, entryId: string, tool: TurnTool): 
 
 export async function clearActivity(uid: string): Promise<Entry[]> {
   try {
-    await AsyncStorage.removeItem(key(uid));
+    await vault.removeItem(key(uid));
   } catch {
     // Nothing to remove is the desired end state anyway.
   }
@@ -100,7 +100,7 @@ export async function clearActivity(uid: string): Promise<Entry[]> {
 
 async function write(uid: string, entries: Entry[]): Promise<void> {
   try {
-    await AsyncStorage.setItem(key(uid), JSON.stringify(entries));
+    await vault.setItem(key(uid), JSON.stringify(entries));
   } catch {
     // Losing a history write costs a row, not the conversation.
   }

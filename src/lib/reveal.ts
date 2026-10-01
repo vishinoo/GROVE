@@ -31,7 +31,7 @@
  * being told to leave is urgent, and this is not.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { vault } from './vault';
 
 import { loadDocs } from './docs';
 import { loadInbox, open as openCaptures } from './inbox';
@@ -57,7 +57,7 @@ function storageKey(uid: string): string {
 
 async function loadProgress(uid: string, now: Date): Promise<Progress> {
   try {
-    const raw = await AsyncStorage.getItem(storageKey(uid));
+    const raw = await vault.getItem(storageKey(uid));
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<Progress>;
       return {
@@ -75,7 +75,7 @@ async function loadProgress(uid: string, now: Date): Promise<Progress> {
 
 async function save(uid: string, progress: Progress): Promise<void> {
   try {
-    await AsyncStorage.setItem(storageKey(uid), JSON.stringify(progress));
+    await vault.setItem(storageKey(uid), JSON.stringify(progress));
   } catch {
     // Worst case a line is offered twice. Nothing is lost.
   }

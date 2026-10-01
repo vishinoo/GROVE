@@ -58,6 +58,7 @@ import * as life from '@/lib/life';
 import { whatMatters, nextUp, type Attention, type NextUp } from '@/lib/attention';
 import { dayIn, nextDiscovery } from '@/lib/reveal';
 import { learnWeek, noteTurn } from '@/lib/rhythms';
+import * as money from '@/lib/money';
 import * as struggles from '@/lib/struggles';
 import { afterTurn, consolidateNow, rememberNote } from '@/lib/consolidate';
 import * as notesStore from '@/lib/notes';
@@ -531,10 +532,22 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    * history.current, Grove carries on referring to things you have just deleted,
    * which is worse than not offering a reset at all.
    */
+  /**
+   * Start again, meaning it.
+   *
+   * This used to clear the transcript, the facts and the sparks, and leave the
+   * long memory, the notes, the ledger and the study list exactly where they
+   * were — so a button labelled "start again" left behind every person, every
+   * dated episode and every amount anyone had ever mentioned. Which is the one
+   * thing a wipe must not do, and became more important rather than less once
+   * all of it was being encrypted: a promise about where someone's data lives
+   * is worth nothing if the button that deletes it does not.
+   */
   const startAgain = useCallback(async () => {
     const account = live.current.uid;
     history.current = [];
     lastVolunteered.current = null;
+    attention.current = { said: new Set<string>() };
     turnSeq.current += 1;
     setCaption('');
     setHeard('');
@@ -542,11 +555,22 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       transcript.clearActivity(account),
       memory.forgetAll(account),
       sparks.clearSparks(account),
+      life.forgetAllLife(account),
+      notesStore.forgetAllNotes(account),
+      inbox.forgetAllCaptures(account),
+      struggles.forgetAllStruggles(account),
+      money.forgetAllMoney(account),
     ]);
     if (!mounted.current) return;
     setActivity(entries);
     setFacts(facts);
     setSparkList(list);
+    setLifeMemory({ entities: [], episodes: [], pending: [] });
+    setNoteList([]);
+    setCaptures([]);
+    setFocus(null);
+    setStuck([]);
+    setNext(null);
   }, []);
 
   const forgetFact = useCallback(async (id: string) => {

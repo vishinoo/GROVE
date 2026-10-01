@@ -30,7 +30,7 @@
  * with a month. Both answers are kept, so it only ever asks once.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { vault } from './vault';
 
 export type Purchase = {
   id: string;
@@ -70,7 +70,7 @@ const EMPTY: Money = { currency: 'CAD', purchases: [] };
 
 export async function loadMoney(uid: string): Promise<Money> {
   try {
-    const raw = await AsyncStorage.getItem(storageKey(uid));
+    const raw = await vault.getItem(storageKey(uid));
     if (!raw) return { ...EMPTY };
     const parsed = JSON.parse(raw) as Partial<Money>;
     return {
@@ -96,7 +96,7 @@ function update(uid: string, change: (money: Money) => Money): Promise<Money> {
         .slice(0, LIMIT),
     };
     try {
-      await AsyncStorage.setItem(storageKey(uid), JSON.stringify(trimmed));
+      await vault.setItem(storageKey(uid), JSON.stringify(trimmed));
     } catch {
       // Losing one purchase costs a little accuracy in a total.
     }
@@ -114,6 +114,11 @@ function update(uid: string, change: (money: Money) => Money): Promise<Money> {
  * guessing, because a wrong number here produces confident wrong advice, which
  * is worse than being asked again.
  */
+/** The whole ledger and the budget with it, gone. */
+export async function forgetAllMoney(uid: string): Promise<void> {
+  await vault.removeItem(storageKey(uid)).catch(() => {});
+}
+
 export function readAmount(said: string): number | null {
   const text = said.toLowerCase().replace(/,/g, '');
 

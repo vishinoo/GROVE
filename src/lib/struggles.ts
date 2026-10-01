@@ -31,7 +31,7 @@
  * the person something real.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { vault } from './vault';
 
 export type Struggle = {
   id: string;
@@ -91,7 +91,7 @@ function norm(text: string): string {
 
 export async function loadStruggles(uid: string): Promise<Struggle[]> {
   try {
-    const raw = await AsyncStorage.getItem(storageKey(uid));
+    const raw = await vault.getItem(storageKey(uid));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Struggle[];
     return Array.isArray(parsed) ? parsed : [];
@@ -106,7 +106,7 @@ function update(uid: string, change: (list: Struggle[]) => Struggle[]): Promise<
   const run = queue.then(async () => {
     const next = tidy(change(await loadStruggles(uid)));
     try {
-      await AsyncStorage.setItem(storageKey(uid), JSON.stringify(next));
+      await vault.setItem(storageKey(uid), JSON.stringify(next));
     } catch {
       // Losing one costs a quiz question.
     }
@@ -135,6 +135,14 @@ function tidy(list: Struggle[]): Struggle[] {
  * containment either direction, which is loose on purpose: a false merge costs
  * a shared counter, and a false split costs the whole point of counting.
  */
+/** Every gap and any running quiz, gone. */
+export async function forgetAllStruggles(uid: string): Promise<void> {
+  await Promise.all([
+    vault.removeItem(storageKey(uid)).catch(() => {}),
+    vault.removeItem(`${QUIZ_KEY}:${uid}`).catch(() => {}),
+  ]);
+}
+
 export function same(list: Struggle[], what: string): Struggle | undefined {
   const target = norm(what);
   if (target.length < 3) return undefined;
@@ -262,7 +270,7 @@ export function studyBlock(list: Struggle[]): string {
 
 export async function loadQuiz(uid: string): Promise<Quiz | null> {
   try {
-    const raw = await AsyncStorage.getItem(`${QUIZ_KEY}:${uid}`);
+    const raw = await vault.getItem(`${QUIZ_KEY}:${uid}`);
     if (!raw) return null;
     const quiz = JSON.parse(raw) as Quiz;
     if (!quiz || !Array.isArray(quiz.questions)) return null;
@@ -280,8 +288,8 @@ export async function loadQuiz(uid: string): Promise<Quiz | null> {
 
 export async function setQuiz(uid: string, quiz: Quiz | null): Promise<void> {
   try {
-    if (quiz) await AsyncStorage.setItem(`${QUIZ_KEY}:${uid}`, JSON.stringify(quiz));
-    else await AsyncStorage.removeItem(`${QUIZ_KEY}:${uid}`);
+    if (quiz) await vault.setItem(`${QUIZ_KEY}:${uid}`, JSON.stringify(quiz));
+    else await vault.removeItem(`${QUIZ_KEY}:${uid}`);
   } catch {
     // A lost quiz is a quiz that has to be restarted.
   }

@@ -32,6 +32,7 @@ import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
 import { runSelfCheck, type CheckResult } from '@/lib/selfCheck';
+import { vaultReady } from '@/lib/vault';
 import { CARES_LIMIT, MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona, type Preset } from '@/lib/persona';
 import { hasOwnKey, setOwnKey } from '@/lib/lightModel';
 import { availableVoices, bestVoiceId, characterVoice, hasEnhancedVoice, speak } from '@/lib/speak';
@@ -512,6 +513,12 @@ export default function Settings() {
 function Privacy() {
   const palette = usePalette();
   const backend = (process.env.EXPO_PUBLIC_NOCTUS_URL ?? '').trim();
+  // Asked rather than claimed. A sentence about encryption that nobody checked
+  // is how "encrypted at rest" ends up in a changelog and nowhere else.
+  const [sealed, setSealed] = useState(false);
+  useEffect(() => {
+    void vaultReady().then(setSealed);
+  }, []);
 
   const lines = [
     backend
@@ -519,7 +526,12 @@ function Privacy() {
       : 'There is no Grove server. No account, nothing synced, nothing held anywhere for you to be leaked from.',
     'To answer you, what you said goes to the model — along with the short list of facts in Settings and the names of the people and projects it knows. Web questions go out as searches.',
     'Your mail, calendar, contacts and documents travel between this phone and Google. Nothing else sees them.',
-    'Everything Grove remembers lives on this phone: the facts, the people, what happened, your captures and your notes. All of it is on the Sparks screen, where you can correct it or delete it.',
+    sealed
+      ? 'Everything Grove remembers lives on this phone, encrypted with a key held in the Keychain and nowhere else — so a backup restored onto another phone contains it and no way to read it. All of it is on the Sparks screen, where you can correct or delete any of it.'
+      : 'Everything Grove remembers lives on this phone. All of it is on the Sparks screen, where you can correct or delete any of it. The encryption key could not be reached on this device, so it is stored as plain text — which is better than losing it.',
+    sealed
+      ? 'That does not protect you from someone holding your unlocked phone with Grove open: the app has to be able to read its own memory. It raises the cost of getting at it from copying a file to running code as Grove.'
+      : '',
     'The word-for-word record is the shortest-lived thing here. The last fifteen exchanges are kept so it can follow a conversation, and the turns waiting to be read into memory are deleted the moment they have been.',
     'No camera. Grove never asks for one, and the glasses are a headset as far as it is concerned.',
   ];
