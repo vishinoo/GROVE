@@ -31,6 +31,8 @@
 
 import { openReminders } from './deviceCalendar';
 import * as google from './google';
+import { localTime } from './when';
+import { outOf, spent as chargeBudget, worthSaying, type Candidate } from './interrupt';
 import { clockOf, missingToday, rhythms } from './rhythms';
 
 export type Moment = {
@@ -57,13 +59,6 @@ function minutesBetween(from: Date, to: Date): number {
 
 function clock(date: Date): string {
   return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-}
-
-/** A date-only string is a local day, not UTC midnight. See abilities.ts. */
-function localTime(value: string): Date {
-  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!dateOnly) return new Date(value);
-  return new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]));
 }
 
 /**
@@ -145,18 +140,51 @@ export async function whatMatters(
   /**
    * Whether Grove may volunteer beyond what someone would regret missing.
    *
-   * The rules above this line have a clock on them and always run: being told
-   * to leave is not chat. The two below it are standing observations, and they
-   * wait for the answer to the question asked on the seventh day. See
-   * `proactive` in persona.ts.
+   * The first two rules have a clock on them and always run: being told to
+   * leave is not chat. The rest are standing observations, and they wait for
+   * the answer to the question asked on the seventh day. See `proactive` in
+   * persona.ts.
    */
   freely = false,
   now = new Date()
 ): Promise<Moment | null> {
+  const found = await candidates(state, uid, freely, now);
+  const verdict = await worthSaying(uid, found, now);
+  if (!verdict.speak) return null;
+
+  // Charged here rather than by the caller, because the caller's next act is to
+  // speak — and a budget charged for a line nobody heard is a line nobody will
+  // ever hear, whereas one charged a moment early costs at most one slot.
+  await chargeBudget(uid, verdict.chosen, now);
+  return {
+    id: verdict.chosen.id,
+    urgency: verdict.chosen.perishable === 'now' ? 'now' : 'soon',
+    say: verdict.chosen.say,
+  };
+}
+
+/**
+ * Everything Grove could truthfully say right now, with what each is worth.
+ *
+ * Every rule returns rather than short-circuits, which is the change that
+ * matters: the old version returned the first thing it found, so "you need to
+ * leave now" and "you haven't started studying" were ordered by the order they
+ * were written in. Now they are ordered by what missing them costs, and
+ * interrupt.ts decides whether the best of them clears the bar at all.
+ */
+async function candidates(
+  state: Attention,
+  uid: string,
+  freely: boolean,
+  now: Date
+): Promise<Candidate[]> {
+  const out: Candidate[] = [];
+  const unsaid = (id: string) => !state.said.has(id);
   const soon = await upcoming(now);
 
   // 1. Leaving. The only thing here that is genuinely urgent, because being
-  //    told after the fact is worthless.
+  //    told after the fact is worthless — and the only thing that is exempt
+  //    from the daily budget.
   const journey = soon.find(
     (e) => e.location.trim() && minutesBetween(now, e.at) <= HORIZON_MINUTES
   );
@@ -164,22 +192,25 @@ export async function whatMatters(
     const travel = await travelMinutes(journey.location);
     if (travel !== null) {
       const leaveIn = minutesBetween(now, journey.at) - travel - GETTING_READY;
-      const id = `leave:${journey.id}`;
-      if (leaveIn <= 0 && !state.said.has(id)) {
-        return {
-          id,
-          urgency: 'now',
+      // A route the planner actually answered is as sure as anything here gets.
+      if (leaveIn <= 0 && unsaid(`leave:${journey.id}`)) {
+        out.push({
+          id: `leave:${journey.id}`,
           say: `You need to leave for ${journey.title} now — it's ${travel} minutes away and it starts at ${clock(journey.at)}.`,
-        };
+          costOfMissing: 5,
+          confidence: 0.95,
+          perishable: 'now',
+        });
       }
       // A warning while there is still time to do something about it.
-      const warning = `leaving:${journey.id}`;
-      if (leaveIn > 0 && leaveIn <= 10 && !state.said.has(warning)) {
-        return {
-          id: warning,
-          urgency: 'soon',
+      if (leaveIn > 0 && leaveIn <= 10 && unsaid(`leaving:${journey.id}`)) {
+        out.push({
+          id: `leaving:${journey.id}`,
           say: `Leave for ${journey.title} in about ${leaveIn} minutes. It's ${travel} minutes away.`,
-        };
+          costOfMissing: 4,
+          confidence: 0.95,
+          perishable: 'now',
+        });
       }
     }
   }
@@ -187,45 +218,60 @@ export async function whatMatters(
   // 2. Starting. No journey to make, but walking in late is still worse than
   //    being told.
   const starting = soon.find((e) => minutesBetween(now, e.at) <= STARTS_SOON_MINUTES);
-  if (starting && !state.said.has(`soon:${starting.id}`)) {
+  if (starting && unsaid(`soon:${starting.id}`)) {
     const minutes = minutesBetween(now, starting.at);
-    return {
+    out.push({
       id: `soon:${starting.id}`,
-      urgency: 'soon',
       say: `${starting.title} in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
-    };
+      costOfMissing: 4,
+      confidence: 0.9,
+      perishable: 'now',
+    });
   }
+
+  if (!freely) return out;
 
   // 3. Missing. The one thing on this list the calendar cannot tell you,
   //    because it is about what is *not* in it: a weekly fixture whose hour is
   //    coming round with nothing in the diary. Basketball at seven for four
   //    Wednesdays running, and an empty Wednesday evening, is either a
   //    cancellation or a thing about to be forgotten — and being asked costs
-  //    nothing in the first case. See rhythms.ts for why three weeks is the bar.
-  if (!freely) return null;
-
+  //    nothing in the first case.
+  //
+  //    Its confidence is the count, which is the point of counting: three of
+  //    the last four weeks is 0.75 and clears the bar, twice is 0.5 and does
+  //    not. Nobody had to pick those numbers.
   const usual = await rhythms(uid, now).catch(() => null);
   const absent = usual ? missingToday(usual, soon, now) : null;
-  if (absent && !state.said.has(`usual:${absent.what}:${now.toDateString()}`)) {
-    return {
-      id: `usual:${absent.what}:${now.toDateString()}`,
-      urgency: 'soon',
-      say: `You normally have ${absent.what} around ${clockOf(absent.at)} on a ${now.toLocaleDateString('en-GB', { weekday: 'long' })}, and there's nothing in your diary for it. Still on?`,
-    };
+  const absentId = absent ? `usual:${absent.what}:${now.toDateString()}` : '';
+  if (absent && unsaid(absentId)) {
+    out.push({
+      id: absentId,
+      say: `You normally have ${absent.what} around ${clockOf(absent.at)} on a ${now.toLocaleDateString('en-GB', { weekday: 'long' })} — ${absent.seen} of the last four weeks — and there's nothing in your diary for it. Still on?`,
+      costOfMissing: 2,
+      confidence: outOf(absent.seen, 4),
+      perishable: 'today',
+    });
   }
 
   // 4. Late. Something they chose to be reminded of, whose time has passed —
-  //    said once, an hour after the fact rather than the moment it slips, so a
+  //    raised an hour after the fact rather than the moment it slips, so a
   //    reminder set for nine is not a nine o'clock alarm.
   const reminders = (await openReminders(10).catch(() => null)) ?? [];
   const late = reminders.find(
     (r) => r.due && r.overdue && minutesBetween(r.due, now) >= 60 && minutesBetween(r.due, now) < 600
   );
-  if (late && !state.said.has(`late:${late.title}`)) {
-    return { id: `late:${late.title}`, urgency: 'soon', say: `You still haven't ${late.title.toLowerCase()}.` };
+  if (late && unsaid(`late:${late.title}`)) {
+    out.push({
+      id: `late:${late.title}`,
+      say: `You still haven't ${late.title.toLowerCase()}.`,
+      costOfMissing: 3,
+      confidence: 1,
+      perishable: 'today',
+    });
   }
 
-  return null;
+  return out;
 }
 
 /**

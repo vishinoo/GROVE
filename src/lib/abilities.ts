@@ -43,7 +43,8 @@ import { loadNotes, searchNotes } from './notes';
 import { loadPlayed, playedLines, recordPlayed } from './listening';
 import { loadDocs, rememberDoc } from './docs';
 import * as inbox from './inbox';
-import { rhythmLines, rhythms } from './rhythms';
+import { constraints, constraintLines } from './constraints';
+import { rhythmLines, rhythms, structurally } from './rhythms';
 import * as money from './money';
 import * as struggles from './struggles';
 import { loadFocus } from './inbox';
@@ -57,7 +58,7 @@ import {
   searchLife,
   updateLife,
 } from './life';
-import { shortDate, windowFor, within as inWindow } from './when';
+import { localTime, shortDate, windowFor, within as inWindow } from './when';
 import { MODES } from './modes';
 import * as google from './google';
 import { isGoogleConnected } from './googleAuth';
@@ -964,11 +965,6 @@ type Dated = { id: string; title: string; start: Date; allDay: boolean; source: 
  * Today's all-day events were filtered out of "what's on today" entirely, and
  * tomorrow's were announced as happening now.
  */
-function localTime(value: string): Date {
-  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!dateOnly) return new Date(value);
-  return new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]));
-}
 
 async function readGoogleCalendar(days: number): Promise<Dated[] | null> {
   const events = await google.readCalendar(days);
@@ -3056,15 +3052,13 @@ const NOW: Ability = {
       loadFocus(CURRENT_UID),
       inbox.loadInbox(CURRENT_UID).then(inbox.open),
     ]);
-    const [events, reminders, life, facts, notes, usual] = await Promise.all([
+    const [events, reminders, life, facts, notes, pattern] = await Promise.all([
       google.readCalendar(2).catch(() => null),
       openReminders(15).catch(() => null),
       loadLife(CURRENT_UID),
       loadFacts(CURRENT_UID),
       loadNotes(CURRENT_UID),
-      rhythms(CURRENT_UID)
-        .then((r) => rhythmLines(r))
-        .catch(() => ''),
+      rhythms(CURRENT_UID).catch(() => null),
     ]);
 
     // An all-day event starts at midnight, so the "last two hours" window drops
@@ -3126,9 +3120,15 @@ const NOW: Ability = {
       owed.length ? `Still owed:\n${owed.map((o) => `- ${o}`).join('\n')}` : '',
       todo.length ? `From recent notes:\n${todo.slice(0, 8).map((t) => `- ${t}`).join('\n')}` : '',
       goals.length ? `Working towards: ${goals.join('; ')}` : '',
-      // What a normal day looks like, so "I have 40 minutes" is answered
-      // against their week rather than in a vacuum.
-      usual,
+      // What a normal day looks like, and how today differs from it — the one
+      // comparison nobody can make about their own day while they are in it.
+      // This ability already has the diary, which is what the comparison needs
+      // and what makes it too expensive to do on every turn.
+      pattern ? rhythmLines(pattern, now) : '',
+      pattern ? structurally(pattern, events ?? [], now) : '',
+      // Everything narrowing what a good answer looks like, in one block, with
+      // where each line came from attached. See constraints.ts.
+      constraintLines(await constraints(CURRENT_UID, events, now)),
     ]
       .filter(Boolean)
       .join('\n');
@@ -3820,7 +3820,7 @@ const SET_MODE: Ability = {
 const STUDY_STUCK: Ability = {
   id: 'study.stuck',
   name: 'Note what you did not understand',
-  what: "Writes down a concept they did not follow, so it can be quizzed later. Use when they say they don't understand, don't get, are confused by or are stuck on something — including right after you have explained it. Also use when they say outright that a thing has finally clicked, with got_it set — their own claim to understand it, never your judgement that their answer was good.",
+  what: "Writes down a concept they did not follow, so it can be quizzed later. Use when they say they don't understand, don't get, are confused by or are stuck on something — including right after you have explained it. Also use for something they keep getting wrong rather than not understanding — they always forget their charger, they keep skipping the gym after a late class — with kind set to habit. And when they say outright that a thing has finally clicked, with got_it set — their own claim to understand it, never your judgement that their answer was good.",
   where: 'device',
   wired: true,
   needs: [],
@@ -3838,12 +3838,17 @@ const STUDY_STUCK: Ability = {
       type: 'string',
       what: "'yes' when they are telling you they now understand it, rather than that they do not",
     },
+    kind: {
+      type: 'string',
+      what: "'habit' when it is something they keep DOING wrong — forgetting their charger, skipping the gym after a late class. 'knowledge' (the default) when it is something they do not understand.",
+    },
   },
   examples: [
     "I don't understand integration by parts",
     "remember that I don't get this concept",
     "this still isn't clicking for me",
     "I'm confused about how the chain rule works",
+    'I always forget my charger when I leave',
     'okay I actually get beta now',
   ],
   run: async (args) => {
@@ -3858,14 +3863,23 @@ const STUDY_STUCK: Ability = {
       return { ok: true, spoken: `Right, ${known.what} is off the list.` };
     }
 
-    const { again } = await struggles.note(CURRENT_UID, what, args.about || '', undefined);
-    const open = struggles.open(await struggles.loadStruggles(CURRENT_UID));
+    const habit = /^h/i.test(args.kind || '');
+    const { again } = await struggles.note(
+      CURRENT_UID,
+      what,
+      args.about || '',
+      undefined,
+      habit ? 'habit' : 'knowledge'
+    );
+    const stillOpen = struggles.open(await struggles.loadStruggles(CURRENT_UID));
     return {
       ok: true,
       spoken: again
-        ? `Noted again — that is the second time ${what} has come up.`
-        : `Written down. I will test you on ${what}.`,
-      detail: `${open.length} open:\n${struggles.studyBlock(open.slice(0, 10))}`,
+        ? `Noted again — that keeps happening.`
+        : habit
+          ? `Written down. I'll bring it up when it is about to happen again.`
+          : `Written down. I will test you on ${what}.`,
+      detail: `${stillOpen.length} open:\n${struggles.studyBlock(stillOpen.slice(0, 10))}`,
     };
   },
 };
@@ -3908,7 +3922,12 @@ const STUDY_QUIZ: Ability = {
   run: async (args) => {
     const all = await struggles.loadStruggles(CURRENT_UID);
     const days = Number.parseInt(args.days || '', 10);
-    let picked = Number.isFinite(days) && days > 0 ? struggles.openSince(all, days) : struggles.open(all);
+    // Knowledge only: you cannot write a question about forgetting a charger,
+    // and trying is the kind of hectoring that gets an app deleted.
+    const askable = struggles.knowledge(all);
+    let picked = Number.isFinite(days) && days > 0
+      ? struggles.openSince(all, days).filter((x) => askable.some((k) => k.id === x.id))
+      : askable;
     if ((args.about || '').trim()) {
       const narrowed = struggles.about(all, args.about);
       // A named subject with nothing open under it is worth saying rather than

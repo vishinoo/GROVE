@@ -36,6 +36,8 @@ import type { Note as NoteItem } from '@/lib/notes';
 import type { Entity as LifeEntity, Episode as LifeEpisode } from '@/lib/life';
 import { open as openCaptures, remaining } from '@/lib/inbox';
 import { asMoney, forgetPurchase, loadMoney, standing, type Money } from '@/lib/money';
+import { budgetToday } from '@/lib/interrupt';
+import { clockOf, rhythms, type Rhythms } from '@/lib/rhythms';
 import { shortDate } from '@/lib/when';
 import { when as transcriptWhen } from '@/lib/transcript';
 
@@ -196,6 +198,8 @@ export default function Sparks() {
           ))
         )}
       </Section>
+
+      <Normal />
 
       <Spending />
 
@@ -503,6 +507,90 @@ function ModeCard({
  * delete, exactly as a standing instruction is — and showing them in two
  * different shapes would suggest a difference that is not there.
  */
+
+/**
+ * What Grove thinks "normal" is, with the evidence attached.
+ *
+ * This is the trust surface for the whole observed half of the memory. Grove
+ * saying "you're usually up by eight" is an assertion about someone's life made
+ * by a machine, and the difference between that being impressive and being
+ * presumptuous is entirely whether they can see where it came from — so every
+ * line here carries its count, and the count is the point.
+ *
+ * It also shows what the interruptions have cost today, because a budget nobody
+ * can see is a promise rather than a mechanism.
+ */
+function Normal() {
+  const palette = usePalette();
+  const { uid } = useSession();
+  const [usual, setUsual] = useState<Rhythms | null>(null);
+  const [budget, setBudget] = useState<{ used: number; of: number; bar: number } | null>(null);
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  useEffect(() => {
+    let alive = true;
+    void rhythms(uid).then((r) => alive && setUsual(r));
+    void budgetToday(uid).then((b) => alive && setBudget(b));
+    return () => {
+      alive = false;
+    };
+  }, [uid]);
+
+  if (!usual) return null;
+  const known = usual.usualStart !== null;
+  if (!known && usual.habits.length === 0) return null;
+
+  return (
+    <Section label="What it thinks is normal">
+      <Card>
+        {known ? (
+          <Text style={[Type.body, { color: palette.ink }]}>
+            Up and talking to it by about {clockOf(usual.usualStart ?? 0)}
+            {usual.usualEnd !== null ? `, done around ${clockOf(usual.usualEnd)}` : ''}.
+          </Text>
+        ) : (
+          <Text style={[Type.body, { color: palette.ink }]}>
+            Not enough days yet to know your hours.
+          </Text>
+        )}
+        {known ? (
+          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 3 }]}>
+            Counted over {usual.knownDays} days. Nothing here was typed in — if it looks wrong, it
+            is because the days it counted were.
+          </Text>
+        ) : null}
+        {usual.lateBy !== null ? (
+          <Text style={[Type.bodySm, { color: palette.ink, marginTop: 8 }]}>
+            Today started about {usual.lateBy >= 90 ? `${Math.round((usual.lateBy / 60) * 10) / 10} hours` : `${usual.lateBy} minutes`}{' '}
+            later than that.
+          </Text>
+        ) : null}
+      </Card>
+
+      {usual.habits.slice(0, 8).map((h) => (
+        <Card key={`${h.what}-${h.weekday}`} style={{ marginTop: 6 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={[Type.body, { color: palette.ink }]}>{h.what}</Text>
+              <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
+                {days[h.weekday]}s around {clockOf(h.at)}
+                {h.where ? ` · ${h.where}` : ''}
+              </Text>
+            </View>
+            <Mono>{h.seen} of 4</Mono>
+          </View>
+        </Card>
+      ))}
+
+      {budget ? (
+        <Text style={[Type.bodySm, { color: palette.muted, marginTop: 8 }]}>
+          It has spoken up without being asked {budget.used} time{budget.used === 1 ? '' : 's'} today,
+          out of {budget.of}. Telling you to leave for something never counts against that.
+        </Text>
+      ) : null}
+    </Section>
+  );
+}
 
 /**
  * The ledger, where you can see it.

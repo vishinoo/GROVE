@@ -562,6 +562,50 @@ section('Everything about someone\'s life is stored sealed');
   }
 }
 
+/*
+ * 14. The interruption budget.
+ *
+ * One property matters more than all the rest of this file's checks put
+ * together: the budget must never be able to stop Grove saying "you need to
+ * leave now". The moment it can, a safety feature has become a rationing
+ * problem, and every bar the learned threshold can reach has to stay below
+ * what a leave-by scores.
+ */
+section('The budget can never silence a leave-by');
+{
+  const interrupt = require(path.join(OUT, 'lib/interrupt.js'));
+
+  const leaveNow = { id: 'leave:x', say: 'Leave now.', costOfMissing: 5, confidence: 0.95, perishable: 'now' };
+  const leaveSoon = { id: 'leaving:x', say: 'Leave in five.', costOfMissing: 4, confidence: 0.95, perishable: 'now' };
+  const observation = { id: 'fyi:x', say: 'You talk about Noctus a lot.', costOfMissing: 1, confidence: 1, perishable: 'whenever' };
+
+  // The highest bar anyone can teach it, by ignoring every single one.
+  const ignoredEverything = Array.from({ length: 40 }, () => ({ at: new Date().toISOString(), answered: false }));
+  const highest = interrupt.barFor(ignoredEverything);
+  check(interrupt.score(leaveNow).score > highest, '"leave now" outscores the highest learned bar', `${interrupt.score(leaveNow).score.toFixed(2)} vs ${highest.toFixed(2)}`);
+  check(interrupt.score(leaveSoon).score > highest, '"leave in five" outscores it too', `${interrupt.score(leaveSoon).score.toFixed(2)} vs ${highest.toFixed(2)}`);
+
+  // And something that would keep until tomorrow never gets through at all.
+  check(interrupt.score(observation).score < interrupt.barFor([]), 'an observation that could wait never clears the bar');
+
+  // Perishability has to actually matter, or the whole scale is decoration.
+  const sameButLater = { ...leaveNow, perishable: 'whenever' };
+  check(
+    interrupt.score(sameButLater).score < interrupt.score(leaveNow).score,
+    'the same thing is worth less when it could be said tomorrow'
+  );
+
+  // Confidence has to come from counts, not from a number someone liked.
+  check(interrupt.outOf(3, 4) === 0.75 && interrupt.outOf(2, 4) === 0.5, 'confidence is a count, not a judgement');
+  check(interrupt.outOf(9, 4) === 1 && interrupt.outOf(0, 0) === 0, 'and cannot leave the 0..1 range');
+
+  // The source has to keep saying so: an exemption written as a magic number in
+  // attention.ts rather than a score would silently stop applying.
+  const attention = fs.readFileSync(path.join(ROOT, 'src/lib/attention.ts'), 'utf8');
+  check(/costOfMissing: 5/.test(attention), 'a leave-by is still declared as the most costly to miss');
+  check(/worthSaying\(/.test(attention), 'and still goes through the budget rather than around it');
+}
+
 /* ------------------------------------------------------------- verdict */
 
 console.log(

@@ -286,10 +286,11 @@ function HowStep() {
 function PrivateStep() {
   return (
     <Slide
-      title="No camera. No server."
+      title="No camera. No server. Your memory."
       lines={[
         'Nothing is pointed at anyone around you, and there is nothing to be pointed. Wear it in a lecture, a meeting or a restaurant.',
-        'What it remembers lives on this phone, in a list you can read and delete. The word-for-word record is deleted as soon as it has been read.',
+        'What it remembers lives on this phone, encrypted with a key that never leaves it — so a backup on another machine holds your memory and no way to read it.',
+        'All of it is on one screen, where you can correct it, delete it, or delete the lot. Anything it worked out by watching says so, with the number of times it counted.',
       ]}
     />
   );

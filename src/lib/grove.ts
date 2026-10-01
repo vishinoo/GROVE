@@ -294,6 +294,10 @@ const STRUGGLE_STATEMENT = new RegExp(
     String.raw`|i'?m (?:confused|lost|stuck|not following)\b` +
     String.raw`|(?:this|that|it|none of (?:this|it)) (?:still )?(?:isn'?t|is not|doesn'?t|does not|never) (?:click|clicking|clicks|mak(?:e|ing) sense|land|landing)\b` +
     String.raw`|i (?:actually |finally |think i )?(?:get|understand|follow) \S.{0,40}\bnow\b` +
+    // The behavioural half: a thing that keeps going wrong rather than a thing
+    // not understood. Same primitive, same gate, and the same reason — it is a
+    // statement about themselves with no verb the imperative test can see.
+    String.raw`|i (?:always|keep|constantly|never) (?:forget|forgetting|skip|skipping|miss|missing|put off|leave|leaving|lose|losing|mess up|get .{0,20} wrong)\b` +
     ')',
   'i'
 );

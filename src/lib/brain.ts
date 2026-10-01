@@ -40,7 +40,7 @@ import {
 import { asPromptBlock, factFrom } from './memory';
 import { lately, loadLife, whoIsWho } from './life';
 import { rhythmLines, rhythms } from './rhythms';
-import { loadQuiz, quizDirective } from './struggles';
+import { frictionBlock, loadStruggles, loadQuiz, quizDirective } from './struggles';
 import { loadFocus, loadInbox, open as openCaptures, remaining } from './inbox';
 import { calculate } from './calc';
 import { abilitiesFor, modeById } from './modes';
@@ -340,7 +340,7 @@ export async function askWithTools(
   // A line of names, not the archive: enough that "my cofounder" and "Jason"
   // are the same person without a lookup, and cheap enough to ride on every
   // turn. Everything else about them is a tool call away.
-  const [roster, session, waiting, usual, quiz] = await Promise.all([
+  const [roster, session, waiting, usual, quiz, friction] = await Promise.all([
     loadLife(currentAccount())
       .then((l) => [whoIsWho(l), lately(l)].filter(Boolean).join('\n'))
       .catch(() => ''),
@@ -356,6 +356,12 @@ export async function askWithTools(
       .then((r) => rhythmLines(r))
       .catch(() => ''),
     loadQuiz(currentAccount()).catch(() => null),
+    // The things that go wrong for them more than once. Cheap — it is already
+    // on the phone — and the only constraint worth paying for on every turn,
+    // because its whole value is being in mind at the moment it recurs.
+    loadStruggles(currentAccount())
+      .then((list) => frictionBlock(list))
+      .catch(() => ''),
   ]);
   const list =
     waiting.length > 0
@@ -373,7 +379,7 @@ export async function askWithTools(
   // request, and routing it as a request is how "the chain rule" became a web
   // search. So it goes last, where it has the most say.
   const quizzing = quiz ? quizDirective(quiz) : '';
-  const system = [systemFor(context, available), roster, usual, list, focusing, quizzing]
+  const system = [systemFor(context, available), roster, usual, friction, list, focusing, quizzing]
     .filter(Boolean)
     .join('\n\n');
   const fact = factFrom(userText) ?? undefined;

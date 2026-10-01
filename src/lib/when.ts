@@ -123,3 +123,21 @@ export function shortDate(iso: string): string {
   if (!Number.isFinite(d.getTime())) return '';
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
+
+/**
+ * A Google date, read in the timezone the person is standing in.
+ *
+ * An all-day event arrives as a bare "2026-10-01" with no time and no offset,
+ * which `new Date()` reads as UTC midnight. That is the previous evening west of
+ * Greenwich, so today's reading week fell outside a filter for today and
+ * vanished from "what's on" — and an all-day entry read as a clock time got
+ * announced as "happening now until 18:00".
+ *
+ * Lived in four files as four private copies, which is three opportunities for
+ * one of them to be fixed and the others not.
+ */
+export function localTime(value: string): Date {
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!dateOnly) return new Date(value);
+  return new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]));
+}

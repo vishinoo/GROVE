@@ -361,6 +361,75 @@ export function rhythmLines(r: Rhythms, now = new Date()): string {
 }
 
 /**
+ * How today differs from a normal one of this weekday.
+ *
+ * The single most useful sentence this file can produce, and the one that needs
+ * both halves of it: a normal Thursday is a median and a group-by, and today is
+ * a diary. Said together they are a comparison, which is what "today is
+ * structurally different" actually means — and the thing nobody can see about
+ * their own day while they are in it.
+ *
+ * Every claim carries its count. "You normally study around 2 on a Thursday" is
+ * an assertion about someone's life made by a machine, and the only thing that
+ * makes it trustworthy rather than presumptuous is saying how it knows: 11
+ * observed sessions is evidence, and the same sentence without it is a guess
+ * wearing a confident tone.
+ */
+export function structurally(
+  r: Rhythms,
+  todaysEvents: { title: string; start: string; allDay?: boolean }[],
+  now = new Date()
+): string {
+  const lines: string[] = [];
+  const day = WEEKDAYS[now.getDay()];
+
+  if (r.lateBy !== null && r.startedAt !== null && r.usualStart !== null) {
+    const hours = r.lateBy >= 90 ? `${Math.round((r.lateBy / 60) * 10) / 10} hours` : `${r.lateBy} minutes`;
+    lines.push(
+      `Started at ${clockOf(r.startedAt)} rather than the usual ${clockOf(r.usualStart)} — ${hours} later, measured over ${r.knownDays} days.`
+    );
+  }
+
+  const todays = r.habits.filter((h) => h.weekday === now.getDay());
+  if (todays.length > 0) {
+    const minute = now.getHours() * 60 + now.getMinutes();
+    const planned = todaysEvents
+      .filter((e) => !e.allDay)
+      .map((e) => norm(e.title))
+      .filter((t) => t.length > 2);
+    const inDiary = (what: string) => {
+      const target = norm(what);
+      return planned.some((t) => t.includes(target) || target.includes(t));
+    };
+
+    const absent = todays.filter((h) => !inDiary(h.what));
+    const gone = absent.filter((h) => h.at < minute);
+    const ahead = absent.filter((h) => h.at >= minute);
+
+    if (gone.length > 0) {
+      lines.push(
+        `Normally done by now on a ${day} and not in today's diary: ${gone
+          .map((h) => `${h.what} (${clockOf(h.at)}, ${h.seen} of the last 4 weeks)`)
+          .join('; ')}.`
+      );
+    }
+    if (ahead.length > 0) {
+      lines.push(
+        `Usually still to come on a ${day}, with nothing in the diary for it: ${ahead
+          .map((h) => `${h.what} (${clockOf(h.at)}, ${h.seen} of the last 4)`)
+          .join('; ')}.`
+      );
+    }
+    if (absent.length === 0) {
+      lines.push(`Their usual ${day} fixtures are all in today's diary.`);
+    }
+  }
+
+  if (lines.length === 0) return '';
+  return `How today compares with a normal ${day}:\n${lines.join('\n')}`;
+}
+
+/**
  * A weekly fixture whose hour is approaching with nothing in today's diary.
  *
  * The one rule here worth interrupting someone for, and it is only possible

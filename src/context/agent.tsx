@@ -57,6 +57,7 @@ import * as memory from '@/lib/memory';
 import * as life from '@/lib/life';
 import { whatMatters, nextUp, type Attention, type NextUp } from '@/lib/attention';
 import { dayIn, nextDiscovery } from '@/lib/reveal';
+import { noteAnswered } from '@/lib/interrupt';
 import { learnWeek, noteTurn } from '@/lib/rhythms';
 import * as money from '@/lib/money';
 import * as struggles from '@/lib/struggles';
@@ -631,6 +632,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // than on anything Grove said first — a leave-by reminder landing at seven
     // before they have spoken would file every day as an early one.
     void noteTurn(account);
+    // Talking shortly after an unprompted line is the only evidence there is
+    // that the line was wanted. It feeds the bar in interrupt.ts, and does
+    // nothing at all unless there is a recent one to credit.
+    void noteAnswered(account);
 
     // A phrase trigger turns your own words into a button, so it is checked
     // before anything is routed: "play my favourite song" should run the spark

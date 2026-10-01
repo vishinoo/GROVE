@@ -1,5 +1,5 @@
 /**
- * The things you did not understand.
+ * The things you repeatedly fail at.
  *
  * Every other memory in Grove records what is true: who someone is, what
  * happened, what you decided. This one records a gap — a thing you were told
@@ -11,6 +11,21 @@
  * that *you* did not follow it on the fourth of October, that you asked again
  * two weeks later, and that you have still never got it right unprompted — and
  * then quiz you on that rather than on the syllabus.
+ *
+ * TWO KINDS OF FRICTION, AND THE SECOND ONE IS THE GENERAL CASE
+ *
+ * It started as a record of things someone did not know, which turned out to be
+ * the narrow version of a better idea: Grove should remember not only what you
+ * know, but **what you repeatedly fail to do**. "You keep forgetting your
+ * charger" and "you skip the gym after a late class" are the same primitive as
+ * "you confuse enterprise value and equity value" — a thing that goes wrong
+ * more than once, which is the only reason it is worth recording at all.
+ *
+ * They are kept apart because they are used in opposite ways. A knowledge gap
+ * can be *tested*, which is what the quiz is for. A habit cannot: you cannot
+ * ask someone a question about forgetting their charger, and trying produces
+ * the kind of hectoring that gets an app deleted. A habit's job is to be in
+ * mind at the moment it is about to happen again.
  *
  * WHY A STRUGGLE IS NOT A FACT
  *
@@ -35,7 +50,16 @@ import { vault } from './vault';
 
 export type Struggle = {
   id: string;
-  /** The concept, in their own words where possible: "integration by parts". */
+  /**
+   * Which kind of friction this is.
+   *
+   * 'knowledge' can be tested and feeds the quiz. 'habit' cannot be tested and
+   * feeds the prompt instead, so it is in mind at the moment it is about to
+   * happen again. Optional rather than required, because every struggle
+   * written before this field existed was a knowledge gap.
+   */
+  kind?: 'knowledge' | 'habit';
+  /** The concept or the behaviour, in their own words where possible. */
   what: string;
   /** What it belongs to — a course, a project, a topic. Lower-cased. */
   about: string;
@@ -157,7 +181,8 @@ export async function note(
   uid: string,
   what: string,
   about: string,
-  said?: string
+  said?: string,
+  kind: 'knowledge' | 'habit' = 'knowledge'
 ): Promise<{ list: Struggle[]; again: boolean }> {
   const clean = what.trim().slice(0, 140);
   if (!clean) return { list: await loadStruggles(uid), again: false };
@@ -170,6 +195,7 @@ export async function note(
       return [
         {
           id: newId(),
+          kind,
           what: clean,
           about: about.trim().toLowerCase().slice(0, 60),
           ...(said ? { said: said.trim().slice(0, 240) } : {}),
@@ -190,6 +216,9 @@ export async function note(
             raised: s.raised + 1,
             lastAt: stamp,
             right: 0,
+            // A thing first heard as a knowledge gap and raised again as a
+            // behaviour is a behaviour; the later telling is the better one.
+            kind: kind === 'habit' ? 'habit' : (s.kind ?? 'knowledge'),
             about: s.about || about.trim().toLowerCase().slice(0, 60),
             gotItAt: undefined,
           }
@@ -204,6 +233,41 @@ export function open(list: Struggle[]): Struggle[] {
   return list
     .filter((s) => !s.gotItAt)
     .sort((a, b) => b.raised - a.raised || b.lastAt.localeCompare(a.lastAt));
+}
+
+/** The ones a question can be written about. Everything the quiz may use. */
+export function knowledge(list: Struggle[]): Struggle[] {
+  return open(list).filter((s) => (s.kind ?? 'knowledge') === 'knowledge');
+}
+
+/**
+ * The ones that cannot be tested, only remembered.
+ *
+ * These go into the turn's prompt rather than into a quiz, and they are capped
+ * hard: three is enough to be useful and ten is a list of someone's failings
+ * read back to them, which is the thing this feature must never become.
+ */
+export function habits(list: Struggle[]): Struggle[] {
+  return open(list)
+    .filter((s) => s.kind === 'habit')
+    .slice(0, 3);
+}
+
+/**
+ * How the turn's prompt is told about them.
+ *
+ * Framed as something to help with at the moment it matters, and explicitly
+ * not as a topic — the failure mode here is Grove bringing up that you skip the
+ * gym while you are asking about the weather.
+ */
+export function frictionBlock(list: Struggle[]): string {
+  const theirs = habits(list);
+  if (theirs.length === 0) return '';
+  return [
+    'Things that go wrong for them more than once:',
+    ...theirs.map((s) => `- ${s.what}${s.raised > 1 ? ` (${s.raised} times)` : ''}`),
+    'Use these only when the thing is about to happen again — a word at the right moment. Never as a topic, never as a list, and never to tell them what they are like.',
+  ].join('\n');
 }
 
 /** Unresolved and raised inside the window, for "this week". */
