@@ -32,7 +32,6 @@ import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
 import { runSelfCheck, type CheckResult } from '@/lib/selfCheck';
-import { vaultReady } from '@/lib/vault';
 import { checkNow, runningLabel, type Caught } from '@/lib/updates';
 import { CARES_LIMIT, MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona, type Preset } from '@/lib/persona';
 import { hasOwnKey, setOwnKey } from '@/lib/lightModel';
@@ -247,7 +246,6 @@ export default function Settings() {
         <Card style={{ paddingVertical: 2 }}>
           <Row
             label="Swearing"
-            hint={persona.friend?.swearing ? 'Talks the way your mates do.' : 'Keeps it clean.'}
             right={
               <Switch
                 value={persona.friend?.swearing ?? false}
@@ -259,7 +257,6 @@ export default function Settings() {
           />
           <Row
             label="Checks in on you"
-            hint="Brings up deadlines, and asks how things went."
             right={
               <Switch
                 value={persona.friend?.checksIn ?? true}
@@ -277,7 +274,7 @@ export default function Settings() {
           */}
           <Row
             label="Speaks up unprompted"
-            hint="A weekly fixture missing from your diary, something gone past. Leave-by times come either way."
+            hint="Urgent things come either way."
             right={
               <Switch
                 value={persona.friend?.proactive ?? false}
@@ -368,11 +365,7 @@ export default function Settings() {
           />
           <Row
             label="Keep speech on this device"
-            hint={
-              persona.preferOnDevice
-                ? 'Nothing you say is sent to Apple.'
-                : 'Uses Apple’s servers. Better with names.'
-            }
+            hint={persona.preferOnDevice ? undefined : 'Better with names.'}
             right={
               <Switch
                 value={persona.preferOnDevice}
@@ -393,10 +386,6 @@ export default function Settings() {
 
       <Section label="Does it all work?">
         <Card>
-          <Text style={[Type.bodySm, { color: palette.muted }]}>
-            Runs every connection against your real account — reading only, nothing sent or
-            created — and says which one is broken.
-          </Text>
           <SelfCheck />
         </Card>
       </Section>
@@ -405,25 +394,13 @@ export default function Settings() {
         <Card style={{ paddingVertical: 2 }}>
           <Row
             label="Glasses"
-            hint={
-              route.isExternal
-                ? route.hasExternalMic
-                  ? 'Playing and listening through them.'
-                  : 'Playing through them, listening on the phone. Reconnect as a headset.'
-                : 'Pair them in iOS Settings — Grove follows the system route.'
-            }
-            value={route.isExternal ? route.name : 'Phone'}
-            tone={route.isExternal ? (route.hasExternalMic ? 'live' : 'alert') : 'off'}
+            hint={route.isExternal && !route.hasExternalMic ? 'Listening on the phone.' : undefined}
+            value={route.isExternal ? route.name : 'Not paired'}
+            tone={route.isExternal ? 'live' : 'off'}
           />
           <Row
             label="Ring"
-            hint={
-              !report.remote
-                ? 'Needs a development build.'
-                : armed
-                  ? 'Grove holds the audio session, so your ring reaches it locked.'
-                  : 'Not armed. Open Grove once to re-take the session.'
-            }
+            hint={!report.remote ? 'Needs a development build.' : armed ? undefined : 'Open Grove once to re-take it.'}
             value={armed ? 'Armed' : 'Off'}
             tone={armed ? 'live' : 'off'}
           />
@@ -433,8 +410,8 @@ export default function Settings() {
               !report.remote
                 ? 'Needs a development build.'
                 : persona.volumeTrigger
-                  ? 'Volume-down is Grove’s trigger now. The phone’s own volume-down button fires it too — iOS reports the new level, never who pressed it.'
-                  : 'For a ring that only sends volume, Home or Sleep. iOS hands none of those to an app, but the volume changing is something Grove can see.'
+                  ? 'The phone’s own volume button fires it too.'
+                  : 'For a ring that sends volume instead of play.'
             }
             right={
               <Switch
@@ -463,10 +440,6 @@ export default function Settings() {
         spent an evening debugging a model that had already been fixed, because
         the phone was still running the bundle that had the broken one.
       */}
-      <Section label="What leaves your phone">
-        <Privacy />
-      </Section>
-
       <Section label="Version">
         <Card>
           <Row label="Update" value={updateLabel} />
@@ -539,62 +512,6 @@ function UpdateNow() {
         <Text style={[Type.bodySm, { color: palette.muted, marginTop: 8 }]}>{said}</Text>
       ) : null}
     </>
-  );
-}
-
-/**
- * Said plainly, because the honest version is the good version.
- *
- * Grove listens while you walk around, which is the most invasive thing any app
- * can do, and the only defensible answer to that is to say exactly where every
- * piece of it goes. Every line here is a fact about this build, not a promise
- * about intentions: no server to sync to, one thing that goes out to be
- * answered, everything else on the phone, and the verbatim record as the
- * shortest-lived thing in the app.
- *
- * Deliberately not a policy. A policy is written for a lawyer; this is written
- * for the person wearing the glasses.
- */
-function Privacy() {
-  const palette = usePalette();
-  const backend = (process.env.EXPO_PUBLIC_NOCTUS_URL ?? '').trim();
-  // Asked rather than claimed. A sentence about encryption that nobody checked
-  // is how "encrypted at rest" ends up in a changelog and nowhere else.
-  const [sealed, setSealed] = useState(false);
-  useEffect(() => {
-    void vaultReady().then(setSealed);
-  }, []);
-
-  const lines = [
-    backend
-      ? `You have pointed Grove at a backend of your own (${backend}). Model calls can go through it.`
-      : 'There is no Grove server. No account, nothing synced, nothing held anywhere for you to be leaked from.',
-    'To answer you, what you said goes to the model — along with the short list of facts in Settings and the names of the people and projects it knows. Web questions go out as searches.',
-    'Your mail, calendar, contacts and documents travel between this phone and Google. Nothing else sees them.',
-    sealed
-      ? 'Everything Grove remembers lives on this phone, encrypted with a key held in the Keychain and nowhere else — so a backup restored onto another phone contains it and no way to read it. All of it is on the Sparks screen, where you can correct or delete any of it.'
-      : 'Everything Grove remembers lives on this phone. All of it is on the Sparks screen, where you can correct or delete any of it. The encryption key could not be reached on this device, so it is stored as plain text — which is better than losing it.',
-    sealed
-      ? 'That does not protect you from someone holding your unlocked phone with Grove open: the app has to be able to read its own memory. It raises the cost of getting at it from copying a file to running code as Grove.'
-      : '',
-    'The word-for-word record is the shortest-lived thing here. The last fifteen exchanges are kept so it can follow a conversation, and the turns waiting to be read into memory are deleted the moment they have been.',
-    'No camera. Grove never asks for one, and the glasses are a headset as far as it is concerned.',
-  ];
-
-  return (
-    <Card>
-      {lines.map((line, i) => (
-        <Text
-          key={line.slice(0, 20)}
-          style={[
-            Type.bodySm,
-            { color: i === 0 ? palette.ink : palette.inkSoft, lineHeight: 20, marginTop: i === 0 ? 0 : 12 },
-          ]}
-        >
-          {line}
-        </Text>
-      ))}
-    </Card>
   );
 }
 

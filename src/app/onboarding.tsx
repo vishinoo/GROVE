@@ -1,33 +1,64 @@
 /**
  * First run.
  *
- * Three slides, then a checklist.
+ * Three slides, then the setup. Two of the setup steps happen in iOS Settings,
+ * where Grove cannot reach, and someone who skips them has an app that looks
+ * fine and a pair of glasses that does nothing.
  *
- * The slides are not a feature tour and are the only marketing in the app.
- * They exist because Grove is indistinguishable from every other voice
- * assistant for the first thirty seconds and completely different after a
- * week, and someone who does not know which one they have bought gives up
- * during the thirty seconds. So they say the promise, how you talk to it, and
- * what it does not do — three things, one screen each, no screenshots of
- * itself. Two of these four steps happen in iOS
- * Settings, where Grove cannot reach, and someone who skips them has an app that
- * looks fine and a pair of glasses that does nothing.
+ * THE SLIDES ARE THE ONLY MARKETING IN THE APP
  *
- * Two of the steps verify themselves rather than asking you to take them on
- * trust: the glasses card only goes green once they are actually connected with
- * a microphone, and the ring step shows the raw media keys as you press. That
- * second one used to be buried in Settings, which was the wrong place — "did my
- * twelve-pound ring work" is the question you have at exactly this moment.
+ * Grove is indistinguishable from every other voice assistant for the first
+ * thirty seconds and completely different after a week, and someone who does
+ * not know which one they have bought gives up during the thirty seconds.
+ *
+ * They are written in the second person about nobody in particular. An earlier
+ * version used the author's own life as the example — a sister at med school,
+ * a cofounder by name — which read, to anyone else holding the phone, as an app
+ * that already knew things about them. The one thing a memory product cannot
+ * afford on its first screen is to seem like it has been reading your mail.
+ *
+ * THE HARDWARE STEPS LEAD WITH THE HARDWARE
+ *
+ * You have just unboxed a pair of glasses and a ring, and the screen should be
+ * showing you the thing in your hand rather than an icon of it. So each of those
+ * steps is a photograph of the real product with the live status underneath —
+ * and the status is the part that moves, because it is the part that changes.
+ *
+ * The plate behind the product stays light in both themes. These are black
+ * objects photographed on white; on a near-black background they are an empty
+ * rectangle. That is a fact about the product rather than a style choice, which
+ * is why it is not a palette token.
+ *
+ * Both steps verify themselves rather than asking you to take them on trust:
+ * the glasses panel reads the live audio route, and the ring panel shows the raw
+ * media keys as you press. That second one used to be buried in Settings, which
+ * was the wrong place — "did my twelve-pound ring work" is the question you have
+ * at exactly this moment.
  */
 
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import {
+  AccessibilityInfo,
+  Image,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon, type IconName } from '@/components/icon';
 import { Orb } from '@/components/orb';
-import { Button, Card, Dot, Mono } from '@/components/ui';
+import { Button, Card, Mono } from '@/components/ui';
 import { Radius, Space, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
@@ -40,6 +71,18 @@ import * as trigger from '@/lib/trigger';
 
 const STEPS = ['what', 'how', 'private', 'name', 'you', 'glasses', 'ring', 'limit'] as const;
 
+const GLASSES = require('../../assets/images/glasses.png');
+const RING = require('../../assets/images/ring.png');
+
+/**
+ * The ground a black product is photographed against.
+ *
+ * Fixed in both themes on purpose. See the note at the top: in dark mode the
+ * palette's own surfaces are near-black, and a black pair of glasses on one of
+ * them is a rectangle with nothing in it.
+ */
+const PLATE = '#F2F3F5';
+
 /**
  * What the intro turned into, if anything.
  *
@@ -51,6 +94,58 @@ const STEPS = ['what', 'how', 'private', 'name', 'you', 'glasses', 'ring', 'limi
  */
 type Read = { state: 'none' } | { state: 'reading' } | { state: 'done'; names: string[] };
 
+/* ------------------------------------------------------------------ motion */
+
+/**
+ * Whether the person has asked the system to stop things moving.
+ *
+ * Read once rather than subscribed to: nobody changes this setting halfway
+ * through an eight-screen intro, and a subscription here would be three lines
+ * of listener for a case that does not happen.
+ */
+function useStillness(): boolean {
+  const [still, setStill] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((on) => alive && setStill(on));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return still;
+}
+
+/**
+ * One entrance per screen, and only one.
+ *
+ * The generic version of this animates every element on the page in sequence,
+ * which reads as a website rather than as a setup flow and makes the fifth
+ * screen as slow as the first. Here the whole step arrives as a single object —
+ * a short rise and fade, keyed on the step so it replays on each change — and
+ * nothing inside it moves on its own.
+ */
+function Reveal({ step, children }: { step: string; children: React.ReactNode }) {
+  const still = useStillness();
+  const enter = useSharedValue(still ? 1 : 0);
+
+  useEffect(() => {
+    if (still) {
+      enter.value = 1;
+      return;
+    }
+    enter.value = 0;
+    enter.value = withTiming(1, { duration: 320, easing: Easing.out(Easing.cubic) });
+  }, [step, still, enter]);
+
+  const style = useAnimatedStyle(() => ({
+    opacity: enter.value,
+    transform: [{ translateY: (1 - enter.value) * 14 }],
+  }));
+
+  return <Animated.View style={style}>{children}</Animated.View>;
+}
+
+/* ------------------------------------------------------------------ screen */
 
 export default function Onboarding() {
   const palette = usePalette();
@@ -108,6 +203,16 @@ export default function Onboarding() {
     else setIndex((n) => n + 1);
   };
 
+  const label = last
+    ? status === 'signed-in'
+      ? 'Done'
+      : 'Sign in'
+    : step === 'you' && about.trim().length < 12
+      ? 'Do this later'
+      : step === 'private'
+        ? 'Set it up'
+        : 'Continue';
+
   return (
     <View style={{ flex: 1, backgroundColor: palette.paper }}>
       <ScrollView
@@ -132,14 +237,16 @@ export default function Onboarding() {
         </View>
 
         <View style={{ flex: 1, justifyContent: 'center', paddingVertical: 24 }}>
-          {step === 'what' ? <WhatStep /> : null}
-          {step === 'how' ? <HowStep /> : null}
-          {step === 'private' ? <PrivateStep /> : null}
-          {step === 'name' ? <NameStep /> : null}
-          {step === 'you' ? <YouStep value={about} onChange={setAbout} /> : null}
-          {step === 'glasses' ? <GlassesStep /> : null}
-          {step === 'ring' ? <RingStep /> : null}
-          {step === 'limit' ? <LimitStep read={read} /> : null}
+          <Reveal step={step}>
+            {step === 'what' ? <WhatStep /> : null}
+            {step === 'how' ? <HowStep /> : null}
+            {step === 'private' ? <PrivateStep /> : null}
+            {step === 'name' ? <NameStep /> : null}
+            {step === 'you' ? <YouStep value={about} onChange={setAbout} /> : null}
+            {step === 'glasses' ? <GlassesStep /> : null}
+            {step === 'ring' ? <RingStep /> : null}
+            {step === 'limit' ? <LimitStep read={read} /> : null}
+          </Reveal>
         </View>
       </ScrollView>
 
@@ -150,39 +257,65 @@ export default function Onboarding() {
           gap: 16,
         }}
       >
-        <View style={{ flexDirection: 'row', gap: 6, justifyContent: 'center' }}>
-          {STEPS.map((_, i) => (
-            <View
-              key={i}
-              style={{
-                width: i === index ? 20 : 6,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor: i === index ? palette.mark : palette.lineStrong,
-              }}
-            />
-          ))}
-        </View>
-        <Button
-          label={
-            last
-              ? status === 'signed-in'
-                ? 'Done'
-                : 'Sign in'
-              : step === 'you' && about.trim().length < 12
-                ? 'Do this later'
-                : step === 'private'
-                  ? 'Set it up'
-                  : 'Continue'
-          }
-          onPress={advance}
-        />
+        <Progress count={STEPS.length} at={index} />
+        <Button label={label} onPress={advance} />
       </View>
     </View>
   );
 }
 
-/* ------------------------------------------------------------------ steps */
+/**
+ * Where you are, as a row of marks.
+ *
+ * The current one grows rather than merely changing colour, so moving between
+ * screens is legible out of the corner of your eye. This is a sequence, and the
+ * progress through it is the one piece of chrome worth animating.
+ */
+function Progress({ count, at }: { count: number; at: number }) {
+  const palette = usePalette();
+  return (
+    <View style={{ flexDirection: 'row', gap: 6, justifyContent: 'center' }}>
+      {Array.from({ length: count }, (_, i) => (
+        <Mark key={i} active={i === at} done={i < at} palette={palette} />
+      ))}
+    </View>
+  );
+}
+
+function Mark({
+  active,
+  done,
+  palette,
+}: {
+  active: boolean;
+  done: boolean;
+  palette: ReturnType<typeof usePalette>;
+}) {
+  const still = useStillness();
+  const width = useSharedValue(active ? 20 : 6);
+
+  useEffect(() => {
+    const to = active ? 20 : 6;
+    width.value = still ? to : withTiming(to, { duration: 260, easing: Easing.out(Easing.cubic) });
+  }, [active, still, width]);
+
+  const style = useAnimatedStyle(() => ({ width: width.value }));
+
+  return (
+    <Animated.View
+      style={[
+        style,
+        {
+          height: 6,
+          borderRadius: 3,
+          backgroundColor: active || done ? palette.mark : palette.lineStrong,
+        },
+      ]}
+    />
+  );
+}
+
+/* ------------------------------------------------------------------- parts */
 
 function Heading({ icon, title }: { icon?: IconName; title: string }) {
   const palette = usePalette();
@@ -200,26 +333,6 @@ function Body({ children }: { children: string }) {
   const palette = usePalette();
   return <Text style={[Type.body, { color: palette.inkSoft }]}>{children}</Text>;
 }
-
-function Todo({ children }: { children: React.ReactNode }) {
-  const palette = usePalette();
-  return (
-    <View
-      style={{
-        marginTop: 16,
-        padding: 13,
-        borderRadius: Radius.card,
-        backgroundColor: palette.sunken,
-        borderWidth: 1,
-        borderColor: palette.line,
-      }}
-    >
-      <Text style={[Type.bodySm, { color: palette.ink, lineHeight: 19 }]}>{children}</Text>
-    </View>
-  );
-}
-
-/* ----------------------------------------------------------------- slides */
 
 /**
  * A slide, which is deliberately not a step.
@@ -241,7 +354,11 @@ function Slide({ title, lines }: { title: string; lines: string[] }) {
           key={line.slice(0, 16)}
           style={[
             Type.body,
-            { color: i === 0 ? palette.ink : palette.inkSoft, marginTop: i === 0 ? 18 : 14, lineHeight: 24 },
+            {
+              color: i === 0 ? palette.ink : palette.inkSoft,
+              marginTop: i === 0 ? 18 : 14,
+              lineHeight: 24,
+            },
           ]}
         >
           {line}
@@ -250,6 +367,109 @@ function Slide({ title, lines }: { title: string; lines: string[] }) {
     </>
   );
 }
+
+/**
+ * The real thing, on a ground it can be seen against.
+ *
+ * Photographed rather than drawn, because at this moment the object is in the
+ * person's other hand and an icon of it is a worse match than the thing itself.
+ */
+function Product({ source, height }: { source: number; height: number }) {
+  const still = useStillness();
+  const settle = useSharedValue(still ? 1 : 0);
+
+  useEffect(() => {
+    settle.value = still
+      ? 1
+      : withDelay(90, withTiming(1, { duration: 420, easing: Easing.out(Easing.cubic) }));
+  }, [still, settle]);
+
+  const style = useAnimatedStyle(() => ({
+    opacity: settle.value,
+    transform: [{ scale: 0.96 + settle.value * 0.04 }],
+  }));
+
+  return (
+    <View
+      style={{
+        height,
+        borderRadius: Radius.card,
+        backgroundColor: PLATE,
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+      }}
+    >
+      <Animated.View style={style}>
+        <Image
+          source={source}
+          resizeMode="contain"
+          style={{ width: '100%', height: height - 28 }}
+          accessible={false}
+        />
+      </Animated.View>
+    </View>
+  );
+}
+
+/**
+ * The live half of a hardware step.
+ *
+ * One line that says what is true now, and a mark that is green when the thing
+ * works. It moves when the state changes, which is the only motion in these two
+ * screens that answers an event rather than a screen appearing.
+ */
+function Status({ live, title, note }: { live: boolean; title: string; note?: string }) {
+  const palette = usePalette();
+  const still = useStillness();
+  const on = useSharedValue(live ? 1 : 0);
+
+  useEffect(() => {
+    on.value = still ? (live ? 1 : 0) : withTiming(live ? 1 : 0, { duration: 420 });
+  }, [live, still, on]);
+
+  const dot = useAnimatedStyle(() => ({
+    transform: [{ scale: 0.7 + on.value * 0.3 }],
+    opacity: 0.45 + on.value * 0.55,
+  }));
+
+  return (
+    <View
+      style={{
+        marginTop: 14,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 11,
+        paddingVertical: 13,
+        paddingHorizontal: 15,
+        borderRadius: Radius.card,
+        backgroundColor: palette.raised,
+        borderWidth: 1,
+        borderColor: live ? palette.lineStrong : palette.line,
+      }}
+    >
+      <Animated.View
+        style={[
+          dot,
+          {
+            width: 9,
+            height: 9,
+            borderRadius: 5,
+            backgroundColor: live ? palette.signal : palette.muted,
+          },
+        ]}
+      />
+      <View style={{ flex: 1 }}>
+        <Text style={[Type.cardTitle, { color: palette.ink }]}>{title}</Text>
+        {note ? (
+          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>{note}</Text>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+/* ------------------------------------------------------------------ slides */
 
 /** The promise, stated once, in the words it will actually be judged on. */
 function WhatStep() {
@@ -261,8 +481,8 @@ function WhatStep() {
       <Slide
         title="It remembers, so you don’t have to."
         lines={[
-          'Tell it something once. Two weeks later, ask what to get Sarah and it knows she likes matcha.',
-          'It keeps the people, the projects and what happened — not a recording of your day. That’s the difference between this and something that answers questions.',
+          'Tell it something once and it keeps it. Weeks later you can ask about the same person, the same project, the same decision, and it still knows.',
+          'It keeps what things meant, not a recording of your day. That is the difference between this and something that answers questions.',
         ]}
       />
     </>
@@ -275,8 +495,8 @@ function HowStep() {
     <Slide
       title="Press the ring. Talk. That’s it."
       lines={[
-        'No wake word, no phone out, no screen. One press on the ring, say what you want, and it answers through your glasses.',
-        'It reaches your mail, your calendar, your documents and the web directly — and anything it cannot undo, it reads back and waits for a press before doing.',
+        'No wake word, no phone out, no screen. One press, say what you want, and it answers through your glasses.',
+        'It reaches your mail, your calendar, your documents and the web directly. Anything it cannot undo, it reads back and waits for a press first.',
       ]}
     />
   );
@@ -289,12 +509,14 @@ function PrivateStep() {
       title="No camera. No server. Your memory."
       lines={[
         'Nothing is pointed at anyone around you, and there is nothing to be pointed. Wear it in a lecture, a meeting or a restaurant.',
-        'What it remembers lives on this phone, encrypted with a key that never leaves it — so a backup on another machine holds your memory and no way to read it.',
-        'All of it is on one screen, where you can correct it, delete it, or delete the lot. Anything it worked out by watching says so, with the number of times it counted.',
+        'What it remembers lives on this phone, encrypted with a key that never leaves it.',
+        'All of it sits on one screen, where you can correct it, delete it, or delete the lot.',
       ]}
     />
   );
 }
+
+/* ------------------------------------------------------------------- steps */
 
 /** Name first, because every step after this refers to it by name. */
 function NameStep() {
@@ -337,9 +559,9 @@ function NameStep() {
  *
  * Everything else here makes the hardware work. This makes Grove worth having
  * on the first afternoon rather than the third week: a handful of sentences
- * about who is in their life and what they are doing goes straight into the
- * long memory, so the first thing they ask is answered with their own names in
- * it instead of "I don't know anything about you yet".
+ * about who is in your life and what you are doing goes straight into the long
+ * memory, so the first thing you ask is answered with your own names in it
+ * instead of "I don't know anything about you yet".
  *
  * Typed, not spoken, and this is the one place in the app where that is the
  * right way round. It is a paragraph, not a sentence; it is full of proper
@@ -347,6 +569,9 @@ function NameStep() {
  * memory later solves by feeding those names back to it — and people edit
  * themselves when they write. Skipping is a real option, said plainly on the
  * button, because an empty box with a Continue greyed out is a wall.
+ *
+ * The example is a stranger's life, not the author's. A placeholder naming real
+ * people reads as an app that already knows them.
  */
 function YouStep({ value, onChange }: { value: string; onChange: (text: string) => void }) {
   const palette = usePalette();
@@ -362,7 +587,9 @@ function YouStep({ value, onChange }: { value: string; onChange: (text: string) 
         <TextInput
           value={value}
           onChangeText={(text) => onChange(text.slice(0, INTRO_LIMIT))}
-          placeholder={"I'm doing a finance degree at UAlberta. I'm building an app called Noctus with Jason, my cofounder. My sister Priya is at med school in Calgary. I'm trying to get an internship for the summer."}
+          placeholder={
+            'Second year of a law degree. Sharing a flat with two friends, saving for a trip in the summer, and trying to get back into running three times a week.'
+          }
           placeholderTextColor={palette.muted}
           multiline
           textAlignVertical="top"
@@ -387,45 +614,39 @@ function YouStep({ value, onChange }: { value: string; onChange: (text: string) 
 const INTRO_LIMIT = 1200;
 
 /**
- * The card underneath is live. It goes green only once the glasses are actually
- * connected *with a microphone*, so the step proves itself.
+ * Pairing, with the glasses on screen and the live route underneath.
+ *
+ * Connected is connected. This used to insist on a headset profile and go amber
+ * for a pair connected without a microphone — which looked like a failure in
+ * the middle of setup, when nothing had failed: Grove speaks through them, the
+ * phone does the listening, and everything works. It is a note under the name
+ * now rather than a warning.
  */
 function GlassesStep() {
-  const palette = usePalette();
   const { route } = useAgent();
-
-  const good = route.isExternal && route.hasExternalMic;
-  const playbackOnly = route.isExternal && !route.hasExternalMic;
+  const paired = route.isExternal;
 
   return (
     <>
-      <Heading icon="glasses" title="Pair your glasses" />
+      <Heading title="Pair your glasses" />
       <Body>
-        They’re an ordinary Bluetooth headset. iOS does the routing, so there’s nothing to set up
-        in here.
+        They’re an ordinary Bluetooth headset. Open Settings › Bluetooth and pair them — iOS does
+        the routing, so there’s nothing to set up in here.
       </Body>
-      <Todo>
-        Settings › Bluetooth, and pair them. They have to connect as a headset, not playback only
-        — otherwise Grove talks into your ear while the phone listens.
-      </Todo>
-      <Card style={{ marginTop: 12 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <Icon name="glasses" size={19} color={palette.inkSoft} />
-          <View style={{ flex: 1 }}>
-            <Text style={[Type.cardTitle, { color: palette.ink }]}>
-              {route.isExternal ? route.name : 'Nothing paired yet'}
-            </Text>
-            <Text style={[Type.bodySm, { color: palette.muted }]}>
-              {good
-                ? 'Headset — microphone works'
-                : playbackOnly
-                  ? 'Playback only — reconnect as a headset'
-                  : 'Waiting for a headset'}
-            </Text>
-          </View>
-          <Dot tone={good ? 'live' : playbackOnly ? 'alert' : 'off'} />
-        </View>
-      </Card>
+      <View style={{ marginTop: 18 }}>
+        <Product source={GLASSES} height={150} />
+      </View>
+      <Status
+        live={paired}
+        title={paired ? route.name : 'Waiting for your glasses'}
+        note={
+          paired
+            ? route.hasExternalMic
+              ? 'Speaking and listening through them.'
+              : 'Speaking through them, listening on the phone.'
+            : 'They’ll show up here the moment they connect.'
+        }
+      />
     </>
   );
 }
@@ -446,22 +667,31 @@ function RingStep() {
     return () => clearInterval(timer);
   }, []);
 
+  const heard = signals.length > 0;
+
   return (
     <>
-      <Heading icon="ring" title="Press your ring" />
+      <Heading title="Press your ring" />
       <Body>
-        It reaches Grove as a media remote — the same signal a headset’s play button sends.
+        Pair it in Settings, then press it a few times. It reaches Grove as a media remote — the
+        same signal a headset’s play button sends.
       </Body>
-      <Todo>Pair it in Settings, then press it a few times. Whatever it sends shows up below.</Todo>
+      <View style={{ marginTop: 18 }}>
+        <Product source={RING} height={190} />
+      </View>
+      <Status
+        live={heard}
+        title={heard ? `${signals.length} press${signals.length === 1 ? '' : 'es'} heard` : 'Nothing yet'}
+        note={
+          heard
+            ? 'That’s it working. Grove sees every one of these.'
+            : 'If it stays empty, check the ring starts and stops music from the lock screen.'
+        }
+      />
 
-      <Card style={{ marginTop: 12 }}>
-        {signals.length === 0 ? (
-          <Text style={[Type.bodySm, { color: palette.muted }]}>
-            Nothing yet. If it stays empty, your ring isn’t sending media keys — check it starts
-            and stops music from the lock screen.
-          </Text>
-        ) : (
-          signals.slice(0, 5).map((signal, i) => (
+      {heard ? (
+        <View style={{ marginTop: 10, paddingHorizontal: 4 }}>
+          {signals.slice(0, 4).map((signal, i) => (
             <View
               key={`${signal.at}-${i}`}
               style={{
@@ -473,16 +703,15 @@ function RingStep() {
                 borderTopColor: palette.line,
               }}
             >
-              <Dot tone={signal.coalesced ? 'off' : 'live'} size={6} />
-              <Text style={[Type.bodySm, { color: palette.ink, flex: 1 }]}>
+              <Text style={[Type.bodySm, { color: palette.inkSoft, flex: 1 }]}>
                 {signal.command}
                 {signal.phase ? ` · ${signal.phase}` : ''}
               </Text>
               <Mono>{signal.coalesced ? 'merged' : 'used'}</Mono>
             </View>
-          ))
-        )}
-      </Card>
+          ))}
+        </View>
+      ) : null}
     </>
   );
 }
@@ -495,13 +724,9 @@ function LimitStep({ read }: { read: Read }) {
     <>
       <Heading icon="alert" title="One thing to know" />
       <Body>
-        iOS won’t let any app be woken from fully closed by a button press. Grove has to be running
-        for your ring to reach it.
+        iOS won’t let any app be woken from fully closed by a button press. Backgrounded, locked
+        and pocketed are all fine — swiping Grove away turns the ring off until you open it again.
       </Body>
-      <Todo>
-        Backgrounded is fine. Locked is fine. Pocketed is fine. Swiping Grove away turns the ring
-        off until you open it again.
-      </Todo>
 
       {/*
         The intro, read while they were pairing. Their own names, back in their
@@ -509,7 +734,7 @@ function LimitStep({ read }: { read: Read }) {
         this screen could claim about it.
       */}
       {read.state === 'done' ? (
-        <Card style={{ marginTop: 16 }}>
+        <Card style={{ marginTop: 18 }}>
           <Mono style={{ marginBottom: 8 }}>Already yours</Mono>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
             {read.names.map((name) => (

@@ -24,6 +24,7 @@ import { Pressable, Switch, Text, TextInput, View } from 'react-native';
 import { AppIcon, iconForKey, type AppIconName } from '@/components/app-icon';
 import { Icon } from '@/components/icon';
 import { Button, Card, Empty, Mono, Screen, Section } from '@/components/ui';
+import { SwipeAway } from '@/components/swipe-away';
 import { Radius, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
@@ -37,7 +38,7 @@ import type { Entity as LifeEntity, Episode as LifeEpisode } from '@/lib/life';
 import { open as openCaptures, remaining } from '@/lib/inbox';
 import { asMoney, forgetPurchase, loadMoney, standing, type Money } from '@/lib/money';
 import { budgetToday } from '@/lib/interrupt';
-import { clockOf, rhythms, type Rhythms } from '@/lib/rhythms';
+import { EVERY_DAY, clockOf, forgetHabit, rhythms, type Habit, type Rhythms } from '@/lib/rhythms';
 import { shortDate } from '@/lib/when';
 import { when as transcriptWhen } from '@/lib/transcript';
 
@@ -120,7 +121,8 @@ export default function Sparks() {
       {waiting.length > 0 ? (
         <Section label="Inbox">
           {waiting.slice(0, 30).map((item) => (
-            <Card key={item.id} style={{ marginBottom: 6 }}>
+            <SwipeAway key={item.id} label={item.text} onDelete={() => void dropCapture(item.id)}>
+            <Card style={{ marginBottom: 6 }}>
               <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
                 <Pressable
                   accessibilityRole="button"
@@ -138,17 +140,9 @@ export default function Sparks() {
                     {item.during ? ` · caught during ${item.during}` : ''}
                   </Text>
                 </View>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Delete ${item.text}`}
-                  onPress={() => void dropCapture(item.id)}
-                  hitSlop={8}
-                  style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
-                >
-                  <Text style={[Type.bodySm, { color: palette.alert }]}>Delete</Text>
-                </Pressable>
               </View>
             </Card>
+            </SwipeAway>
           ))}
         </Section>
       ) : null}
@@ -189,12 +183,13 @@ export default function Sparks() {
           </Card>
         ) : (
           goals.map((fact) => (
-            <FactCard
-              key={fact.id}
-              fact={fact}
-              onSave={(value) => void editFact(fact.id, value)}
-              onForget={() => void forgetFact(fact.id)}
-            />
+            <SwipeAway key={fact.id} label={fact.value} onDelete={() => void forgetFact(fact.id)}>
+              <FactCard
+                fact={fact}
+                onSave={(value) => void editFact(fact.id, value)}
+                onForget={() => void forgetFact(fact.id)}
+              />
+            </SwipeAway>
           ))
         )}
       </Section>
@@ -213,7 +208,8 @@ export default function Sparks() {
       {stuck.length > 0 ? (
         <Section label="Not clicking yet">
           {stuck.slice(0, 20).map((item) => (
-            <Card key={item.id} style={{ marginBottom: 6 }}>
+            <SwipeAway key={item.id} label={item.what} onDelete={() => void forgetStruggle(item.id)}>
+            <Card style={{ marginBottom: 6 }}>
               <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
                 <Pressable
                   accessibilityRole="button"
@@ -232,21 +228,13 @@ export default function Sparks() {
                     {item.right > 0 ? ' · one right answer so far' : ''}
                   </Text>
                 </View>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Delete ${item.what}`}
-                  onPress={() => void forgetStruggle(item.id)}
-                  hitSlop={8}
-                  style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
-                >
-                  <Text style={[Type.bodySm, { color: palette.alert }]}>Delete</Text>
-                </Pressable>
               </View>
             </Card>
+            </SwipeAway>
           ))}
           <Text style={[Type.bodySm, { color: palette.muted, marginTop: 6 }]}>
-            Say &ldquo;quiz me&rdquo; and these are the questions. Two right answers in a row and
-            one comes off the list.
+            Tick one off when it clicks, or swipe it away. Say &ldquo;quiz me&rdquo; and these are
+            the questions.
           </Text>
         </Section>
       ) : null}
@@ -265,7 +253,9 @@ export default function Sparks() {
           </Card>
         ) : (
           notes.slice(0, 20).map((note) => (
-            <NoteCard key={note.id} note={note} onForget={() => void forgetNote(note.id)} />
+            <SwipeAway key={note.id} label={note.title} onDelete={() => void forgetNote(note.id)}>
+              <NoteCard note={note} onForget={() => void forgetNote(note.id)} />
+            </SwipeAway>
           ))
         )}
       </Section>
@@ -290,13 +280,18 @@ export default function Sparks() {
             .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen))
             .slice(0, 40)
             .map((entity) => (
-              <EntityCard
+              <SwipeAway
                 key={entity.id}
-                entity={entity}
-                episodes={life.episodes.filter((e) => e.about.includes(entity.id))}
-                onForget={() => void forgetEntity(entity.id)}
-                onForgetEpisode={(id) => void forgetEpisode(id)}
-              />
+                label={entity.name}
+                onDelete={() => void forgetEntity(entity.id)}
+              >
+                <EntityCard
+                  entity={entity}
+                  episodes={life.episodes.filter((e) => e.about.includes(entity.id))}
+                  onForget={() => void forgetEntity(entity.id)}
+                  onForgetEpisode={(id) => void forgetEpisode(id)}
+                />
+              </SwipeAway>
             ))
         )}
       </Section>
@@ -304,14 +299,19 @@ export default function Sparks() {
       {life.episodes.length > 0 ? (
         <Section label="What happened">
           {life.episodes.slice(0, 15).map((episode) => (
-            <EpisodeRow
+            <SwipeAway
               key={episode.id}
+              label={episode.title}
+              onDelete={() => void forgetEpisode(episode.id)}
+            >
+            <EpisodeRow
               episode={episode}
               names={episode.about
                 .map((id) => life.entities.find((e) => e.id === id)?.name)
                 .filter((n): n is string => !!n)}
               onForget={() => void forgetEpisode(episode.id)}
             />
+            </SwipeAway>
           ))}
         </Section>
       ) : null}
@@ -326,12 +326,13 @@ export default function Sparks() {
           </Card>
         ) : (
           plain.map((fact) => (
-            <FactCard
-              key={fact.id}
-              fact={fact}
-              onSave={(value) => void editFact(fact.id, value)}
-              onForget={() => void forgetFact(fact.id)}
-            />
+            <SwipeAway key={fact.id} label={fact.value} onDelete={() => void forgetFact(fact.id)}>
+              <FactCard
+                fact={fact}
+                onSave={(value) => void editFact(fact.id, value)}
+                onForget={() => void forgetFact(fact.id)}
+              />
+            </SwipeAway>
           ))
         )}
         {facts.length > 0 ? (
@@ -525,6 +526,7 @@ function Normal() {
   const { uid } = useSession();
   const [usual, setUsual] = useState<Rhythms | null>(null);
   const [budget, setBudget] = useState<{ used: number; of: number; bar: number } | null>(null);
+  const drop = (habits: Habit[]) => setUsual((was) => (was ? { ...was, habits } : was));
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
   useEffect(() => {
@@ -567,25 +569,33 @@ function Normal() {
         ) : null}
       </Card>
 
-      {usual.habits.slice(0, 8).map((h) => (
-        <Card key={`${h.what}-${h.weekday}`} style={{ marginTop: 6 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <View style={{ flex: 1 }}>
-              <Text style={[Type.body, { color: palette.ink }]}>{h.what}</Text>
-              <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
-                {days[h.weekday]}s around {clockOf(h.at)}
-                {h.where ? ` · ${h.where}` : ''}
-              </Text>
+      {usual.habits.slice(0, 10).map((h) => (
+        <SwipeAway
+          key={`${h.what}-${h.weekday}`}
+          label={h.what}
+          onDelete={() => void forgetHabit(uid, h).then(drop)}
+        >
+          <Card style={{ marginTop: 6 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={[Type.body, { color: palette.ink }]}>{h.what}</Text>
+                <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
+                  {h.weekday === EVERY_DAY ? 'Most days' : `${days[h.weekday]}s`} around{' '}
+                  {clockOf(h.at)}
+                  {h.where ? ` · ${h.where}` : ''}
+                </Text>
+              </View>
+              <Mono>{h.weekday === EVERY_DAY ? `${h.seen} times` : `${h.seen} of 4`}</Mono>
             </View>
-            <Mono>{h.seen} of 4</Mono>
-          </View>
-        </Card>
+          </Card>
+        </SwipeAway>
       ))}
 
       {budget ? (
         <Text style={[Type.bodySm, { color: palette.muted, marginTop: 8 }]}>
-          It has spoken up without being asked {budget.used} time{budget.used === 1 ? '' : 's'} today,
-          out of {budget.of}. Telling you to leave for something never counts against that.
+          Swipe any of these away if it isn’t a pattern. It has spoken up without being asked{' '}
+          {budget.used} time{budget.used === 1 ? '' : 's'} today, out of {budget.of} — telling you
+          to leave for something never counts against that.
         </Text>
       ) : null}
     </Section>
@@ -648,27 +658,24 @@ function Spending() {
       </Card>
 
       {money.purchases.slice(0, 10).map((p) => (
-        <Card key={p.id} style={{ marginTop: 6 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <View style={{ flex: 1 }}>
-              <Text style={[Type.body, { color: palette.ink }]}>{p.what}</Text>
-              <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
-                {shortDate(p.at)}
-                {p.category ? ` · ${p.category}` : ''}
-              </Text>
+        <SwipeAway
+          key={p.id}
+          label={p.what}
+          onDelete={() => void forgetPurchase(uid, p.id).then(setMoney)}
+        >
+          <Card style={{ marginTop: 6 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={[Type.body, { color: palette.ink }]}>{p.what}</Text>
+                <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
+                  {shortDate(p.at)}
+                  {p.category ? ` · ${p.category}` : ''}
+                </Text>
+              </View>
+              <Text style={[Type.cardTitle, { color: palette.ink }]}>{asMoney(p.amount, c)}</Text>
             </View>
-            <Text style={[Type.cardTitle, { color: palette.ink }]}>{asMoney(p.amount, c)}</Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Delete ${p.what}`}
-              onPress={() => void forgetPurchase(uid, p.id).then(setMoney)}
-              hitSlop={8}
-              style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
-            >
-              <Icon name="trash" size={15} color={palette.alert} />
-            </Pressable>
-          </View>
-        </Card>
+          </Card>
+        </SwipeAway>
       ))}
       <Text style={[Type.bodySm, { color: palette.muted, marginTop: 6 }]}>
         Say what you spent and it lands here. &ldquo;Should I buy this?&rdquo; is answered against

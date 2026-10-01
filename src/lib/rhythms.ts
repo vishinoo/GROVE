@@ -62,13 +62,24 @@ type Store = {
   days: DayLog[];
   /** The last calendar history read, held so it happens once a day at most. */
   week?: { at: string; habits: Habit[] };
+  /**
+   * Habits the person has thrown away.
+   *
+   * Kept rather than simply deleted, because the next calendar read would find
+   * exactly the same pattern and put it straight back — which is the most
+   * annoying possible response to someone deleting something.
+   */
+  hidden?: string[];
 };
 
 /** Something that happens on the same weekday often enough to be a pattern. */
 export type Habit = {
   /** What it is called, as the calendar calls it. */
   what: string;
-  /** 0–6, Sunday first, matching Date#getDay. */
+  /**
+   * 0–6, Sunday first, matching Date#getDay — or EVERY_DAY for a thing that
+   * happens on most of them.
+   */
   weekday: number;
   /** Minutes past midnight, the median of the times it has started at. */
   at: number;
@@ -90,6 +101,19 @@ const ENOUGH_DAYS = 4;
 
 /** Three of the same weekday is a pattern. Two is a coincidence. */
 const ENOUGH_TIMES = 3;
+
+/**
+ * The weekday of something that does not have one.
+ *
+ * "Wake up", "water", "get ready" are on a calendar every morning, and grouping
+ * strictly by weekday turned each of them into five or six near-identical rows
+ * that said the same thing about the same routine. Past this many weekdays it
+ * is not a Tuesday thing, it is a daily thing, and it is one row.
+ */
+export const EVERY_DAY = -1;
+
+/** Four of the seven. Below that it genuinely is a weekday pattern. */
+const MOST_DAYS = 4;
 
 /** A pattern that took a month to form does not change inside a day. */
 const HISTORY_FOR_MS = 20 * 3_600_000;
@@ -139,10 +163,11 @@ async function load(uid: string): Promise<Store> {
     return {
       days: Array.isArray(parsed.days) ? parsed.days : [],
       week: parsed.week,
+      hidden: Array.isArray(parsed.hidden) ? parsed.hidden : [],
     };
   } catch {
     // A corrupt log means Grove does not know your habits yet. Nothing breaks.
-    return { days: [] };
+    return { days: [], hidden: [] };
   }
 }
 
@@ -232,7 +257,8 @@ export async function rhythms(uid: string, now = new Date()): Promise<Rhythms> {
   const past = store.days.filter((d) => d.day !== today);
   const startedAt = store.days.find((d) => d.day === today)?.first ?? null;
 
-  const habits = store.week?.habits ?? [];
+  const dropped = new Set(store.hidden ?? []);
+  const habits = (store.week?.habits ?? []).filter((h) => !dropped.has(habitKey(h)));
   if (past.length < ENOUGH_DAYS) return { ...empty, startedAt, knownDays: past.length, habits };
 
   const usualStart = median(past.map((d) => d.first).filter((v): v is number => v !== undefined));
@@ -261,7 +287,8 @@ export async function learnWeek(uid: string, now = new Date()): Promise<Habit[]>
   if (!uid || uid === 'anon') return [];
   const store = await load(uid);
   if (store.week && now.getTime() - new Date(store.week.at).getTime() < HISTORY_FOR_MS) {
-    return store.week.habits;
+    const dropped = new Set(store.hidden ?? []);
+    return store.week.habits.filter((h) => !dropped.has(habitKey(h)));
   }
 
   const events = await google.calendarHistory(4).catch(() => null);
@@ -269,7 +296,24 @@ export async function learnWeek(uid: string, now = new Date()): Promise<Habit[]>
 
   const habits = habitsIn(events);
   await update(uid, (s) => ({ ...s, week: { at: now.toISOString(), habits } }));
-  return habits;
+  const dropped = new Set(store.hidden ?? []);
+  return habits.filter((h) => !dropped.has(habitKey(h)));
+}
+
+/**
+ * Throws a habit away for good.
+ *
+ * The key is kept rather than the row deleted, because the row is rebuilt from
+ * the calendar every day and deleting it alone would bring it straight back.
+ */
+export async function forgetHabit(uid: string, habit: Habit): Promise<Habit[]> {
+  const key = habitKey(habit);
+  const next = await update(uid, (s) => ({
+    ...s,
+    hidden: [...new Set([...(s.hidden ?? []), key])].slice(-200),
+  }));
+  const dropped = new Set(next.hidden ?? []);
+  return (next.week?.habits ?? []).filter((h) => !dropped.has(habitKey(h)));
 }
 
 /**
@@ -299,15 +343,49 @@ export function habitsIn(events: google.CalendarEvent[]): Habit[] {
     groups.set(key, group);
   }
 
-  return [...groups.values()]
-    .filter((g) => g.times.length >= ENOUGH_TIMES)
-    .map((g) => {
+  const strong = [...groups.values()].filter((g) => g.times.length >= ENOUGH_TIMES);
+
+  // Anything happening on most weekdays is one routine, not five patterns.
+  // Counted before the per-weekday rows are built, because the merge has to
+  // replace them rather than sit alongside them.
+  const spread = new Map<string, typeof strong>();
+  for (const g of strong) {
+    const key = norm(g.what);
+    spread.set(key, [...(spread.get(key) ?? []), g]);
+  }
+
+  const made: Habit[] = [];
+  for (const [, days] of spread) {
+    const sameThing = days[0];
+    const everyDay = days.length >= MOST_DAYS;
+    const times = everyDay ? days.flatMap((d) => d.times) : null;
+    const wheres = everyDay ? days.flatMap((d) => d.wheres) : null;
+
+    if (everyDay && times && wheres) {
+      made.push({
+        what: sameThing.what,
+        weekday: EVERY_DAY,
+        at: median(times) ?? times[0],
+        seen: times.length,
+        ...(wheres.length >= ENOUGH_TIMES && new Set(wheres).size === 1 ? { where: wheres[0] } : {}),
+      });
+      continue;
+    }
+    for (const g of days) {
       const at = median(g.times) ?? g.times[0];
       // A place is only worth repeating when it has been the same place.
-      const where = g.wheres.length >= ENOUGH_TIMES && new Set(g.wheres).size === 1 ? g.wheres[0] : undefined;
-      return { what: g.what, weekday: g.weekday, at, seen: g.times.length, ...(where ? { where } : {}) };
-    })
-    .sort((a, b) => b.seen - a.seen || a.weekday - b.weekday || a.at - b.at);
+      const where =
+        g.wheres.length >= ENOUGH_TIMES && new Set(g.wheres).size === 1 ? g.wheres[0] : undefined;
+      made.push({ what: g.what, weekday: g.weekday, at, seen: g.times.length, ...(where ? { where } : {}) });
+    }
+  }
+
+  return made.sort((a, b) => b.seen - a.seen || a.weekday - b.weekday || a.at - b.at);
+}
+
+/** Identifies a habit across reads, so one can be hidden and stay hidden. */
+export function habitKey(habit: Habit): string {
+  return `${norm(habit.what)}|${habit.weekday}`;
 }
 
 function norm(text: string): string {
@@ -339,6 +417,16 @@ export function rhythmLines(r: Rhythms, now = new Date()): string {
     );
   }
 
+  const daily = r.habits.filter((h) => h.weekday === EVERY_DAY);
+  if (daily.length > 0) {
+    lines.push(
+      `Most days: ${daily
+        .slice(0, 5)
+        .map((h) => `${h.what} around ${clockOf(h.at)}`)
+        .join('; ')}.`
+    );
+  }
+
   const todays = r.habits.filter((h) => h.weekday === now.getDay());
   if (todays.length > 0) {
     lines.push(
@@ -348,7 +436,9 @@ export function rhythmLines(r: Rhythms, now = new Date()): string {
         .join('; ')}.`
     );
   }
-  const rest = r.habits.filter((h) => h.weekday !== now.getDay()).slice(0, 6);
+  const rest = r.habits
+    .filter((h) => h.weekday !== now.getDay() && h.weekday !== EVERY_DAY)
+    .slice(0, 6);
   if (rest.length > 0) {
     lines.push(
       `The rest of their week: ${rest
@@ -390,7 +480,7 @@ export function structurally(
     );
   }
 
-  const todays = r.habits.filter((h) => h.weekday === now.getDay());
+  const todays = r.habits.filter((h) => h.weekday === now.getDay() || h.weekday === EVERY_DAY);
   if (todays.length > 0) {
     const minute = now.getHours() * 60 + now.getMinutes();
     const planned = todaysEvents
@@ -465,7 +555,10 @@ export function missingToday(
 
   return (
     r.habits.find((h) => {
-      if (h.weekday !== now.getDay() || h.seen < ENOUGH_TIMES) return false;
+      // Never a daily routine. "You normally have wake up around 07:30 on a
+      // Thursday and there's nothing in your diary for it" is not a sentence
+      // worth interrupting anyone with.
+      if (h.weekday === EVERY_DAY || h.weekday !== now.getDay() || h.seen < ENOUGH_TIMES) return false;
       const away = h.at - minute;
       if (away < soonest || away > latest) return false;
       return !already(h.what);

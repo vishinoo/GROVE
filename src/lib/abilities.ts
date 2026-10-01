@@ -2101,6 +2101,16 @@ const MUSIC_RECENT: Ability = {
  * "I can't reach the weather" for a town Grove has looked up fifty times.
  * Places do not move.
  */
+/**
+ * Where Grove assumes you are until told otherwise.
+ *
+ * Behind the town named in the sentence and the one recorded in memory, so
+ * "weather in Toronto" and "I live in Bristol" both beat it — the second
+ * permanently. Ahead of the network's guess, which is IP geolocation and is
+ * routinely wrong by a few hundred kilometres.
+ */
+const DEFAULT_TOWN = 'Edmonton';
+
 const placeCache = new Map<string, { latitude: number; longitude: number; name: string }>();
 
 /** The last answer, so a blip repeats yesterday's minute rather than failing. */
@@ -2142,10 +2152,12 @@ const WEATHER: Ability = {
     // difference between an assistant and a form.
     let place = asked;
     if (!place) place = (await homeTown()) ?? '';
+    // The stated town, ahead of the network's guess. Geolocation by IP is
+    // routinely wrong by several hundred kilometres — it put this phone in
+    // Vancouver — and being confidently wrong about where someone is standing
+    // is worse than a default they can change by saying where they live.
+    if (!place) place = DEFAULT_TOWN;
     if (!place) place = (await cityFromNetwork()) ?? '';
-    if (!place) {
-      return { ok: false, spoken: 'Which town am I checking?' };
-    }
 
     try {
       // Bounded even though runAbility bounds the whole run: failing at 8

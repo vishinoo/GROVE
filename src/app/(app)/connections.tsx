@@ -19,7 +19,7 @@ import { Card, Mono, Notice, Screen, Section } from '@/components/ui';
 import { Radius, Type } from '@/constants/theme';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
-import { ABILITIES, abilityById } from '@/lib/abilities';
+import { abilityById } from '@/lib/abilities';
 import { CONNECTIONS, providerFor, type Connection } from '@/lib/connections';
 import { grantMessage, type GrantOutcome } from '@/lib/devicePermissions';
 import { missingScopes } from '@/lib/googleAuth';
@@ -32,7 +32,6 @@ export default function Connections() {
   const [error, setError] = useState<string | null>(null);
   /** Set when the fix is in iOS Settings, so the notice can go straight there. */
   const [needsSettings, setNeedsSettings] = useState(false);
-  const [showAll, setShowAll] = useState(false);
   /**
    * Jobs the Google sign-in was never given permission for.
    *
@@ -43,8 +42,6 @@ export default function Connections() {
    */
   const [ungranted, setUngranted] = useState<string[]>([]);
 
-  /** Only what is actually built — a list of things that do not work is noise. */
-  const wired = ABILITIES.filter((a) => a.wired);
 
   const live = new Set(connections);
   const connected = CONNECTIONS.filter((c) => live.has(c.key));
@@ -159,56 +156,6 @@ export default function Connections() {
             onPress={() => void act(item)}
           />
         ))}
-      </Section>
-
-      {/*
-        What all of that adds up to.
-
-        A connection is not a capability, and this screen only showed the
-        former: Contacts and Calling both arrive through the Google row, so
-        adding them changed nothing visible and there was no way to find out
-        what Grove could suddenly do. The useful question is never "is Google
-        connected" but "what can I say", and this answers it.
-
-        Folded away, because two dozen cards is a wall rather than a list. Open
-        it when you want to know what to ask for; the rest of the time this
-        screen is about what is connected, which is five rows.
-      */}
-      <Section label="Everything it can do">
-        <Card style={{ paddingVertical: 0 }}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ expanded: showAll }}
-            onPress={() => setShowAll((was) => !was)}
-            style={({ pressed }) => ({
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 10,
-              paddingVertical: 14,
-              opacity: pressed ? 0.6 : 1,
-            })}
-          >
-            <Text style={[Type.body, { color: palette.ink, flex: 1 }]}>
-              {wired.length} things you can ask for
-            </Text>
-            <Mono color={palette.muted}>{showAll ? 'hide' : 'show'}</Mono>
-          </Pressable>
-
-          {showAll ? (
-            <View style={{ paddingBottom: 12, gap: 12 }}>
-              {wired.map((ability) => (
-                <View key={ability.id} style={{ borderTopWidth: 1, borderTopColor: palette.line, paddingTop: 10 }}>
-                  <Text style={[Type.cardTitle, { color: palette.ink }]}>{ability.name}</Text>
-                  {ability.examples[0] ? (
-                    <Text style={[Type.bodySm, { color: palette.muted, marginTop: 3 }]}>
-                      &ldquo;{ability.examples[0]}&rdquo;
-                    </Text>
-                  ) : null}
-                </View>
-              ))}
-            </View>
-          ) : null}
-        </Card>
       </Section>
 
       <Text

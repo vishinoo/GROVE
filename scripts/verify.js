@@ -606,6 +606,53 @@ section('The budget can never silence a leave-by');
   check(/worthSaying\(/.test(attention), 'and still goes through the budget rather than around it');
 }
 
+/*
+ * 15. One row per routine.
+ *
+ * A thing on the calendar every weekday was grouped strictly by weekday, which
+ * turned one morning routine into five near-identical rows saying the same
+ * thing — and then offered to chase the person about each of them separately
+ * for not being in today's diary.
+ */
+section('A daily routine is one row, and is never chased');
+{
+  const rhythms = require(path.join(OUT, 'lib/rhythms.js'));
+  const at = (back, hh, mm, title) => {
+    const d = new Date();
+    d.setDate(d.getDate() - back);
+    d.setHours(hh, mm, 0, 0);
+    return { id: `${title}${back}`, title, start: d.toISOString(), end: d.toISOString(), allDay: false, location: '' };
+  };
+
+  const history = [];
+  for (let back = 1; back <= 28; back += 1) {
+    const d = new Date();
+    d.setDate(d.getDate() - back);
+    if (d.getDay() === 0 || d.getDay() === 6) continue;
+    history.push(at(back, 7, 30, 'Wake up'));
+  }
+  for (const back of [7, 14, 21, 28]) history.push(at(back, 19, 0, 'Basketball'));
+
+  const habits = rhythms.habitsIn(history);
+  check(habits.length === 2, `${history.length} events become ${habits.length} rows`, habits.map((h) => h.what).join(', '));
+  const daily = habits.find((h) => h.what === 'Wake up');
+  check(daily && daily.weekday === rhythms.EVERY_DAY, 'a weekday-morning routine is one daily row');
+  const weekly = habits.find((h) => h.what === 'Basketball');
+  check(weekly && weekly.weekday !== rhythms.EVERY_DAY, 'a once-a-week fixture keeps its weekday');
+
+  // The interruption this would otherwise produce is absurd, and it is the
+  // reason the merge matters rather than merely tidying a screen.
+  const soon = new Date();
+  soon.setHours(7, 0, 0, 0);
+  const never = { habits: [{ what: 'Wake up', weekday: rhythms.EVERY_DAY, at: 7 * 60 + 30, seen: 20 }] };
+  check(rhythms.missingToday(never, [], soon) === null, 'nobody is asked why "wake up" is not in their diary');
+
+  // Hiding one has to survive the next calendar read, or deleting it is
+  // pointless: the pattern is still there and would be learned again.
+  check(typeof rhythms.forgetHabit === 'function', 'a habit can be thrown away for good');
+  check(typeof rhythms.habitKey === 'function', 'and is identified across reads by a stable key');
+}
+
 /* ------------------------------------------------------------- verdict */
 
 console.log(

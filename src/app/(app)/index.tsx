@@ -452,8 +452,8 @@ function LogLine({ label, children }: { label: string; children: string }) {
  * Two facts, stated plainly, because between them they explain every way this
  * product fails: the glasses aren't connected, or the ring can't reach Grove.
  * The mic caveat is separate from the route on purpose — a pair of glasses can
- * be connected for playback and still not be listening, which is otherwise an
- * invisible and maddening failure.
+ * be connected for playback while the phone does the listening — which still
+ * works, and is said under the name rather than coloured as a fault.
  */
 function Hardware({
   armed,
@@ -470,11 +470,18 @@ function Hardware({
 }) {
   return (
     <View style={{ flexDirection: 'row', gap: 8 }}>
+      {/*
+        Paired is paired. This used to go amber for a pair connected without a
+        microphone, which was technically true and read as a fault — the
+        glasses were on, Grove was working, and the strip said something was
+        wrong. The microphone is the phone's in that case and everything still
+        works, so it is a note under the name rather than a warning colour.
+      */}
       <Chip
         icon="glasses"
         label={external ? routeName : 'Phone'}
-        hint={external && !mic ? 'playback only' : undefined}
-        tone={external ? (mic ? 'live' : 'alert') : 'off'}
+        hint={external && !mic ? 'phone mic' : undefined}
+        tone={external ? 'live' : 'off'}
       />
       {/*
         Three states, because there are three. Grove cannot see a paired ring —
