@@ -43,6 +43,7 @@ import { loadNotes, searchNotes } from './notes';
 import { loadPlayed, playedLines, recordPlayed } from './listening';
 import { loadDocs, rememberDoc } from './docs';
 import * as inbox from './inbox';
+import { rhythmLines, rhythms } from './rhythms';
 import { loadFocus } from './inbox';
 import {
   closeEpisode,
@@ -3030,12 +3031,15 @@ const NOW: Ability = {
       loadFocus(CURRENT_UID),
       inbox.loadInbox(CURRENT_UID).then(inbox.open),
     ]);
-    const [events, reminders, life, facts, notes] = await Promise.all([
+    const [events, reminders, life, facts, notes, usual] = await Promise.all([
       google.readCalendar(2).catch(() => null),
       openReminders(15).catch(() => null),
       loadLife(CURRENT_UID),
       loadFacts(CURRENT_UID),
       loadNotes(CURRENT_UID),
+      rhythms(CURRENT_UID)
+        .then((r) => rhythmLines(r))
+        .catch(() => ''),
     ]);
 
     // An all-day event starts at midnight, so the "last two hours" window drops
@@ -3097,6 +3101,9 @@ const NOW: Ability = {
       owed.length ? `Still owed:\n${owed.map((o) => `- ${o}`).join('\n')}` : '',
       todo.length ? `From recent notes:\n${todo.slice(0, 8).map((t) => `- ${t}`).join('\n')}` : '',
       goals.length ? `Working towards: ${goals.join('; ')}` : '',
+      // What a normal day looks like, so "I have 40 minutes" is answered
+      // against their week rather than in a vacuum.
+      usual,
     ]
       .filter(Boolean)
       .join('\n');

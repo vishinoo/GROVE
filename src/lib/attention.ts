@@ -31,6 +31,7 @@
 
 import { openReminders } from './deviceCalendar';
 import * as google from './google';
+import { clockOf, missingToday, rhythms } from './rhythms';
 
 export type Moment = {
   /** Stable for the thing itself, so it is said once and not once a minute. */
@@ -138,7 +139,11 @@ export type Attention = {
  *
  * Ordered by what it costs the person to miss, not by what is soonest.
  */
-export async function whatMatters(state: Attention, now = new Date()): Promise<Moment | null> {
+export async function whatMatters(
+  state: Attention,
+  uid: string,
+  now = new Date()
+): Promise<Moment | null> {
   const soon = await upcoming(now);
 
   // 1. Leaving. The only thing here that is genuinely urgent, because being
@@ -182,7 +187,23 @@ export async function whatMatters(state: Attention, now = new Date()): Promise<M
     };
   }
 
-  // 3. Late. Something they chose to be reminded of, whose time has passed —
+  // 3. Missing. The one thing on this list the calendar cannot tell you,
+  //    because it is about what is *not* in it: a weekly fixture whose hour is
+  //    coming round with nothing in the diary. Basketball at seven for four
+  //    Wednesdays running, and an empty Wednesday evening, is either a
+  //    cancellation or a thing about to be forgotten — and being asked costs
+  //    nothing in the first case. See rhythms.ts for why three weeks is the bar.
+  const usual = await rhythms(uid, now).catch(() => null);
+  const absent = usual ? missingToday(usual, soon, now) : null;
+  if (absent && !state.said.has(`usual:${absent.what}:${now.toDateString()}`)) {
+    return {
+      id: `usual:${absent.what}:${now.toDateString()}`,
+      urgency: 'soon',
+      say: `You normally have ${absent.what} around ${clockOf(absent.at)} on a ${now.toLocaleDateString('en-GB', { weekday: 'long' })}, and there's nothing in your diary for it. Still on?`,
+    };
+  }
+
+  // 4. Late. Something they chose to be reminded of, whose time has passed —
   //    said once, an hour after the fact rather than the moment it slips, so a
   //    reminder set for nine is not a nine o'clock alarm.
   const reminders = (await openReminders(10).catch(() => null)) ?? [];

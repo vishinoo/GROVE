@@ -57,6 +57,7 @@ import * as memory from '@/lib/memory';
 import * as life from '@/lib/life';
 import { whatMatters, nextUp, type Attention, type NextUp } from '@/lib/attention';
 import { nextDiscovery } from '@/lib/reveal';
+import { learnWeek, noteTurn } from '@/lib/rhythms';
 import { afterTurn, consolidateNow, rememberNote } from '@/lib/consolidate';
 import * as notesStore from '@/lib/notes';
 import * as inbox from '@/lib/inbox';
@@ -486,6 +487,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       // Opening the app is the only reliable moment a device-side spark gets.
       void catchUp();
     });
+    // What their week normally looks like. Held for a day inside rhythms.ts, so
+    // this is a network call on the first open of the day and free after that.
+    void learnWeek(uid);
     // catchUp is declared below and is stable (useCallback with no deps), so
     // naming it here would be a forward reference for no benefit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -577,6 +581,11 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     const mine = () => mounted.current && turn === turnSeq.current;
 
     const { persona: voice, facts: known, uid: account } = live.current;
+
+    // When the day started. Marked here, on something the person said, rather
+    // than on anything Grove said first — a leave-by reminder landing at seven
+    // before they have spoken would file every day as an early one.
+    void noteTurn(account);
 
     // A phrase trigger turns your own words into a button, so it is checked
     // before anything is routed: "play my favourite song" should run the spark
@@ -909,8 +918,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // Urgency first, always. A discovery is only ever offered when there is
     // nothing to be late for — being told what you talk about most while you
     // should be leaving the house is the wrong order.
-    const moment = await whatMatters(attention.current);
     const account = live.current.uid;
+    const moment = await whatMatters(attention.current, account);
     // Both of these record what they offered before it is spoken, so the state
     // is re-checked here rather than after — a press that landed during the
     // calendar read means this turn is over, and a discovery marked as said

@@ -755,17 +755,52 @@ export async function readCalendar(days = 1): Promise<CalendarEvent[] | null> {
     // means, and reading them out is how a free day sounds busy.
     .filter((e) => e.status !== 'cancelled')
     .filter((e) => !(e.attendees ?? []).some((a) => a.self && a.responseStatus === 'declined'))
-    .map((e) => ({
-      id: e.id ?? '',
-      title: e.summary || 'Untitled',
-      start: e.start?.dateTime || e.start?.date || '',
-      // Needed to answer "is anything on right now" and "how long have I got":
-      // a start time alone cannot tell you whether you are in the middle of it.
-      end: e.end?.dateTime || e.end?.date || '',
-      allDay: Boolean(e.start?.date && !e.start?.dateTime),
-      location: e.location ?? '',
-    }))
+    .map(asEvent)
     .filter((e) => e.start);
+}
+
+function asEvent(e: RawEvent): CalendarEvent {
+  return {
+    id: e.id ?? '',
+    title: e.summary || 'Untitled',
+    start: e.start?.dateTime || e.start?.date || '',
+    // Needed to answer "is anything on right now" and "how long have I got":
+    // a start time alone cannot tell you whether you are in the middle of it.
+    end: e.end?.dateTime || e.end?.date || '',
+    allDay: Boolean(e.start?.date && !e.start?.dateTime),
+    location: e.location ?? '',
+  };
+}
+
+/**
+ * The weeks behind, for working out what someone's week normally looks like.
+ *
+ * Separate from readCalendar because everything else here looks forward and
+ * because the shape of the request is different: a month of history needs a
+ * far higher result cap than a day of diary, and asking for 250 events on
+ * every "what's on today" would be a slow call spoken into someone's ear.
+ *
+ * Read rarely — a pattern that took four weeks to form does not change inside
+ * a day — so rhythms.ts holds the answer and asks again once a day at most.
+ */
+export async function calendarHistory(weeks = 4): Promise<CalendarEvent[] | null> {
+  const back = Math.min(Math.max(weeks, 1), 12);
+  const to = new Date();
+  const from = new Date(to.getTime() - back * 7 * 86_400_000);
+
+  const params = new URLSearchParams({
+    timeMin: from.toISOString(),
+    timeMax: to.toISOString(),
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    maxResults: '250',
+  });
+  const data = await call<{ items?: RawEvent[] }>(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`,
+    { timeoutMs: 20_000 }
+  );
+  if (data === null) return null;
+  return (data.items ?? []).filter((e) => e.status !== 'cancelled').map(asEvent).filter((e) => e.start);
 }
 
 /**

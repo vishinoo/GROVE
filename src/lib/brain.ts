@@ -39,6 +39,7 @@ import {
 } from './lightModel';
 import { asPromptBlock, factFrom } from './memory';
 import { lately, loadLife, whoIsWho } from './life';
+import { rhythmLines, rhythms } from './rhythms';
 import { loadFocus, loadInbox, open as openCaptures, remaining } from './inbox';
 import { calculate } from './calc';
 import { abilitiesFor, modeById } from './modes';
@@ -338,7 +339,7 @@ export async function askWithTools(
   // A line of names, not the archive: enough that "my cofounder" and "Jason"
   // are the same person without a lookup, and cheap enough to ride on every
   // turn. Everything else about them is a tool call away.
-  const [roster, session, waiting] = await Promise.all([
+  const [roster, session, waiting, usual] = await Promise.all([
     loadLife(currentAccount())
       .then((l) => [whoIsWho(l), lately(l)].filter(Boolean).join('\n'))
       .catch(() => ''),
@@ -348,6 +349,11 @@ export async function askWithTools(
     loadInbox(currentAccount())
       .then((items) => openCaptures(items).slice(0, 4).map((i) => i.text))
       .catch(() => [] as string[]),
+    // What a normal week looks like, and whether today is one. Free: a median
+    // and a group-by over what is already on the phone.
+    rhythms(currentAccount())
+      .then((r) => rhythmLines(r))
+      .catch(() => ''),
   ]);
   const list =
     waiting.length > 0
@@ -360,7 +366,9 @@ export async function askWithTools(
   const focusing = session
     ? `They are in a focus session on ${session.what}${remaining(session) ? ` — ${remaining(session)}` : ''}. Anything that is not that: capture it and point them back in one short line, and do not expand on it. Answer anything that IS about ${session.what} properly. If they ask what they should be doing, the answer is ${session.what}.`
     : '';
-  const system = [systemFor(context, available), roster, list, focusing].filter(Boolean).join('\n\n');
+  const system = [systemFor(context, available), roster, usual, list, focusing]
+    .filter(Boolean)
+    .join('\n\n');
   const fact = factFrom(userText) ?? undefined;
 
   // Sums are worked out exactly and handed over as a fact; see calc.ts.
