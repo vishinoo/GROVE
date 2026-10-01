@@ -325,6 +325,73 @@ nothing closes with a second sound. Urgency always wins over a discovery: being
 told what you talk about most while you should be leaving the house is the wrong
 order.
 
+## The interruption budget
+
+`src/lib/attention.ts` decides what *could* be said; `src/lib/interrupt.ts`
+decides whether it is worth saying, and that second question is the product.
+**Grove's measure is not how much it gets used, it is how little of someone's
+attention it spends.** Every other assistant is tuned the other way, and that
+one difference produces opposite software.
+
+Each rule returns a candidate with what it is worth. **Three factors, not
+five** — the obvious design multiplies importance, confidence, time
+sensitivity, relevance and expected benefit, and the last two are the same
+guess wearing different names, both collapsing into "how much would they regret
+missing it", which the rule already knows. What is left:
+
+- **cost of missing**, 1–5, stated by the rule, on a scale too coarse to fake
+  judgement with.
+- **confidence**, taken from an actual count wherever there is one. Three of
+  the last four weeks is 0.75 and clears the bar; twice is 0.5 and does not.
+  *Nobody picked those numbers*, which is the only reason they can be trusted.
+- **perishability** — being told to leave is worthless afterwards; a note about
+  spending is as true tomorrow.
+
+Three a day, forty-five minutes apart, nothing repeated. The bar moves with
+them: talking shortly after an unprompted line is the only evidence that the
+line was wanted, so answering lowers it and ignoring raises it — crude on
+purpose, and it takes six before it moves at all.
+
+**The budget may never silence a leave-by.** A budget that can stop "you need
+to leave now" has turned a safety feature into a rationing problem. Anything
+above the exempt line skips the cap, the spacing and the learned bar, and
+`npm run verify` proves the highest bar anyone could teach it still sits below
+what a leave-by scores.
+
+## Constraints, in one read
+
+`src/lib/constraints.ts`. Money was never about money: the useful abstraction
+is **a fact about someone's situation that makes some answers wrong which would
+otherwise be right**. The forty minutes before a lecture, the £180 left, the
+thing promised on Tuesday, the concept never followed — collected in one place
+so a new constraint reaches every answer at once rather than being threaded
+through each ability by hand. Nothing is stored; every line is assembled from
+whichever module owns it.
+
+Not in every prompt, because it needs the diary and the diary is a network
+call. The cheap constraints ride on every turn (rhythm, focus, the list,
+frictions); the full picture is assembled by `now.context`, which is the
+ability someone reaches when the shape of their day *is* the question.
+
+**Provenance is printed, not dropped**: `told`, `observed` or `inferred` on
+every line. The model can then tell which it may state back as fact, and the
+person hearing "you're usually up by eight" can find out it came from counting.
+Every spoken claim about a pattern carries its count for the same reason — that
+sentence is an assertion about someone's life made by a machine, and the
+difference between impressive and presumptuous is whether they can see where it
+came from. The Sparks screen shows what Grove thinks is normal, with the count
+beside each line, and what the interruptions have cost today.
+
+## Friction, not just knowledge
+
+`struggles.ts` holds two kinds. A **knowledge** gap can be tested and feeds the
+quiz. A **habit** cannot: "you keep forgetting your charger" is the same
+primitive — a thing that goes wrong more than once — but you cannot ask someone
+a question about it, and trying is the kind of hectoring that gets an app
+deleted. Habits feed the prompt instead, so they are in mind at the moment the
+thing is about to happen again, capped at three: ten is a list of someone's
+failings read back to them.
+
 ## The first run teaches it about you
 
 Three slides, then the checklist. The slides are the only marketing in the app
