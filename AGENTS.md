@@ -310,6 +310,15 @@ why the harness asserts every line interpolates something of theirs. Each needs
 its evidence to exist or the day passes quietly; one a day, once ever, nothing
 after the first week and a bit.
 
+**On the seventh day Grove asks whether it may speak up before being asked**,
+and asks on screen with two buttons rather than out loud — a spoken question
+needs an open microphone, and on this particular decision a misheard yes is the
+worst possible outcome. `persona.friend.proactive` has three states and the
+unset one is the point: unset volunteers only things with a clock on them, plus
+the one-a-day discoveries that earn the right to ask. Yes opens the standing
+observations; no closes them and leaves the urgent half alone, because "don't
+chat to me" and "don't tell me I'm about to be late" are different requests.
+
 **Nothing unprompted opens the microphone**, even the lines that end in a
 question. Grove started it, the phone is in a pocket, and a mic that hears
 nothing closes with a second sound. Urgency always wins over a discovery: being
@@ -318,7 +327,18 @@ order.
 
 ## The first run teaches it about you
 
-`src/app/onboarding.tsx` has one step that is not setup: a box asking who is in
+Three slides, then the checklist. The slides are the only marketing in the app
+and exist because Grove is indistinguishable from any other voice assistant for
+thirty seconds and completely different after a week.
+
+**Onboarding was unreachable in a release build for a while.** The gate in
+`src/app/index.tsx` read the session: a live one meant the app had been used
+before. True while Noctus was mandatory, false the moment Grove went standalone
+— with no backend the session reports `signed-in` on the first launch, by
+design, because there is no account to sign in to. It now turns on whether the
+intro has been seen, and nothing else.
+
+`src/app/onboarding.tsx` also has one step that is not setup: a box asking who is in
 your life and what you are working on. Typed, not spoken, and this is the one
 place in the app where that is the right way round — it is a paragraph, it is
 full of proper nouns a recogniser has never heard, and people edit themselves
@@ -590,6 +610,90 @@ lookup rather than embeddings (agentmemory's own benchmark puts BM25 alone at
 scoring, provenance on every fact, and supersession instead of contradiction
 detection. What was deliberately not taken: vectors, decay formulas and reward
 propagation, all of which need a server or a second model to earn their keep.
+
+## What a normal week looks like
+
+`src/lib/rhythms.ts` is the only part that knows what *usually* happens, which
+is the missing input behind "you slept late, so I'd leave around 10:20". The
+calendar gives the eleven o'clock and the route planner the forty minutes;
+neither can tell you today started two hours later than normal, and without
+that the advice is the same every day.
+
+Two sources, both already on the phone: the first and last thing said to Grove
+each day (a rough proxy for waking and turning in, used only as a comparison
+against the same person's own median and never stated as a fact about their
+sleep), and a month of calendar history grouped by title and weekday. **Three
+Wednesdays at seven is a pattern; two is a coincidence.** No model call — a
+median and a group-by have to be free, because this rides in every prompt.
+
+It buys one interruption the calendar cannot produce: a weekly fixture whose
+hour is coming round with **nothing in the diary for it**. Matched by
+containment, so "Basketball (moved)" counts — an exact match would nag someone
+about an event they are looking at. Being up early is never remarked on, and
+under four days there is no prompt block at all.
+
+## Things you did not understand
+
+`src/lib/struggles.ts` records a gap rather than a fact, which makes it the one
+memory that is useful precisely because it is about something you cannot do.
+Anything can explain integration by parts; what nothing else can do is remember
+that *you* did not follow it, asked again two weeks later, and have still never
+got it right unprompted.
+
+**Two correct answers close it, not one.** One right answer about a thing you
+just revised is a memory test; the second, days later, is understanding. A wrong
+answer reopens it and resets the count.
+
+The quiz needed a new primitive: `listenAfter` on `AbilityResult`, an ability
+whose answer is itself a question. Declared, never inferred — the
+missing-argument case works by accident of shape (a failed run whose line
+contains a "?") and that cannot work here, where the run succeeded and the
+question is the point. A running quiz goes **last** in the system prompt, where
+it has the most say, with the answer key: marking is the one job a model is
+genuinely good at here and it cannot tell a right answer from a confident wrong
+one without knowing what right was.
+
+## Money
+
+See also the section further down on why nothing spends any. `src/lib/money.ts`
+is a ledger and an opinion. The numbers are numbers, not facts: "you spent £80
+on shoes" as a sentence can be read back and cannot be added up, and a budget
+you cannot subtract from is a feeling.
+
+**It asks before it answers.** A missing price and a monthly figure nobody has
+stated both come back as questions, through the same path as "which town?", and
+both answers are kept so it only ever asks once. Advice with a number missing
+sounded certain while doing arithmetic on a budget that did not exist.
+
+**It never says buy it** — not as a moral position, but because Grove can only
+see what it has been told and never the bank, and a confident yes off a partial
+ledger is the one output here that could cost money. Where the numbers are
+comfortable it says so and leaves the decision alone.
+
+## The memory is encrypted at rest
+
+`src/lib/vault.ts` sits under the ten stores that hold someone's life: AES-256
+in counter mode, key in the Keychain under
+`WHEN_UNLOCKED_THIS_DEVICE_ONLY` — **which is the whole point**, since the key
+then never rides an iCloud sync or comes back from a backup onto another phone.
+Without that flag the key travels beside the data it protects.
+
+Two rules matter more than the cipher:
+
+- **An unsealed value is read as it is**, then re-sealed on the spot. Refusing
+  it would wipe every existing install.
+- **A write that cannot be encrypted is written in the clear.** Losing what
+  someone just said in order to protect it is the wrong trade.
+
+No MAC, deliberately: confidentiality is the goal, and damaged bytes fail to
+parse, which every store already treats as a corrupt archive. `vaultReady()`
+is asked rather than assumed, because a claim about encryption nobody checked
+is how "encrypted at rest" ends up in a changelog and nowhere else.
+
+`npm run verify` fails if any of those stores reaches AsyncStorage directly —
+a one-import regression that type-checks and whose only symptom would be a
+sentence in Settings quietly becoming untrue. It also asserts `startAgain`
+clears all of them; it used to clear three stores and leave five.
 
 ## Voice notes
 
