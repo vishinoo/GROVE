@@ -26,6 +26,7 @@ import { Icon } from '@/components/icon';
 import { Button, Card, Empty, Mono, Screen, Section } from '@/components/ui';
 import { Radius, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
+import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { abilityById, type Ability } from '@/lib/abilities';
 import { describeTrigger, parseSchedule, phraseTrigger, type Spark } from '@/lib/sparks';
@@ -34,6 +35,7 @@ import { VALUE_MAX } from '@/lib/memory';
 import type { Note as NoteItem } from '@/lib/notes';
 import type { Entity as LifeEntity, Episode as LifeEpisode } from '@/lib/life';
 import { open as openCaptures, remaining } from '@/lib/inbox';
+import { asMoney, forgetPurchase, loadMoney, standing, type Money } from '@/lib/money';
 import { shortDate } from '@/lib/when';
 import { when as transcriptWhen } from '@/lib/transcript';
 
@@ -194,6 +196,8 @@ export default function Sparks() {
           ))
         )}
       </Section>
+
+      <Spending />
 
       {/*
         The one list here that is about something you cannot do yet, which is
@@ -499,6 +503,93 @@ function ModeCard({
  * delete, exactly as a standing instruction is — and showing them in two
  * different shapes would suggest a difference that is not there.
  */
+
+/**
+ * The ledger, where you can see it.
+ *
+ * Same rule as everything else on this screen: a memory you cannot see is one
+ * you cannot correct, and money is the memory where a wrong entry does the most
+ * damage — one mistyped amount and every piece of advice after it is arithmetic
+ * about a number that never happened. So every line here can be deleted.
+ *
+ * Read on mount rather than held in the agent context, because nothing else on
+ * screen depends on it and spending changes a few times a day at most.
+ */
+function Spending() {
+  const palette = usePalette();
+  const { uid } = useSession();
+  const [money, setMoney] = useState<Money | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void loadMoney(uid).then((m) => {
+      if (alive) setMoney(m);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [uid]);
+
+  if (!money || (money.purchases.length === 0 && money.monthly === undefined)) return null;
+  const s = standing(money);
+  const c = money.currency;
+
+  return (
+    <Section label="Spending">
+      <Card>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
+          <Text style={[Type.screenTitle, { color: palette.ink }]}>{asMoney(s.thisMonth, c)}</Text>
+          <Text style={[Type.bodySm, { color: palette.muted, flex: 1 }]}>
+            this month
+            {s.left === null ? '' : ` · ${asMoney(s.left, c)} left of ${asMoney(money.monthly ?? 0, c)}`}
+          </Text>
+        </View>
+        {s.byCategory.length > 0 ? (
+          <Text style={[Type.bodySm, { color: palette.inkSoft, marginTop: 6 }]}>
+            {s.byCategory
+              .slice(0, 4)
+              .map((g) => `${g.category} ${asMoney(g.amount, c)}`)
+              .join(' · ')}
+          </Text>
+        ) : null}
+        {s.usualMonth !== null ? (
+          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 4 }]}>
+            A normal month for you is about {asMoney(s.usualMonth, c)}.
+          </Text>
+        ) : null}
+      </Card>
+
+      {money.purchases.slice(0, 10).map((p) => (
+        <Card key={p.id} style={{ marginTop: 6 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={[Type.body, { color: palette.ink }]}>{p.what}</Text>
+              <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
+                {shortDate(p.at)}
+                {p.category ? ` · ${p.category}` : ''}
+              </Text>
+            </View>
+            <Text style={[Type.cardTitle, { color: palette.ink }]}>{asMoney(p.amount, c)}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Delete ${p.what}`}
+              onPress={() => void forgetPurchase(uid, p.id).then(setMoney)}
+              hitSlop={8}
+              style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+            >
+              <Icon name="trash" size={15} color={palette.alert} />
+            </Pressable>
+          </View>
+        </Card>
+      ))}
+      <Text style={[Type.bodySm, { color: palette.muted, marginTop: 6 }]}>
+        Say what you spent and it lands here. &ldquo;Should I buy this?&rdquo; is answered against
+        these numbers, and nothing in Grove can spend any of it.
+      </Text>
+    </Section>
+  );
+}
+
 function FactCard({
   fact,
   onSave,

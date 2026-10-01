@@ -1171,6 +1171,51 @@ Return JSON: {"subjects": [{"name": "<exactly as given>", "summary": "...", "fac
 }
 
 /**
+ * Whether something is a good idea, given what they have and what they want.
+ *
+ * Its own call because the shape of a good answer here is unlike anything else
+ * in the app: it has to lead with the number, it has to connect the purchase to
+ * the thing they said they were saving for, and it has to be willing to say no
+ * to someone who has already decided. A general assistant prompt produces "it
+ * depends on your priorities!", which is the answer of something that does not
+ * know you.
+ *
+ * It is told never to say buy it. Not as a moral position — this is one
+ * person's own tool — but because Grove can only see what it has been told,
+ * never the bank, and a confident yes from something working off a partial
+ * ledger is the one output here that could actually cost money.
+ */
+export async function lightAdvice(
+  item: string,
+  price: string,
+  money: string,
+  goals: string,
+  recent: string
+): Promise<string | null> {
+  return complete(
+    `You are advising one person on whether to buy something. You know their budget and what they have spent. Be direct and brief — three or four sentences, spoken aloud.
+
+How to answer:
+- Lead with the arithmetic. What this costs against what is left, and how far through the month it is.
+- Connect it to what they said they are working towards, if anything here touches it. A thing they are saving for is the strongest argument you have.
+- Say if they have bought something like it recently. That is usually the real answer.
+- End with what you would want to know or wait for, not with a verdict to go ahead.
+
+Never say to buy it, never say it is fine, and never tell them what they want to hear. You can only see what they have told you, not their bank, so do not speak as though the ledger is complete. If the numbers say they can easily afford it, say that plainly and leave the decision with them. No markdown, no lists, no currency conversions.`,
+    [
+      {
+        role: 'user',
+        content: `Thinking about: ${item}\nPrice: ${price}\n\nTheir money:\n${money}\n\nWhat they are working towards:\n${goals || '(nothing recorded)'}\n\nSimilar things bought lately:\n${recent || '(none)'}`,
+      },
+    ],
+    false,
+    false,
+    false,
+    400
+  );
+}
+
+/**
  * Questions about the things someone did not understand.
  *
  * Its own call, and a short one, because the job is unusually easy to get

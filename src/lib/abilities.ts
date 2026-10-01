@@ -44,6 +44,7 @@ import { loadPlayed, playedLines, recordPlayed } from './listening';
 import { loadDocs, rememberDoc } from './docs';
 import * as inbox from './inbox';
 import { rhythmLines, rhythms } from './rhythms';
+import * as money from './money';
 import * as struggles from './struggles';
 import { loadFocus } from './inbox';
 import {
@@ -65,6 +66,7 @@ import {
   lightDigest,
   lightDocument,
   lightEmail,
+  lightAdvice,
   lightPlan,
   lightQuiz,
   lightResearch,
@@ -4046,12 +4048,245 @@ const STUDY_STOP: Ability = {
   },
 };
 
+
+/* ---------------------------------------------------------------- money */
+
+/**
+ * What they have to spend. Asked for rather than assumed.
+ *
+ * The first thing `money.advise` does when it has no figure is ask for one,
+ * and this is where that answer lands — so it is also the ability that makes
+ * every later piece of advice specific instead of hedged.
+ */
+const MONEY_BUDGET: Ability = {
+  id: 'money.budget',
+  name: 'Set a budget',
+  what: 'Records what they have to spend in a month, overall or for one kind of thing. Use when they state a figure: "I have 400 a month", "my food budget is 300", "I can spend about 2k on this trip". Also use with nothing set to read back what they have.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {
+    amount: { type: 'string', what: 'the figure they said, digits or words — "400", "two thousand"' },
+    category: {
+      type: 'string',
+      what: 'what the figure is for, in their words: food, clothes, going out. Empty when it is their whole monthly spend.',
+    },
+    currency: { type: 'string', what: 'a three-letter code, only if they named a currency' },
+  },
+  examples: [
+    'I have 400 a month to spend',
+    'set my food budget to 300 a month',
+    'my monthly budget is two thousand',
+  ],
+  run: async (args) => {
+    const held = await money.loadMoney(CURRENT_UID);
+    const amount = money.readAmount(args.amount || '');
+    if (amount === null) {
+      const s = money.standing(held);
+      if (held.monthly === undefined && !held.caps) {
+        return { ok: false, spoken: 'You have not told me what you are working with. How much a month?' };
+      }
+      return {
+        ok: true,
+        spoken:
+          held.monthly === undefined
+            ? `No overall figure, but ${Object.entries(held.caps ?? {}).map(([k, v]) => `${k} ${money.asMoney(v, held.currency)}`).join(', ')}.`
+            : `${money.asMoney(held.monthly, held.currency)} a month, and ${money.asMoney(s.thisMonth, held.currency)} of it is gone.`,
+        detail: money.moneyBlock(held),
+      };
+    }
+
+    const next = await money.setBudget(CURRENT_UID, amount, args.category, (args.currency || '').toUpperCase() || undefined);
+    const where = (args.category || '').trim();
+    return {
+      ok: true,
+      spoken: where
+        ? `${money.asMoney(amount, next.currency)} a month for ${where}.`
+        : `Right — ${money.asMoney(amount, next.currency)} a month.`,
+      detail: money.moneyBlock(next),
+    };
+  },
+};
+
+/**
+ * "I spent eighty on shoes."
+ *
+ * A number with a date on it, which is the whole reason this is not a fact in
+ * memory.ts: a ledger you can add up produces advice that names a figure, and
+ * a sentence you can read back does not.
+ */
+const MONEY_SPENT: Ability = {
+  id: 'money.spent',
+  name: 'Log what you spent',
+  what: 'Records money spent, so later advice knows about it. Use whenever they mention buying something or what it cost: "I spent 80 on shoes", "dinner was 140", "just bought a monitor for 300".',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {
+    what: { type: 'string', what: 'what they bought, in their words', required: true },
+    amount: { type: 'string', what: 'what it cost', required: true },
+    category: {
+      type: 'string',
+      what: 'a loose grouping in their own words if it is obvious: food, clothes, transport, going out. Empty if not.',
+    },
+  },
+  examples: [
+    'I spent 80 on running shoes',
+    'dinner last night was 140',
+    'I just bought a monitor for 300',
+    'put 45 down for petrol',
+  ],
+  run: async (args) => {
+    const amount = money.readAmount(args.amount || '');
+    const what = (args.what || '').trim();
+    if (!what) return { ok: false, spoken: 'What was it you bought?' };
+    if (amount === null) return { ok: false, spoken: `How much for the ${what}?` };
+
+    const next = await money.spent(CURRENT_UID, what, amount, args.category || '');
+    const s = money.standing(next);
+    const left = s.left === null ? '' : ` ${money.asMoney(s.left, next.currency)} left this month.`;
+    return {
+      ok: true,
+      spoken: `Logged — ${money.asMoney(amount, next.currency)} on ${what}.${left}`,
+      detail: money.moneyBlock(next),
+    };
+  },
+};
+
+/** "How much have I spent this month?" */
+const MONEY_REVIEW: Ability = {
+  id: 'money.review',
+  name: 'Where the money went',
+  what: 'Reads back what they have spent — the total this month, where it went, and what is left. Use for "how much have I spent", "where is my money going", "how am I doing this month".',
+  where: 'device',
+  wired: true,
+  needs: [],
+  reads: true,
+  args: {},
+  examples: [
+    'how much have I spent this month',
+    'what is my budget',
+    'where is my money going',
+    'how am I doing on my budget',
+    'what have I spent on food',
+  ],
+  run: async () => {
+    const held = await money.loadMoney(CURRENT_UID);
+    if (held.purchases.length === 0 && held.monthly === undefined) {
+      return {
+        ok: false,
+        spoken: 'I have nothing on your spending yet. Tell me what you spend and what you have a month and I can keep track.',
+      };
+    }
+    const s = money.standing(held);
+    const c = held.currency;
+    const top = s.byCategory[0];
+    return {
+      ok: true,
+      spoken: [
+        `${money.asMoney(s.thisMonth, c)} so far this month`,
+        s.left === null ? '' : `, ${money.asMoney(s.left, c)} left`,
+        top ? `. Most of it on ${top.category}, ${money.asMoney(top.amount, c)}` : '',
+        '.',
+      ].join(''),
+      detail: money.moneyBlock(held),
+    };
+  },
+};
+
+/**
+ * "Should I buy this?"
+ *
+ * The one money question a phone cannot answer, because answering it needs the
+ * budget, the month so far, and the thing they said they were saving for.
+ *
+ * It asks before it answers. A price it was not given and a monthly figure
+ * nobody has ever stated both come back as questions — which the turn handles
+ * through the same path as "which town?", so the answer arrives as the next
+ * sentence and fills the gap. Guessing either produces advice that sounds
+ * certain and is arithmetic about numbers nobody supplied.
+ */
+const MONEY_ADVISE: Ability = {
+  id: 'money.advise',
+  name: 'Should I buy this',
+  what: 'Weighs a purchase against their budget, what they have already spent and what they are saving for. Use for "should I buy this", "can I afford X", "is this a good idea", "talk me out of this". It never buys anything.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  reads: true,
+  timeoutMs: 30_000,
+  args: {
+    item: { type: 'string', what: 'what they are thinking of buying, as specifically as the conversation allows', required: true },
+    price: { type: 'string', what: 'what it costs', required: true },
+    monthly: {
+      type: 'string',
+      what: 'only when they have just told you what they have a month. Normally left empty — it is already stored.',
+    },
+  },
+  examples: [
+    'should I buy these headphones',
+    'can I afford a 300 dollar monitor',
+    'is it a good idea to get a new laptop',
+    'talk me out of buying this',
+  ],
+  run: async (args) => {
+    const item = (args.item || '').trim();
+    if (!item) return { ok: false, spoken: 'What are you thinking of buying?' };
+    const price = money.readAmount(args.price || '');
+    if (price === null) return { ok: false, spoken: `How much for the ${item}?` };
+
+    // A figure they have just said is recorded before it is used, so the next
+    // question of this kind does not ask again.
+    const stated = money.readAmount(args.monthly || '');
+    if (stated !== null) await money.setBudget(CURRENT_UID, stated);
+    const held = await money.loadMoney(CURRENT_UID);
+
+    // No budget and none offered: ask, rather than advise around a hole. The
+    // turn routes the answer back into this same ability.
+    if (held.monthly === undefined && !held.caps) {
+      return {
+        ok: false,
+        spoken: `Before I say anything useful — what are you working with a month?`,
+      };
+    }
+
+    const facts = await loadFacts(CURRENT_UID);
+    const goals = facts.filter((f) => f.kind === 'goal').map((f) => f.value).join('; ');
+    const before = money.similar(held, item);
+    const advice = (
+      await lightAdvice(
+        item,
+        money.asMoney(price, held.currency),
+        money.moneyBlock(held),
+        goals,
+        before.map((p) => `${p.what} — ${money.asMoney(p.amount, held.currency)} on ${shortDate(p.at)}`).join('\n')
+      )
+    )?.trim();
+
+    const s = money.standing(held);
+    // The arithmetic is said whether or not the model answered, because the
+    // numbers are the part that was actually asked for.
+    const sums = `${money.asMoney(price, held.currency)} against ${
+      s.left === null ? `${money.asMoney(s.thisMonth, held.currency)} already spent` : `${money.asMoney(s.left, held.currency)} left`
+    } this month.`;
+    return {
+      ok: true,
+      spoken: advice || sums,
+      detail: [sums, money.moneyBlock(held), goals ? `Working towards: ${goals}` : ''].filter(Boolean).join('\n'),
+    };
+  },
+};
+
 export const ABILITIES: Ability[] = [
   NOW,
   STUDY_STUCK,
   STUDY_QUIZ,
   STUDY_NEXT,
   STUDY_STOP,
+  MONEY_ADVISE,
+  MONEY_BUDGET,
+  MONEY_SPENT,
+  MONEY_REVIEW,
   CAPTURE,
   INBOX_REVIEW,
   FOCUS_START,

@@ -184,7 +184,7 @@ const BARE_YES =
  * Address forms are allowed in front of it, because people say "please" and
  * "hey Grove" and mean the imperative that follows.
  */
-const VERBS = String.raw`make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up|play|read|brief|tell me about|email|text|message|call|switch to|switch into|go into|turn on|turn off|open|handle|push|reschedule|delay|shift|dim|start|stop|queue|skip|pause|resume|let .{2,20} know|give me|reply|respond|answer|forward|let'?s go|take me|drive me|directions|navigate|which way|delete|remove|take|summari[sz]e|catch me up|recap|digest|remember|note|jot|keep in mind|don'?t let me forget|tick|mark|ring|dial|complete|finished|get me|order|uber|book me|share|capture|focus(?: on)?|jot|quiz|test|forget`;
+const VERBS = String.raw`make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up|play|read|brief|tell me about|email|text|message|call|switch to|switch into|go into|turn on|turn off|open|handle|push|reschedule|delay|shift|dim|start|stop|queue|skip|pause|resume|let .{2,20} know|give me|reply|respond|answer|forward|let'?s go|take me|drive me|directions|navigate|which way|delete|remove|take|summari[sz]e|catch me up|recap|digest|remember|note|jot|keep in mind|don'?t let me forget|tick|mark|ring|dial|complete|finished|get me|order|uber|book me|share|capture|focus(?: on)?|jot|quiz|test|forget|set|talk me out of`;
 
 /** "hey Grove, please …" — anything that can precede an instruction. */
 /**
@@ -246,6 +246,31 @@ const NAV_COMMAND = new RegExp(
  */
 const ORDER_COMMAND = new RegExp(
   `^\\s*${ADDRESS}(?:i(?:'d| would)? (?:want|need|like) to |i'?m going to )(?:order|get)\\s+\\S`,
+  'i'
+);
+
+/**
+ * Stating a figure: what something cost, or what they have to spend.
+ *
+ * Needed for the same reason STRUGGLE_STATEMENT is — these are statements, not
+ * instructions, and every one of them leads with a subject rather than a verb.
+ * "I spent eighty on shoes" is the sentence that makes every later piece of
+ * money advice specific instead of hedged, and without a gate it reached
+ * nothing at all.
+ *
+ * The last branch is the narrow one and is anchored at the end on purpose:
+ * "dinner was 140" is a price and "the film was 140 minutes" is not, and the
+ * only reliable difference is whether a unit follows the number.
+ */
+const MONEY_STATEMENT = new RegExp(
+  `^\\s*${ADDRESS}(?:` +
+    String.raw`i (?:just |only )?(?:spent|paid|bought|picked up|dropped)\b` +
+    String.raw`|i(?:'ve| have)? got (?:about )?(?:[$£€]\s*)?\d` +
+    String.raw`|i have (?:about )?(?:[$£€]\s*)?\d[\d.,]*\s*(?:a|per|each) (?:month|week)\b` +
+    String.raw`|my (?:\w+ )?budget is\b` +
+    String.raw`|my monthly (?:budget|spend|allowance)\b` +
+    ')' +
+    String.raw`|^.{0,40}\bwas\s+(?:[$£€]\s*)?\d+(?:\.\d{1,2})?\s*(?:dollars|pounds|euros|bucks|quid)?\s*[.!]?\s*$`,
   'i'
 );
 
@@ -315,7 +340,7 @@ const ELLIPTICAL_LOOKUP =
   /^\s*(?:anything|any (?:mail|messages|emails|news)|catch me up|brief me|where am i at|remind me who)\b/i;
 
 const LOOKUP_QUESTION =
-  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|coat|umbrella|wear|traffic|how long|how far|eta|leave for|leave by|set off|get there|get home|which way|way to|route to|far is|my day|day looking|got on|first thing|last thing|next thing|what time is|what time'?s|note|notes|memo|memos|to-?do|task|tasks|my list|still have to do|number|phone number|contact|first class|last class|of the day|first class|class|appointment|meeting|event|events|booked|flight|this week|anything with|anything on|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|doc|docs|document|plan|notes|spreadsheet|drive|document|documents|report|reports|written|inbox|captured|capture|news|markets|happened|remind me (?:what|who|about)|supposed to|do i know about|did i say|what did i|anything from|say about|did .{2,20} say|supposed to be doing|should i (?:do|work on|be doing|start)|what now|where am i at|catch me up|idea|ideas|decide|decided|decision|working on|been up to|happened|brief me|who is|who's|important|attention|urgent|deal with|needs me|need(?:s)? (?:my )?(?:attention|doing)|outstanding|promised|owe|commitment|commitments|free time|have (?:an? )?(?:hour|minutes?)|did .{2,20} do|score|won|win|lose|lost|game|match|free online|free to|how much|cost|costs|price|open|opens|close|closes|hours|where can i|where do i|buy|available)\b/i;
+  /\b(calendar|schedule|diary|agenda|weather|forecast|temperature|rain|coat|umbrella|wear|traffic|how long|how far|eta|leave for|leave by|set off|get there|get home|which way|way to|route to|far is|my day|day looking|got on|first thing|last thing|next thing|what time is|what time'?s|note|notes|memo|memos|to-?do|task|tasks|my list|still have to do|number|phone number|contact|first class|last class|of the day|first class|class|appointment|meeting|event|events|booked|flight|this week|anything with|anything on|on today|on tomorrow|next (?:thing|meeting|event)|free (?:at|on|today|tomorrow)|inbox|email|emails|mail|doc|docs|document|plan|notes|spreadsheet|drive|document|documents|report|reports|written|inbox|captured|capture|news|markets|happened|remind me (?:what|who|about)|supposed to|do i know about|did i say|what did i|anything from|say about|did .{2,20} say|supposed to be doing|should i (?:do|work on|be doing|start)|what now|where am i at|catch me up|idea|ideas|decide|decided|decision|working on|been up to|happened|brief me|who is|who's|important|attention|urgent|deal with|needs me|need(?:s)? (?:my )?(?:attention|doing)|outstanding|promised|owe|commitment|commitments|free time|have (?:an? )?(?:hour|minutes?)|did .{2,20} do|score|won|win|lose|lost|game|match|free online|free to|how much|cost|costs|price|open|opens|close|closes|hours|where can i|where do i|buy|available|afford|budget|spent|spend|spending|money|cheaper|worth it)\b/i;
 
 /**
  * Whether this is a question Grove should look up rather than answer offhand.
@@ -370,6 +395,9 @@ export function detectActIntent(text: string): boolean {
   // "I don't get this" is a request to write it down, however little it looks
   // like one. See STRUGGLE_STATEMENT.
   if (STRUGGLE_STATEMENT.test(t)) return true;
+  // "I spent eighty on shoes" is a thing to write down, and leads with a
+  // subject like every other statement the imperative test cannot see.
+  if (MONEY_STATEMENT.test(t)) return true;
   // A bare go-ahead beats the question test, because it is the whole sentence.
   if (BARE_GO_AHEAD.test(t) || BARE_YES.test(t)) return true;
   // "Study mode." "Back to normal." No verb anywhere, and unmistakably an
