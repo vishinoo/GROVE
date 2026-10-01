@@ -32,14 +32,18 @@ import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
+import { remaining } from '@/lib/inbox';
 import { modeById } from '@/lib/modes';
 import { when } from '@/lib/transcript';
+
+import type { NextUp } from '@/lib/attention';
+import type { Focus } from '@/lib/inbox';
 
 export default function Talk() {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   const { notice, dismissNotice } = useSession();
-  const { state, caption, heard, level, armed, ringSeen, route, problem, activity, next, press, say, persona } =
+  const { state, caption, heard, level, armed, ringSeen, route, problem, activity, next, focus, press, say, persona } =
     useAgent();
 
   const [draft, setDraft] = useState('');
@@ -125,42 +129,7 @@ export default function Talk() {
           </Text>
         )}
 
-        {/*
-          The one thing worth knowing without asking, and the only thing on
-          this screen that is there before you speak. A leave-by time earns its
-          place because it is the thing a phone in a pocket cannot tell you.
-        */}
-        {next ? (
-          <View
-            style={{
-              marginTop: 26,
-              alignSelf: 'center',
-              maxWidth: 420,
-              width: '100%',
-              paddingVertical: 12,
-              paddingHorizontal: 16,
-              borderRadius: Radius.well,
-              backgroundColor: palette.raised,
-              borderWidth: 1,
-              borderColor: palette.line,
-            }}
-          >
-            <Text style={[Type.bodySm, { color: palette.muted }]}>Next</Text>
-            <Text style={[Type.body, { color: palette.ink, marginTop: 2 }]}>
-              {next.title} at{' '}
-              {next.at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-            </Text>
-            {next.leaveBy ? (
-              <Text style={[Type.bodySm, { color: palette.ink, marginTop: 4 }]}>
-                Leave by{' '}
-                {next.leaveBy.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-                {next.where ? ` for ${next.where}` : ''}
-              </Text>
-            ) : next.where ? (
-              <Text style={[Type.bodySm, { color: palette.muted, marginTop: 4 }]}>{next.where}</Text>
-            ) : null}
-          </View>
-        ) : null}
+        <Now focus={focus} next={next} />
 
         {activity.length > 0 ? (
           <View style={{ marginTop: 32 }}>
@@ -239,6 +208,80 @@ export default function Talk() {
  * it all took place while you were looking somewhere else, so "did that
  * reminder actually get set" is a question with no other way to answer it.
  */
+/**
+ * The only thing on this screen that is there before you speak.
+ *
+ * Two lines at most, and both of them answer "what am I supposed to be doing" —
+ * which is the question someone has when they take the phone out, and the one
+ * thing a lock screen cannot answer. A focus session goes above the diary
+ * because it is what they chose over everything in it, and a leave-by time
+ * earns its place by being a fact nothing else on the phone will tell them.
+ *
+ * Nothing here is a dashboard. If there is no session and nothing coming, it is
+ * not there at all — an empty "Nothing standing yet" panel was on the Sparks
+ * screen once and was the ugliest thing in the app.
+ */
+function Now({ focus, next }: { focus: Focus | null; next: NextUp }) {
+  const palette = usePalette();
+  if (!focus && !next) return null;
+  const left = focus ? remaining(focus) : '';
+
+  return (
+    <View
+      style={{
+        marginTop: 26,
+        alignSelf: 'center',
+        maxWidth: 420,
+        width: '100%',
+        paddingVertical: 13,
+        paddingHorizontal: 16,
+        borderRadius: Radius.well,
+        backgroundColor: palette.raised,
+        borderWidth: 1,
+        borderColor: palette.line,
+      }}
+    >
+      {focus ? (
+        <>
+          <Mono>On</Mono>
+          <Text style={[Type.body, { color: palette.ink, marginTop: 3 }]}>
+            {focus.what}
+            {left ? <Text style={{ color: palette.muted }}>{`  ${left}`}</Text> : null}
+          </Text>
+        </>
+      ) : null}
+
+      {next ? (
+        <View
+          style={
+            focus
+              ? { marginTop: 11, paddingTop: 11, borderTopWidth: 1, borderTopColor: palette.line }
+              : undefined
+          }
+        >
+          <Mono>Next</Mono>
+          <Text style={[Type.body, { color: palette.ink, marginTop: 3 }]}>
+            {next.title}
+            <Text style={{ color: palette.muted }}>{`  ${clock(next.at)}`}</Text>
+          </Text>
+          {next.leaveBy ? (
+            <Text style={[Type.bodySm, { color: palette.ink, marginTop: 4 }]}>
+              Leave by {clock(next.leaveBy)}
+              {next.where ? ` — ${next.where}` : ''}
+            </Text>
+          ) : next.where ? (
+            <Text style={[Type.bodySm, { color: palette.muted, marginTop: 4 }]}>{next.where}</Text>
+          ) : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function clock(date: Date): string {
+  return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+
 function LogRow({ entry }: { entry: ReturnType<typeof useAgent>['activity'][number] }) {
   const palette = usePalette();
   const [open, setOpen] = useState(false);

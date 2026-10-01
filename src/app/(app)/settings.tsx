@@ -449,6 +449,10 @@ export default function Settings() {
         spent an evening debugging a model that had already been fixed, because
         the phone was still running the bundle that had the broken one.
       */}
+      <Section label="What leaves your phone">
+        <Privacy />
+      </Section>
+
       <Section label="Version">
         <Card>
           <Row label="Update" value={updateLabel} />
@@ -470,6 +474,52 @@ export default function Settings() {
         />
       </Section>
     </Screen>
+  );
+}
+
+
+/**
+ * Said plainly, because the honest version is the good version.
+ *
+ * Grove listens while you walk around, which is the most invasive thing any app
+ * can do, and the only defensible answer to that is to say exactly where every
+ * piece of it goes. Every line here is a fact about this build, not a promise
+ * about intentions: no server to sync to, one thing that goes out to be
+ * answered, everything else on the phone, and the verbatim record as the
+ * shortest-lived thing in the app.
+ *
+ * Deliberately not a policy. A policy is written for a lawyer; this is written
+ * for the person wearing the glasses.
+ */
+function Privacy() {
+  const palette = usePalette();
+  const backend = (process.env.EXPO_PUBLIC_NOCTUS_URL ?? '').trim();
+
+  const lines = [
+    backend
+      ? `You have pointed Grove at a backend of your own (${backend}). Model calls can go through it.`
+      : 'There is no Grove server. No account, nothing synced, nothing held anywhere for you to be leaked from.',
+    'To answer you, what you said goes to the model — along with the short list of facts in Settings and the names of the people and projects it knows. Web questions go out as searches.',
+    'Your mail, calendar, contacts and documents travel between this phone and Google. Nothing else sees them.',
+    'Everything Grove remembers lives on this phone: the facts, the people, what happened, your captures and your notes. All of it is on the Sparks screen, where you can correct it or delete it.',
+    'The word-for-word record is the shortest-lived thing here. The last fifteen exchanges are kept so it can follow a conversation, and the turns waiting to be read into memory are deleted the moment they have been.',
+    'No camera. Grove never asks for one, and the glasses are a headset as far as it is concerned.',
+  ];
+
+  return (
+    <Card>
+      {lines.map((line, i) => (
+        <Text
+          key={line.slice(0, 20)}
+          style={[
+            Type.bodySm,
+            { color: i === 0 ? palette.ink : palette.inkSoft, lineHeight: 20, marginTop: i === 0 ? 0 : 12 },
+          ]}
+        >
+          {line}
+        </Text>
+      ))}
+    </Card>
   );
 }
 
