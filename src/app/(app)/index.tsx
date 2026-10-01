@@ -39,7 +39,7 @@ export default function Talk() {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   const { notice, dismissNotice } = useSession();
-  const { state, caption, heard, level, armed, ringSeen, route, problem, activity, press, say, persona } =
+  const { state, caption, heard, level, armed, ringSeen, route, problem, activity, next, press, say, persona } =
     useAgent();
 
   const [draft, setDraft] = useState('');
@@ -124,6 +124,43 @@ export default function Talk() {
             {armed ? 'Press your ring, or the orb above.' : 'Press the orb above to talk.'}
           </Text>
         )}
+
+        {/*
+          The one thing worth knowing without asking, and the only thing on
+          this screen that is there before you speak. A leave-by time earns its
+          place because it is the thing a phone in a pocket cannot tell you.
+        */}
+        {next ? (
+          <View
+            style={{
+              marginTop: 26,
+              alignSelf: 'center',
+              maxWidth: 420,
+              width: '100%',
+              paddingVertical: 12,
+              paddingHorizontal: 16,
+              borderRadius: Radius.well,
+              backgroundColor: palette.raised,
+              borderWidth: 1,
+              borderColor: palette.line,
+            }}
+          >
+            <Text style={[Type.bodySm, { color: palette.muted }]}>Next</Text>
+            <Text style={[Type.body, { color: palette.ink, marginTop: 2 }]}>
+              {next.title} at{' '}
+              {next.at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+            {next.leaveBy ? (
+              <Text style={[Type.bodySm, { color: palette.ink, marginTop: 4 }]}>
+                Leave by{' '}
+                {next.leaveBy.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                {next.where ? ` for ${next.where}` : ''}
+              </Text>
+            ) : next.where ? (
+              <Text style={[Type.bodySm, { color: palette.muted, marginTop: 4 }]}>{next.where}</Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {activity.length > 0 ? (
           <View style={{ marginTop: 32 }}>

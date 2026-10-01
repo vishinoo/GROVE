@@ -55,6 +55,7 @@ import { isSpeaking, speak, stopSpeaking } from '@/lib/speak';
 import { lightNotes } from '@/lib/lightModel';
 import * as memory from '@/lib/memory';
 import * as life from '@/lib/life';
+import { whatMatters, nextUp, type Attention, type NextUp } from '@/lib/attention';
 import { afterTurn, consolidateNow, rememberNote } from '@/lib/consolidate';
 import * as notesStore from '@/lib/notes';
 import * as inbox from '@/lib/inbox';
@@ -139,6 +140,9 @@ type AgentValue = {
   forgetEntity: (id: string) => Promise<void>;
   forgetEpisode: (id: string) => Promise<void>;
 
+  /** The next thing in the day, and when to leave for it. Shown, never spoken. */
+  next: NextUp;
+
   /** The trigger, however it was pressed — ring, screen or keyboard. */
   press: () => void;
   /** Skip the microphone entirely. Used by the typed fallback. */
@@ -176,6 +180,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const openedAt = useRef(0);
   /** When Grove last made a sound, which is when a phantom press can arrive. */
   const lastSound = useRef(0);
+  /** What has already been volunteered, so nothing is said twice. */
+  const attention = useRef<Attention>({ said: new Set<string>() });
+  const [next, setNext] = useState<NextUp>(null);
   /** So a listen can retry itself without `press` being rebuilt. */
   const beginListeningRef = useRef<((continuous: boolean, retrying?: boolean) => void) | null>(null);
 
@@ -876,6 +883,41 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           // A build without the native half never queued anything to resume.
         }
       }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * Speaking first, which is the part that can ruin the product.
+   *
+   * Every ninety seconds while Grove is resting: work out whether there is one
+   * thing worth an interruption (attention.ts decides what qualifies), and say
+   * it only if the mode allows interruptions at all, nothing else is happening,
+   * and it has not already been said. Everything else waits to be asked.
+   */
+  const considerSpeaking = useCallback(async () => {
+    if (!mounted.current) return;
+    const resting = stateNow.current === 'idle' || stateNow.current === 'asleep';
+    if (!resting || running.current || isSpeaking() || memo.current || awaitingYes.current) return;
+
+    const mode = modeById(live.current.persona.mode ?? 'normal');
+    if (!maySpeak(mode, lastVolunteered.current)) return;
+    // Checking in is theirs to switch off; nothing here overrides that.
+    if (live.current.persona.friend?.checksIn === false) return;
+
+    const moment = await whatMatters(attention.current);
+    if (!moment || !mounted.current) return;
+    if (stateNow.current !== 'idle' && stateNow.current !== 'asleep') return;
+
+    attention.current.said.add(moment.id);
+    lastVolunteered.current = new Date().toISOString();
+    setCaption(moment.say);
+    utter(moment.say);
+
+    const account = live.current.uid;
+    if (account && account !== 'anon') {
+      const entries = await transcript.record(account, { said: '', replied: moment.say });
+      if (mounted.current) setActivity(entries);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1647,16 +1689,34 @@ function shortFailure(text: string): string {
       void arm();
     }, 4 * 60_000);
 
+    // Speaking first. Ninety seconds is often enough to catch a "leave now"
+    // while it is still useful, and rare enough that the checks cost nothing:
+    // a calendar read, and a route lookup only when something with an address
+    // is close.
+    const watch = setInterval(() => void considerSpeaking(), 90_000);
+    void considerSpeaking();
+
+    // What the Talk screen shows without being asked. A minute is finer than
+    // anyone needs and still cheap.
+    const refreshNext = async () => {
+      const found = await nextUp().catch(() => null);
+      if (mounted.current) setNext(found);
+    };
+    void refreshNext();
+    const upcoming = setInterval(() => void refreshNext(), 60_000);
+
     return () => {
       cancelled = true;
       clearInterval(heartbeat);
+      clearInterval(watch);
+      clearInterval(upcoming);
       offTrigger();
       offRoute();
       appSub.remove();
     };
     // finishNote reads only refs and stable setters; see the note on `press`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, press, beginListening, catchUp, setState]);
+  }, [status, press, beginListening, catchUp, considerSpeaking, setState]);
 
   /**
    * The volume-down fallback follows the preference, but only once the session
@@ -1719,6 +1779,7 @@ function shortFailure(text: string): string {
       dropCapture,
       focus,
       endFocus,
+      next,
       life: lifeMemory,
       forgetEntity,
       forgetEpisode,
@@ -1755,6 +1816,7 @@ function shortFailure(text: string): string {
       dropCapture,
       focus,
       endFocus,
+      next,
       lifeMemory,
       forgetEntity,
       forgetEpisode,
