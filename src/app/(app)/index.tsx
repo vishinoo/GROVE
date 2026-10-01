@@ -43,7 +43,7 @@ export default function Talk() {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   const { notice, dismissNotice } = useSession();
-  const { state, caption, heard, level, armed, ringSeen, route, problem, activity, next, focus, press, say, persona } =
+  const { state, caption, heard, level, armed, ringSeen, route, problem, activity, next, focus, dayOne, press, say, persona, updatePersona } =
     useAgent();
 
   const [draft, setDraft] = useState('');
@@ -130,6 +130,79 @@ export default function Talk() {
         )}
 
         <Now focus={focus} next={next} />
+
+        {/*
+          The one question Grove asks about itself, on the seventh day, once.
+          Asked on screen with two buttons rather than out loud, because a
+          spoken question needs an open microphone and "yeah" has to be
+          unmistakably an answer — on a decision about whether something may
+          talk to you unprompted, a misheard yes is the worst possible outcome.
+        */}
+        {dayOne >= 7 && persona.friend?.proactive === undefined ? (
+          <View
+            style={{
+              marginTop: 18,
+              alignSelf: 'center',
+              maxWidth: 420,
+              width: '100%',
+              paddingVertical: 14,
+              paddingHorizontal: 16,
+              borderRadius: Radius.well,
+              backgroundColor: palette.sunken,
+              borderWidth: 1,
+              borderColor: palette.lineStrong,
+            }}
+          >
+            <Text style={[Type.body, { color: palette.ink }]}>
+              A week in. I know your week well enough now to speak up before you ask — when a
+              fixture is missing from your diary, or something you meant to do has gone past.
+            </Text>
+            <Text style={[Type.bodySm, { color: palette.muted, marginTop: 8 }]}>
+              Either way I&rsquo;ll still tell you when you need to leave for something.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() =>
+                  void updatePersona({
+                    ...persona,
+                    friend: { ...(persona.friend ?? {}), proactive: true },
+                  })
+                }
+                style={({ pressed }) => ({
+                  flex: 1,
+                  paddingVertical: 11,
+                  borderRadius: Radius.card,
+                  backgroundColor: palette.ink,
+                  alignItems: 'center',
+                  opacity: pressed ? 0.6 : 1,
+                })}
+              >
+                <Text style={[Type.cardTitle, { color: palette.paper }]}>Go ahead</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() =>
+                  void updatePersona({
+                    ...persona,
+                    friend: { ...(persona.friend ?? {}), proactive: false },
+                  })
+                }
+                style={({ pressed }) => ({
+                  flex: 1,
+                  paddingVertical: 11,
+                  borderRadius: Radius.card,
+                  borderWidth: 1,
+                  borderColor: palette.lineStrong,
+                  alignItems: 'center',
+                  opacity: pressed ? 0.6 : 1,
+                })}
+              >
+                <Text style={[Type.cardTitle, { color: palette.ink }]}>Only if it&rsquo;s urgent</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
 
         {activity.length > 0 ? (
           <View style={{ marginTop: 32 }}>

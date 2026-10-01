@@ -227,6 +227,19 @@ function lower(text: string): string {
 }
 
 /**
+ * How many days in they are, so the seventh can be recognised.
+ *
+ * Reads the same record the discoveries use, and creates it on first call —
+ * which means the day Grove was first opened, not the day something first
+ * thought to ask.
+ */
+export async function dayIn(uid: string, now = new Date()): Promise<number> {
+  if (!uid || uid === 'anon') return 0;
+  const progress = await loadProgress(uid, now);
+  return dayNumber(progress.firstAt, now);
+}
+
+/**
  * The one discovery worth offering today, or nothing.
  *
  * Recorded as said before it is returned, because the caller is about to speak

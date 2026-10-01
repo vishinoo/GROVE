@@ -28,15 +28,20 @@ export default function Index() {
     );
   }
 
-  // A live session means this app has been used before, so the intro is only
-  // ever in the way — it belongs in front of people who haven't signed in.
+  // Whether the intro has been seen decides this, and nothing else does.
   //
-  // This deliberately outranks ALWAYS_SHOW_ONBOARDING. That flag used to come
-  // first, so a machine with it set walked a signed-in user through the intro
-  // on every launch and then dropped them at /login — which reads as being
-  // signed out, and means doing Google again, several times a day. A dev
-  // convenience must not be able to look like a broken session.
-  if (status === 'signed-in') return <Redirect href="/(app)" />;
+  // It used to be the session: a live one meant the app had been used before,
+  // so the intro was assumed to be in the way. That held while Noctus was
+  // mandatory and stopped holding the moment Grove went standalone — with no
+  // backend configured the session context reports 'signed-in' on the very
+  // first launch, by design, because there is no account to sign in to. So this
+  // branch sent every new install straight past the intro, and onboarding had
+  // been unreachable in a release build ever since: no name, no hardware
+  // checklist, nobody told that a force-quit turns the ring off.
+  //
+  // The dev flag still comes second, so a stray EXPO_PUBLIC_ALWAYS_ONBOARD
+  // cannot strand a shipped build on the intro.
+  if (!seenIntro) return <Redirect href="/onboarding" />;
   if (ALWAYS_SHOW_ONBOARDING) return <Redirect href="/onboarding" />;
-  return <Redirect href={seenIntro ? '/login' : '/onboarding'} />;
+  return <Redirect href={status === 'signed-in' ? '/(app)' : '/login'} />;
 }

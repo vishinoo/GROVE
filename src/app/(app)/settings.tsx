@@ -273,6 +273,24 @@ export default function Settings() {
               />
             }
           />
+          {/*
+            The answer to the question asked on the seventh day, changeable
+            afterwards — a one-time decision you cannot revisit is a trap. Off
+            does not mean silent: a leave-by time is not chat, and it still
+            comes.
+          */}
+          <Row
+            label="Speaks up unprompted"
+            hint="A weekly fixture missing from your diary, something gone past. Leave-by times come either way."
+            right={
+              <Switch
+                value={persona.friend?.proactive ?? false}
+                onValueChange={(proactive) => set({ friend: { ...persona.friend, proactive } })}
+                trackColor={{ true: palette.mark, false: palette.sunken }}
+                thumbColor={palette.raised}
+              />
+            }
+          />
         </Card>
         <Card>
           <Text style={[Type.bodySm, { color: palette.muted }]}>What it should look out for</Text>

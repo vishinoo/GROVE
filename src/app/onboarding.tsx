@@ -1,7 +1,15 @@
 /**
  * First run.
  *
- * A checklist, not a feature tour. Two of these four steps happen in iOS
+ * Three slides, then a checklist.
+ *
+ * The slides are not a feature tour and are the only marketing in the app.
+ * They exist because Grove is indistinguishable from every other voice
+ * assistant for the first thirty seconds and completely different after a
+ * week, and someone who does not know which one they have bought gives up
+ * during the thirty seconds. So they say the promise, how you talk to it, and
+ * what it does not do — three things, one screen each, no screenshots of
+ * itself. Two of these four steps happen in iOS
  * Settings, where Grove cannot reach, and someone who skips them has an app that
  * looks fine and a pair of glasses that does nothing.
  *
@@ -30,7 +38,7 @@ import { loadLife } from '@/lib/life';
 import { NAME_LIMIT } from '@/lib/persona';
 import * as trigger from '@/lib/trigger';
 
-const STEPS = ['name', 'you', 'glasses', 'ring', 'limit'] as const;
+const STEPS = ['what', 'how', 'private', 'name', 'you', 'glasses', 'ring', 'limit'] as const;
 
 /**
  * What the intro turned into, if anything.
@@ -124,6 +132,9 @@ export default function Onboarding() {
         </View>
 
         <View style={{ flex: 1, justifyContent: 'center', paddingVertical: 24 }}>
+          {step === 'what' ? <WhatStep /> : null}
+          {step === 'how' ? <HowStep /> : null}
+          {step === 'private' ? <PrivateStep /> : null}
           {step === 'name' ? <NameStep /> : null}
           {step === 'you' ? <YouStep value={about} onChange={setAbout} /> : null}
           {step === 'glasses' ? <GlassesStep /> : null}
@@ -160,7 +171,9 @@ export default function Onboarding() {
                 : 'Sign in'
               : step === 'you' && about.trim().length < 12
                 ? 'Do this later'
-                : 'Continue'
+                : step === 'private'
+                  ? 'Set it up'
+                  : 'Continue'
           }
           onPress={advance}
         />
@@ -203,6 +216,82 @@ function Todo({ children }: { children: React.ReactNode }) {
     >
       <Text style={[Type.bodySm, { color: palette.ink, lineHeight: 19 }]}>{children}</Text>
     </View>
+  );
+}
+
+/* ----------------------------------------------------------------- slides */
+
+/**
+ * A slide, which is deliberately not a step.
+ *
+ * Nothing to fill in, nothing to check, and the type is bigger — so the three
+ * of these read as being told something and the five after them read as being
+ * asked for something. One statement, a few lines under it, and no card: a
+ * card is a container for data, and there is no data here.
+ */
+function Slide({ title, lines }: { title: string; lines: string[] }) {
+  const palette = usePalette();
+  return (
+    <>
+      <Text style={[Type.screenTitle, { color: palette.ink, fontSize: 30, lineHeight: 36 }]}>
+        {title}
+      </Text>
+      {lines.map((line, i) => (
+        <Text
+          key={line.slice(0, 16)}
+          style={[
+            Type.body,
+            { color: i === 0 ? palette.ink : palette.inkSoft, marginTop: i === 0 ? 18 : 14, lineHeight: 24 },
+          ]}
+        >
+          {line}
+        </Text>
+      ))}
+    </>
+  );
+}
+
+/** The promise, stated once, in the words it will actually be judged on. */
+function WhatStep() {
+  return (
+    <>
+      <View style={{ alignItems: 'flex-start', marginBottom: 22 }}>
+        <Orb state="idle" level={0} size={96} showCaption={false} />
+      </View>
+      <Slide
+        title="It remembers, so you don’t have to."
+        lines={[
+          'Tell it something once. Two weeks later, ask what to get Sarah and it knows she likes matcha.',
+          'It keeps the people, the projects and what happened — not a recording of your day. That’s the difference between this and something that answers questions.',
+        ]}
+      />
+    </>
+  );
+}
+
+/** How you actually use it, which is the part nobody expects. */
+function HowStep() {
+  return (
+    <Slide
+      title="Press the ring. Talk. That’s it."
+      lines={[
+        'No wake word, no phone out, no screen. One press on the ring, say what you want, and it answers through your glasses.',
+        'It reaches your mail, your calendar, your documents and the web directly — and anything it cannot undo, it reads back and waits for a press before doing.',
+      ]}
+    />
+  );
+}
+
+/** What it does not do, which on a wearable is a feature and not a disclaimer. */
+function PrivateStep() {
+  return (
+    <Slide
+      title="No camera. No server."
+      lines={[
+        'Nothing is pointed at anyone around you, and there is nothing to be pointed. Wear it in a lecture, a meeting or a restaurant.',
+        'What it remembers lives on this phone, in a list you can read and delete. The word-for-word record is deleted as soon as it has been read.',
+      ]}
+    />
   );
 }
 

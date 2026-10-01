@@ -142,6 +142,15 @@ export type Attention = {
 export async function whatMatters(
   state: Attention,
   uid: string,
+  /**
+   * Whether Grove may volunteer beyond what someone would regret missing.
+   *
+   * The rules above this line have a clock on them and always run: being told
+   * to leave is not chat. The two below it are standing observations, and they
+   * wait for the answer to the question asked on the seventh day. See
+   * `proactive` in persona.ts.
+   */
+  freely = false,
   now = new Date()
 ): Promise<Moment | null> {
   const soon = await upcoming(now);
@@ -193,6 +202,8 @@ export async function whatMatters(
   //    Wednesdays running, and an empty Wednesday evening, is either a
   //    cancellation or a thing about to be forgotten — and being asked costs
   //    nothing in the first case. See rhythms.ts for why three weeks is the bar.
+  if (!freely) return null;
+
   const usual = await rhythms(uid, now).catch(() => null);
   const absent = usual ? missingToday(usual, soon, now) : null;
   if (absent && !state.said.has(`usual:${absent.what}:${now.toDateString()}`)) {

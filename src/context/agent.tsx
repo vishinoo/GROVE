@@ -56,7 +56,7 @@ import { lightNotes } from '@/lib/lightModel';
 import * as memory from '@/lib/memory';
 import * as life from '@/lib/life';
 import { whatMatters, nextUp, type Attention, type NextUp } from '@/lib/attention';
-import { nextDiscovery } from '@/lib/reveal';
+import { dayIn, nextDiscovery } from '@/lib/reveal';
 import { learnWeek, noteTurn } from '@/lib/rhythms';
 import * as struggles from '@/lib/struggles';
 import { afterTurn, consolidateNow, rememberNote } from '@/lib/consolidate';
@@ -146,6 +146,12 @@ type AgentValue = {
   /** The next thing in the day, and when to leave for it. Shown, never spoken. */
   next: NextUp;
 
+  /**
+   * How many days since Grove was first opened. Used for the one question it
+   * asks on the seventh — see `proactive` in persona.ts.
+   */
+  dayOne: number;
+
   /** Things they said they did not understand, hardest first. */
   struggles: struggles.Struggle[];
   /** Tick one off by hand, when a quiz is not how they found out. */
@@ -193,6 +199,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const attention = useRef<Attention>({ said: new Set<string>() });
   const [next, setNext] = useState<NextUp>(null);
   const [stuck, setStuck] = useState<struggles.Struggle[]>([]);
+  const [dayOne, setDayOne] = useState(0);
   /** So a listen can retry itself without `press` being rebuilt. */
   const beginListeningRef = useRef<((continuous: boolean, retrying?: boolean) => void) | null>(null);
 
@@ -500,6 +507,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     void learnWeek(uid);
     void struggles.loadStruggles(uid).then((list) => {
       if (mounted.current) setStuck(list);
+    });
+    void dayIn(uid).then((day) => {
+      if (mounted.current) setDayOne(day);
     });
     // catchUp is declared below and is stable (useCallback with no deps), so
     // naming it here would be a forward reference for no benefit.
@@ -936,7 +946,11 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // nothing to be late for — being told what you talk about most while you
     // should be leaving the house is the wrong order.
     const account = live.current.uid;
-    const moment = await whatMatters(attention.current, account);
+    const moment = await whatMatters(
+      attention.current,
+      account,
+      live.current.persona.friend?.proactive === true
+    );
     // Both of these record what they offered before it is spoken, so the state
     // is re-checked here rather than after — a press that landed during the
     // calendar read means this turn is over, and a discovery marked as said
@@ -1831,6 +1845,7 @@ function shortFailure(text: string): string {
       focus,
       endFocus,
       next,
+      dayOne,
       struggles: stuck,
       gotStruggle,
       forgetStruggle,
@@ -1871,6 +1886,7 @@ function shortFailure(text: string): string {
       focus,
       endFocus,
       next,
+      dayOne,
       stuck,
       gotStruggle,
       forgetStruggle,

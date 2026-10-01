@@ -46,6 +46,22 @@ export type Friend = {
   cares?: string;
   /** Whether it may ask how things went and bring up what you're working on. */
   checksIn?: boolean;
+  /**
+   * Whether Grove may volunteer the softer things, beyond what you would
+   * regret missing.
+   *
+   * Three states, and the undefined one is the point. Unset means it has not
+   * asked yet, which is where everyone starts: for the first week it volunteers
+   * only things with a clock on them — leave now, this starts in ten minutes —
+   * plus the one-a-day discoveries that are how it earns the right to ask at
+   * all. On the seventh day it asks, once, on the Talk screen.
+   *
+   * True opens the rest: a weekly fixture missing from today's diary, a
+   * reminder that has gone past. False closes it and leaves the urgent half
+   * alone, because "don't chat to me" and "don't tell me I'm about to be late"
+   * are different requests and nobody means the second one.
+   */
+  proactive?: boolean;
 };
 
 export const CARES_LIMIT = 300;
@@ -317,6 +333,7 @@ function readFriend(raw: unknown): Friend | undefined {
     depth: one(f.depth, ['brief', 'balanced', 'deep']),
     cares: typeof f.cares === 'string' ? f.cares.slice(0, CARES_LIMIT) : undefined,
     checksIn: typeof f.checksIn === 'boolean' ? f.checksIn : undefined,
+    proactive: typeof f.proactive === 'boolean' ? f.proactive : undefined,
   };
 }
 
