@@ -825,6 +825,34 @@ food delivery and shopping were asked for and are deliberately absent, because
 the useful version of each is one sentence away from spending money on a
 misheard word.
 
+## An update arrives one launch late unless you do something about it
+
+`fallbackToCacheTimeout: 0` means expo-updates never makes anyone wait at
+launch: it starts the bundle it already has, downloads a new one in the
+background, and runs that one **next** time. The right default — nobody should
+watch a spinner because a developer shipped something — and it quietly breaks
+the only sentence anyone cares about: *"I pushed an update, you'll have it when
+you open it."* You will have it the time after that, with nothing on screen
+saying so, which looks exactly like the publish having failed.
+
+`src/lib/updates.ts` closes that at the gate in `src/app/index.tsx`, which is
+the one moment a `reloadAsync` costs nothing: no audio session, no turn in
+flight, no half-read confirmation. A second later there might be all three, and
+a reload then abandons an answer mid-sentence and drops the session the ring
+reaches Grove through — so it is **never offered mid-use**. Bounded to a few
+seconds, because the gate is the splash screen and a slow connection must not
+turn opening Grove into staring at one; past that it starts on what it has and
+leaves the update for next time, exactly as before.
+
+Settings has a manual check with no deadline, since someone who just tapped it
+has said they are willing to wait. It reports all four outcomes including "you
+already have the newest one", because that is the answer half of those taps are
+looking for and a button that reports nothing is a button you press twice.
+
+**Quote the iOS update ID from Settings → Version, not the EAS group id.** They
+are different ids and `eas update:list` only prints the group, so the two are
+easy to compare and conclude wrongly from.
+
 ## Checks
 
 Two kinds, and the difference matters. `npm run verify` and the live harness

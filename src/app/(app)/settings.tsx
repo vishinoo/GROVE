@@ -33,6 +33,7 @@ import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
 import { runSelfCheck, type CheckResult } from '@/lib/selfCheck';
 import { vaultReady } from '@/lib/vault';
+import { checkNow, runningLabel, type Caught } from '@/lib/updates';
 import { CARES_LIMIT, MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona, type Preset } from '@/lib/persona';
 import { hasOwnKey, setOwnKey } from '@/lib/lightModel';
 import { availableVoices, bestVoiceId, characterVoice, hasEnhancedVoice, speak } from '@/lib/speak';
@@ -68,13 +69,7 @@ export default function Settings() {
   const draftPalette = persona.palette ?? modeById(persona.mode ?? 'normal').palette;
   /** Which lobe is being recoloured, or null when the picker is closed. */
   const [editing, setEditing] = useState<number | null>(null);
-  // An embedded bundle has no update id — that is itself the answer, so it
-  // is shown rather than left blank.
-  const updateLabel = Updates.isEmbeddedLaunch
-    ? 'built in (no OTA yet)'
-    : `${(Updates.updateId ?? '').slice(0, 8) || 'unknown'} · ${
-        Updates.createdAt ? Updates.createdAt.toLocaleString() : 'unknown date'
-      }`;
+  const updateLabel = runningLabel();
 
   const reduced = reducedModeReason();
   const report = capabilities();
@@ -478,6 +473,7 @@ export default function Settings() {
           <Row label="Channel" value={Updates.channel || 'embedded'} />
           <Row label="Model" value={process.env.EXPO_PUBLIC_GEMINI_MODEL || 'default'} />
         </Card>
+        <UpdateNow />
       </Section>
 
       <Section label="Account">
@@ -496,6 +492,55 @@ export default function Settings() {
   );
 }
 
+
+
+/**
+ * Fetching the newest bundle on purpose.
+ *
+ * Grove catches up on its own at launch, which covers the ordinary case. This
+ * is for the case where someone has been told an update exists and wants to see
+ * it now rather than find out whether it worked — and for the one where the
+ * launch check gave up because the connection was slow.
+ *
+ * It says which of the four things happened, including "you already have it",
+ * because that is the answer someone is actually looking for half the time and
+ * a button that reports nothing is a button you press twice.
+ */
+function UpdateNow() {
+  const palette = usePalette();
+  const [state, setState] = useState<'idle' | 'looking' | Caught>('idle');
+
+  const look = async () => {
+    setState('looking');
+    setState(await checkNow());
+  };
+
+  const said =
+    state === 'looking'
+      ? 'Looking…'
+      : state === 'current'
+        ? 'You already have the newest one.'
+        : state === 'reloading'
+          ? 'Found one. Restarting…'
+          : state === 'unavailable'
+            ? 'Updates are off in this build.'
+            : state === 'failed'
+              ? 'Could not reach the update server. Try again in a moment.'
+              : '';
+
+  return (
+    <>
+      <Button
+        label={state === 'looking' ? 'Checking…' : 'Check for an update'}
+        onPress={() => void look()}
+        style={{ marginTop: 10 }}
+      />
+      {said ? (
+        <Text style={[Type.bodySm, { color: palette.muted, marginTop: 8 }]}>{said}</Text>
+      ) : null}
+    </>
+  );
+}
 
 /**
  * Said plainly, because the honest version is the good version.
