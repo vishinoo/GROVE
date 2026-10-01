@@ -1171,6 +1171,41 @@ Return JSON: {"subjects": [{"name": "<exactly as given>", "summary": "...", "fac
 }
 
 /**
+ * The person themselves, out of the way they describe their own life.
+ *
+ * A companion to lightConsolidate rather than part of it, because the two
+ * answers belong in different places and asking for both at once got neither
+ * right. The long memory holds the people and projects around someone, and is
+ * searched; the short list of facts holds what is true about *them*, and is in
+ * every prompt. Told to do both, the model filed the person as an entity
+ * beside their own sister, which put "Vishnu (self)" at the head of a roster
+ * of the people in Vishnu's life.
+ *
+ * Goals come back separately from facts because they are stored separately and
+ * read differently: "wants a summer internship" is not the same kind of
+ * sentence as "studying finance at UAlberta", and a model that cannot tell them
+ * apart congratulates you on things you have not done.
+ */
+export async function lightSelf(text: string): Promise<string | null> {
+  const said = text.trim();
+  if (!said) return null;
+  return complete(
+    `Someone is describing their own life to their new assistant. Pull out what is true about THEM — not about the other people they mention.
+
+Return JSON with exactly these keys:
+- "facts": array of short sentences that are true about them now. Write each in the second person, as the assistant would hold it: "You are studying finance at UAlberta", "You live in Edmonton". Only what they actually said.
+- "goals": array of things they are working towards rather than things that are already true, same wording: "You want to land a summer internship in private equity".
+
+Keep both lists short — at most six facts and four goals. Skip anything about another person, anything you would have to guess, and anything that will be untrue in a month. If they said nothing about themselves, return {"facts":[],"goals":[]}.`,
+    [{ role: 'user', content: said.slice(0, 6000) }],
+    true,
+    false,
+    false,
+    700
+  );
+}
+
+/**
  * What is worth remembering in a stretch of someone's life.
  *
  * One call over a batch — a dozen turns, or one finished note — rather than one

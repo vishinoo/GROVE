@@ -56,6 +56,7 @@ import { lightNotes } from '@/lib/lightModel';
 import * as memory from '@/lib/memory';
 import * as life from '@/lib/life';
 import { whatMatters, nextUp, type Attention, type NextUp } from '@/lib/attention';
+import { nextDiscovery } from '@/lib/reveal';
 import { afterTurn, consolidateNow, rememberNote } from '@/lib/consolidate';
 import * as notesStore from '@/lib/notes';
 import * as inbox from '@/lib/inbox';
@@ -905,18 +906,34 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // Checking in is theirs to switch off; nothing here overrides that.
     if (live.current.persona.friend?.checksIn === false) return;
 
+    // Urgency first, always. A discovery is only ever offered when there is
+    // nothing to be late for — being told what you talk about most while you
+    // should be leaving the house is the wrong order.
     const moment = await whatMatters(attention.current);
-    if (!moment || !mounted.current) return;
+    const account = live.current.uid;
+    // Both of these record what they offered before it is spoken, so the state
+    // is re-checked here rather than after — a press that landed during the
+    // calendar read means this turn is over, and a discovery marked as said
+    // and then dropped is gone for good.
+    if (!mounted.current || (stateNow.current !== 'idle' && stateNow.current !== 'asleep')) return;
+
+    const say = moment
+      ? moment.say
+      : ((await nextDiscovery(account).catch(() => null))?.say ?? null);
+    if (!say || !mounted.current) return;
     if (stateNow.current !== 'idle' && stateNow.current !== 'asleep') return;
 
-    attention.current.said.add(moment.id);
+    if (moment) attention.current.said.add(moment.id);
     lastVolunteered.current = new Date().toISOString();
-    setCaption(moment.say);
-    utter(moment.say);
+    setCaption(say);
+    // Spoken, never listened after — even the lines that end in a question.
+    // Grove started this, the phone is in a pocket, and an opened microphone
+    // that hears nothing closes with a second sound. One unasked-for noise is
+    // the most this is worth. The press is there if they want to answer.
+    utter(say);
 
-    const account = live.current.uid;
     if (account && account !== 'anon') {
-      const entries = await transcript.record(account, { said: '', replied: moment.say });
+      const entries = await transcript.record(account, { said: '', replied: say });
       if (mounted.current) setActivity(entries);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

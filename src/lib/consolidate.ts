@@ -13,7 +13,7 @@
  * delete on the Sparks screen.
  */
 
-import { lightCompact, lightConsolidate } from './lightModel';
+import { lightCompact, lightConsolidate, lightSelf } from './lightModel';
 import {
   absorb,
   addPending,
@@ -28,6 +28,7 @@ import {
   type Learned,
   type Life,
 } from './life';
+import { remember } from './memory';
 import type { Note } from './notes';
 
 /**
@@ -198,6 +199,65 @@ async function readBuffer(uid: string): Promise<void> {
   // Tidying is the same job's second half, and it runs on the same schedule as
   // everything else here: in the background, with nobody waiting.
   if ((after.sinceCompacted ?? 0) >= COMPACT_EVERY) await compact(uid);
+}
+
+/**
+ * Reads what someone says about their own life straight into the memory.
+ *
+ * The first run asks for a few sentences about who is in their life and what
+ * they are working on, and this is where those sentences go. It is the same
+ * call as everything else here, with one difference: the material is first-hand
+ * rather than overheard, so the source is recorded as 'told' and the whole
+ * thing is read at once instead of waiting for a buffer to fill. Nobody wants
+ * to type that and then be asked again a dozen turns later.
+ */
+export async function rememberIntro(uid: string, text: string): Promise<'kept' | 'nothing' | 'failed'> {
+  const said = text.trim();
+  if (said.length < 12) return 'nothing';
+
+  // Two calls, in parallel, going to the two different places this ends up:
+  // the people and projects into the long memory, the person themselves into
+  // the short list that rides in every prompt. Either can fail without taking
+  // the other with it.
+  const [around, own] = await Promise.all([
+    learn(
+      uid,
+      `This is the person describing their own life, in their own words, when they first set up their assistant. Everything here is first-hand and can be taken as true. Record the people, projects, places and organisations they mention — never the person themselves. Nothing here is a commitment anyone owes: they are describing a situation, not reporting a promise, so no episode from this is open.\n\n${said.slice(0, 6000)}`,
+      'told'
+    ),
+    keepSelf(uid, said),
+  ]);
+  return around === 'kept' || own ? 'kept' : around;
+}
+
+/** Their own standing facts and goals, straight into the always-in-mind list. */
+async function keepSelf(uid: string, said: string): Promise<boolean> {
+  const raw = await lightSelf(said).catch(() => null);
+  if (!raw) return false;
+  let parsed: { facts?: unknown; goals?: unknown };
+  try {
+    parsed = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, '').trim()) as typeof parsed;
+  } catch {
+    return false;
+  }
+  const lines = (value: unknown, limit: number): string[] =>
+    (Array.isArray(value) ? value : [])
+      .filter((v): v is string => typeof v === 'string' && v.trim().length > 3)
+      .slice(0, limit);
+
+  const facts = lines(parsed.facts, 6);
+  const goals = lines(parsed.goals, 4);
+  if (facts.length === 0 && goals.length === 0) return false;
+
+  // Keyed per line, because remember() replaces by key: one shared key would
+  // leave the last sentence and throw away the other five.
+  for (const [i, value] of facts.entries()) {
+    await remember(uid, { key: `intro-${i}`, value, source: 'told' });
+  }
+  for (const [i, value] of goals.entries()) {
+    await remember(uid, { key: `intro-goal-${i}`, value, source: 'told', kind: 'goal' });
+  }
+  return true;
 }
 
 /** Reads a finished voice note or meeting log into the long memory. */

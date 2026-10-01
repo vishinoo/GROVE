@@ -13,7 +13,7 @@
  */
 
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -24,11 +24,24 @@ import { Radius, Space, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
+import { rememberIntro } from '@/lib/consolidate';
 import { markOnboardingSeen } from '@/lib/firstRun';
+import { loadLife } from '@/lib/life';
 import { NAME_LIMIT } from '@/lib/persona';
 import * as trigger from '@/lib/trigger';
 
-const STEPS = ['name', 'glasses', 'ring', 'limit'] as const;
+const STEPS = ['name', 'you', 'glasses', 'ring', 'limit'] as const;
+
+/**
+ * What the intro turned into, if anything.
+ *
+ * The read takes a few seconds, and the two steps after it are hardware —
+ * pairing glasses and pressing a ring — which take considerably longer. So it
+ * is started when they move on and the result is shown at the end, by which
+ * time it has long finished. Nobody waits for a spinner, and the last screen
+ * gets to prove the whole thing works by naming their own people back to them.
+ */
+type Read = { state: 'none' } | { state: 'reading' } | { state: 'done'; names: string[] };
 
 
 export default function Onboarding() {
@@ -36,10 +49,41 @@ export default function Onboarding() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [index, setIndex] = useState(0);
-  const { status } = useSession();
+  const { status, uid } = useSession();
+  const [about, setAbout] = useState('');
+  const [read, setRead] = useState<Read>({ state: 'none' });
+  const started = useRef(false);
 
   const step = STEPS[index];
   const last = index === STEPS.length - 1;
+
+  /**
+   * Reads the intro into the long memory, once, in the background.
+   *
+   * Failing is quiet on purpose: the words are worth something and the setup is
+   * worth more. If the model could not be reached, the last screen simply says
+   * nothing about it and the first conversation picks the names up instead.
+   */
+  const keep = () => {
+    if (started.current) return;
+    const text = about.trim();
+    if (text.length < 12 || !uid || uid === 'anon') return;
+    started.current = true;
+    setRead({ state: 'reading' });
+    void (async () => {
+      const outcome = await rememberIntro(uid, text).catch(() => 'failed' as const);
+      if (outcome !== 'kept') {
+        setRead({ state: 'none' });
+        return;
+      }
+      const life = await loadLife(uid).catch(() => null);
+      const names = (life?.entities ?? [])
+        .sort((a, b) => b.mentions - a.mentions || b.lastSeen.localeCompare(a.lastSeen))
+        .slice(0, 6)
+        .map((e) => e.name);
+      setRead(names.length > 0 ? { state: 'done', names } : { state: 'none' });
+    })();
+  };
 
   const finish = async () => {
     await markOnboardingSeen();
@@ -50,7 +94,11 @@ export default function Onboarding() {
     router.replace(status === 'signed-in' ? '/(app)' : '/login');
   };
 
-  const advance = () => (last ? void finish() : setIndex((n) => n + 1));
+  const advance = () => {
+    if (step === 'you') keep();
+    if (last) void finish();
+    else setIndex((n) => n + 1);
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: palette.paper }}>
@@ -77,9 +125,10 @@ export default function Onboarding() {
 
         <View style={{ flex: 1, justifyContent: 'center', paddingVertical: 24 }}>
           {step === 'name' ? <NameStep /> : null}
+          {step === 'you' ? <YouStep value={about} onChange={setAbout} /> : null}
           {step === 'glasses' ? <GlassesStep /> : null}
           {step === 'ring' ? <RingStep /> : null}
-          {step === 'limit' ? <LimitStep /> : null}
+          {step === 'limit' ? <LimitStep read={read} /> : null}
         </View>
       </ScrollView>
 
@@ -104,7 +153,15 @@ export default function Onboarding() {
           ))}
         </View>
         <Button
-          label={last ? (status === 'signed-in' ? 'Done' : 'Sign in with Noctus') : 'Continue'}
+          label={
+            last
+              ? status === 'signed-in'
+                ? 'Done'
+                : 'Sign in'
+              : step === 'you' && about.trim().length < 12
+                ? 'Do this later'
+                : 'Continue'
+          }
           onPress={advance}
         />
       </View>
@@ -184,6 +241,60 @@ function NameStep() {
     </>
   );
 }
+
+/**
+ * The one step that is not setup.
+ *
+ * Everything else here makes the hardware work. This makes Grove worth having
+ * on the first afternoon rather than the third week: a handful of sentences
+ * about who is in their life and what they are doing goes straight into the
+ * long memory, so the first thing they ask is answered with their own names in
+ * it instead of "I don't know anything about you yet".
+ *
+ * Typed, not spoken, and this is the one place in the app where that is the
+ * right way round. It is a paragraph, not a sentence; it is full of proper
+ * nouns a recogniser has never heard — which is the exact problem the long
+ * memory later solves by feeding those names back to it — and people edit
+ * themselves when they write. Skipping is a real option, said plainly on the
+ * button, because an empty box with a Continue greyed out is a wall.
+ */
+function YouStep({ value, onChange }: { value: string; onChange: (text: string) => void }) {
+  const palette = usePalette();
+
+  return (
+    <>
+      <Heading icon="person" title="Tell me about your life" />
+      <Body>
+        Who’s in it, what you’re working on, what you’re trying to get done. A few sentences is
+        plenty — I’ll keep the names and fill in the rest as we talk.
+      </Body>
+      <Card style={{ marginTop: 16 }}>
+        <TextInput
+          value={value}
+          onChangeText={(text) => onChange(text.slice(0, INTRO_LIMIT))}
+          placeholder={"I'm doing a finance degree at UAlberta. I'm building an app called Noctus with Jason, my cofounder. My sister Priya is at med school in Calgary. I'm trying to get an internship for the summer."}
+          placeholderTextColor={palette.muted}
+          multiline
+          textAlignVertical="top"
+          style={{
+            fontFamily: Type.body.fontFamily,
+            fontSize: 16,
+            lineHeight: 23,
+            color: palette.ink,
+            minHeight: 148,
+            paddingVertical: 2,
+          }}
+        />
+      </Card>
+      <Text style={[Type.bodySm, { color: palette.muted, marginTop: 10 }]}>
+        Stays on your phone. You can read and delete any of it later, on Sparks.
+      </Text>
+    </>
+  );
+}
+
+/** Long enough for a paragraph about a life, short enough to stay one call. */
+const INTRO_LIMIT = 1200;
 
 /**
  * The card underneath is live. It goes green only once the glasses are actually
@@ -287,7 +398,9 @@ function RingStep() {
 }
 
 /** Said up front rather than discovered on a walk. */
-function LimitStep() {
+function LimitStep({ read }: { read: Read }) {
+  const palette = usePalette();
+
   return (
     <>
       <Heading icon="alert" title="One thing to know" />
@@ -299,6 +412,37 @@ function LimitStep() {
         Backgrounded is fine. Locked is fine. Pocketed is fine. Swiping Grove away turns the ring
         off until you open it again.
       </Todo>
+
+      {/*
+        The intro, read while they were pairing. Their own names, back in their
+        own words — which is a better argument for the whole app than anything
+        this screen could claim about it.
+      */}
+      {read.state === 'done' ? (
+        <Card style={{ marginTop: 16 }}>
+          <Mono style={{ marginBottom: 8 }}>Already yours</Mono>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+            {read.names.map((name) => (
+              <View
+                key={name}
+                style={{
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  borderRadius: Radius.pill,
+                  backgroundColor: palette.sunken,
+                  borderWidth: 1,
+                  borderColor: palette.line,
+                }}
+              >
+                <Text style={[Type.bodySm, { color: palette.ink }]}>{name}</Text>
+              </View>
+            ))}
+          </View>
+          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 10 }]}>
+            Ask me about any of them.
+          </Text>
+        </Card>
+      ) : null}
     </>
   );
 }

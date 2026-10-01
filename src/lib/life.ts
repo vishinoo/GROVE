@@ -247,13 +247,32 @@ const EPISODE_KINDS: EpisodeKind[] = ['conversation', 'note', 'meeting', 'idea',
  * summary, not a second entry. Facts already held, word for word, are dropped
  * — a consolidation that runs over the same week twice should change nothing.
  */
+/** How a model says "this entity is the person I am talking to". */
+const SELF = /^(self|me|myself|user|the user|owner|i)$/i;
+
 export function absorb(life: Life, learned: Learned, source: string, now = new Date()): Life {
   const stamp = now.toISOString();
   const entities = [...life.entities];
 
+  /**
+   * The names this material used for the person themselves.
+   *
+   * Collected before anything is absorbed, because an episode's `about` list
+   * refers to entities by name and is read after them. Skipping the self entity
+   * on its own was not enough: "Vishnu" then arrived as an unknown name from an
+   * episode and was minted a second time as a bare topic.
+   */
+  const mine = new Set(
+    (learned.entities ?? [])
+      .filter((e) => SELF.test((e.relation ?? '').trim()))
+      .map((e) => norm(e.name ?? ''))
+      .filter(Boolean)
+  );
+
   const idFor = (name: string, kind?: string): string | null => {
     const clean = name.trim().slice(0, 60);
     if (!clean || /^(me|i|myself|the user|user)$/i.test(clean)) return null;
+    if (mine.has(norm(clean))) return null;
     const k = (KINDS.includes(kind as EntityKind) ? kind : 'topic') as EntityKind;
     // Kindless only when the model did not say what this is. A named kind that
     // finds nothing is a new thing, not an excuse to match something else.
@@ -276,6 +295,16 @@ export function absorb(life: Life, learned: Learned, source: string, now = new D
   };
 
   for (const e of learned.entities ?? []) {
+    // The person is not a person in their own life.
+    //
+    // The name guard in idFor catches "me" and "the user"; this catches the
+    // commoner version, which is the model filing them under their own name
+    // with a relation that gives it away. Told not to, it still did it from a
+    // first-person intro — so code decides. Left in, it put "Vishnu (self)" at
+    // the head of a roster of the people in Vishnu's life, and everything true
+    // about them was held twice, in the one place that is searched rather than
+    // the one place that is always in mind.
+    if (mine.has(norm(e.name ?? ''))) continue;
     const id = idFor(e.name, e.kind);
     if (!id) continue;
     const i = entities.findIndex((x) => x.id === id);
