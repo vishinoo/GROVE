@@ -7,7 +7,7 @@
  * hairline-and-paper look consistent when a screen is added later.
  */
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -91,6 +91,61 @@ export function Section({
         <Text style={[monoLabel, { color: palette.muted, marginBottom: 10 }]}>{label}</Text>
       ) : null}
       {children}
+    </View>
+  );
+}
+
+/**
+ * A section you have to open.
+ *
+ * The archive sections — what happened, the people, the facts — are long, grow
+ * for ever and are read on purpose rather than in passing. Left open they push
+ * everything else off the screen, so this screen became a wall of someone's own
+ * memory with the live parts buried under it.
+ *
+ * The count is on the header for the same reason the section exists: knowing
+ * there are eleven of something is most of what a glance wants, and opening it
+ * is for the time you actually came to correct one.
+ */
+export function Folding({
+  label,
+  count,
+  children,
+  style,
+}: {
+  label: string;
+  count?: number;
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const palette = usePalette();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <View style={[{ marginBottom: Space.section }, style]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${label}${count === undefined ? '' : `, ${count}`}`}
+        onPress={() => setOpen((was) => !was)}
+        hitSlop={6}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          paddingVertical: 6,
+          marginBottom: open ? 8 : 0,
+          opacity: pressed ? 0.6 : 1,
+        })}
+      >
+        <Text style={[monoLabel, { color: palette.muted }]}>{label}</Text>
+        {count === undefined ? null : (
+          <Text style={[monoLabel, { color: palette.lineStrong }]}>{count}</Text>
+        )}
+        <View style={{ flex: 1 }} />
+        <Icon name={open ? 'down' : 'chevron'} size={13} color={palette.muted} />
+      </Pressable>
+      {open ? children : null}
     </View>
   );
 }

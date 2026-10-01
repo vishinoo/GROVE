@@ -93,11 +93,20 @@ export function SwipeAway({
     transform: [{ translateX: x.value }],
   }));
 
+  /**
+   * A height only while it is leaving, and never otherwise.
+   *
+   * Collapsing the row is what identifies which one left, in a list where
+   * several of them look alike — but an earlier version measured once and then
+   * applied that height for ever. Any card that grew afterwards overflowed a
+   * box frozen at its old size: a memory card opened to show its editor and the
+   * Forget button underneath it spilled straight over the next section, and a
+   * goal long enough to wrap did the same. Natural height the rest of the time,
+   * which is what a list of things that change size needs.
+   */
   const shell = useAnimatedStyle(() => ({
     opacity: 1 - gone.value,
-    // Collapsing the row is what identifies which one left, in a list where
-    // several of them look alike.
-    ...(height.value === undefined ? {} : { height: height.value * (1 - gone.value) }),
+    height: gone.value > 0 && height.value !== undefined ? height.value * (1 - gone.value) : undefined,
   }));
 
   const behind = useAnimatedStyle(() => ({
@@ -108,7 +117,9 @@ export function SwipeAway({
     <Animated.View
       style={shell}
       onLayout={(event) => {
-        if (height.value === undefined) height.value = event.nativeEvent.layout.height;
+        // Tracked rather than captured once, so the collapse starts from
+        // whatever the row actually is at the moment it is swiped away.
+        if (gone.value === 0) height.value = event.nativeEvent.layout.height;
       }}
     >
       <View>

@@ -453,7 +453,7 @@ export default function Settings() {
         <Card style={{ paddingVertical: 2 }}>
           <Row label="Signed in" value={user?.email ?? user?.name ?? '—'} />
         </Card>
-        <StartAgain />
+        <Forgetting />
         <Button
           label="Sign out"
           tone="danger"
@@ -819,8 +819,23 @@ function OwnKey() {
  * action deserves. The second tap goes back to sleep after a few seconds, so a
  * stray press cannot sit there waiting to be completed by accident.
  */
-function StartAgain() {
-  const { startAgain } = useAgent();
+/**
+ * A button that asks once, by becoming the question.
+ *
+ * No dialog: the second tap is the confirmation, and it disarms itself after
+ * four seconds so a button left armed cannot be hit by the next thing you
+ * meant to press. The same reasoning as the confirmation on a spoken action —
+ * doing nothing has to be the safe outcome.
+ */
+function Armed({
+  label,
+  question,
+  onConfirm,
+}: {
+  label: string;
+  question: string;
+  onConfirm: () => void;
+}) {
   const [armed, setArmed] = useState(false);
 
   useEffect(() => {
@@ -831,7 +846,7 @@ function StartAgain() {
 
   return (
     <Button
-      label={armed ? 'Tap again to wipe everything' : 'Start again'}
+      label={armed ? question : label}
       tone={armed ? 'danger' : 'quiet'}
       onPress={() => {
         if (!armed) {
@@ -839,10 +854,38 @@ function StartAgain() {
           return;
         }
         setArmed(false);
-        void startAgain();
+        onConfirm();
       }}
       style={{ marginTop: 14 }}
     />
+  );
+}
+
+/**
+ * The two ways of forgetting, which are not the same thing.
+ *
+ * Forgetting the facts drops the short list that rides in every prompt and
+ * leaves the people, the notes and what happened alone — which is what someone
+ * wants when Grove has written down something wrong about them. Starting again
+ * takes the lot. Both live here rather than at the end of the memory list on
+ * Sparks, where a wipe sat directly under the rows it would destroy.
+ */
+function Forgetting() {
+  const { startAgain, forgetEverything } = useAgent();
+
+  return (
+    <>
+      <Armed
+        label="Forget the facts about me"
+        question="Tap again to forget them"
+        onConfirm={() => void forgetEverything()}
+      />
+      <Armed
+        label="Start again"
+        question="Tap again to wipe everything"
+        onConfirm={() => void startAgain()}
+      />
+    </>
   );
 }
 

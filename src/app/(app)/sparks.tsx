@@ -23,7 +23,7 @@ import { Pressable, Switch, Text, TextInput, View } from 'react-native';
 
 import { AppIcon, iconForKey, type AppIconName } from '@/components/app-icon';
 import { Icon } from '@/components/icon';
-import { Button, Card, Empty, Mono, Screen, Section } from '@/components/ui';
+import { Card, Empty, Folding, Mono, Screen, Section } from '@/components/ui';
 import { SwipeAway } from '@/components/swipe-away';
 import { Radius, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
@@ -37,14 +37,12 @@ import type { Note as NoteItem } from '@/lib/notes';
 import type { Entity as LifeEntity, Episode as LifeEpisode } from '@/lib/life';
 import { open as openCaptures, remaining } from '@/lib/inbox';
 import { asMoney, forgetPurchase, loadMoney, standing, type Money } from '@/lib/money';
-import { budgetToday } from '@/lib/interrupt';
-import { EVERY_DAY, clockOf, forgetHabit, rhythms, type Habit, type Rhythms } from '@/lib/rhythms';
 import { shortDate } from '@/lib/when';
 import { when as transcriptWhen } from '@/lib/transcript';
 
 export default function Sparks() {
   const palette = usePalette();
-  const { captures, tickOff, dropCapture, focus, endFocus, sparks, setSparkEnabled, editSpark, deleteSpark, facts, editFact, forgetFact, forgetEverything, notes, forgetNote, life, forgetEntity, forgetEpisode, struggles, gotStruggle, forgetStruggle, persona, updatePersona } =
+  const { captures, tickOff, dropCapture, focus, endFocus, sparks, setSparkEnabled, editSpark, deleteSpark, facts, editFact, forgetFact, notes, forgetNote, life, forgetEntity, forgetEpisode, struggles, gotStruggle, forgetStruggle, persona, updatePersona } =
     useAgent();
   const waiting = openCaptures(captures);
   // Goals and facts are shown apart because they are read differently: a goal
@@ -172,17 +170,9 @@ export default function Sparks() {
         Grove keeps and acts on without being asked again. Finding out what it
         remembers should not require going looking for it.
       */}
-      <Section label="Goals">
-        {goals.length === 0 ? (
-          <Card>
-            <Text style={[Type.bodySm, { color: palette.muted }]}>
-              Nothing yet. Say &ldquo;I want to learn Spanish&rdquo; or &ldquo;I&rsquo;m saving for a
-              deposit&rdquo; and it is kept here. Goals are held apart from everything else and are
-              never dropped to make room.
-            </Text>
-          </Card>
-        ) : (
-          goals.map((fact) => (
+      {goals.length > 0 ? (
+        <Section label="Goals">
+          {goals.map((fact) => (
             <SwipeAway key={fact.id} label={fact.value} onDelete={() => void forgetFact(fact.id)}>
               <FactCard
                 fact={fact}
@@ -190,11 +180,9 @@ export default function Sparks() {
                 onForget={() => void forgetFact(fact.id)}
               />
             </SwipeAway>
-          ))
-        )}
-      </Section>
-
-      <Normal />
+          ))}
+        </Section>
+      ) : null}
 
       <Spending />
 
@@ -245,12 +233,9 @@ export default function Sparks() {
       */}
       <Section label="Notes">
         {notes.length === 0 ? (
-          <Card>
-            <Text style={[Type.bodySm, { color: palette.muted }]}>
-              Say &ldquo;listen to this&rdquo; and talk. Press when you are done, and it turns into
-              a note here — summary, points and anything you need to do.
-            </Text>
-          </Card>
+          <Text style={[Type.bodySm, { color: palette.muted }]}>
+            Say &ldquo;listen to this&rdquo; and talk. Press when you&rsquo;re done.
+          </Text>
         ) : (
           notes.slice(0, 20).map((note) => (
             <SwipeAway key={note.id} label={note.title} onDelete={() => void forgetNote(note.id)}>
@@ -266,17 +251,9 @@ export default function Sparks() {
         believes something wrong about a person you see every week is worse
         than one that remembers nothing.
       */}
-      <Section label="People and projects">
-        {life.entities.length === 0 ? (
-          <Card>
-            <Text style={[Type.bodySm, { color: palette.muted }]}>
-              Nothing yet. As you talk, log meetings and take notes, Grove builds up who and what
-              is in your life here — and what happened, with dates. Everything in here can be
-              deleted.
-            </Text>
-          </Card>
-        ) : (
-          [...life.entities]
+      {life.entities.length > 0 ? (
+        <Folding label="People and projects" count={life.entities.length}>
+          {[...life.entities]
             .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen))
             .slice(0, 40)
             .map((entity) => (
@@ -292,12 +269,12 @@ export default function Sparks() {
                   onForgetEpisode={(id) => void forgetEpisode(id)}
                 />
               </SwipeAway>
-            ))
-        )}
-      </Section>
+            ))}
+        </Folding>
+      ) : null}
 
       {life.episodes.length > 0 ? (
-        <Section label="What happened">
+        <Folding label="What happened" count={life.episodes.length}>
           {life.episodes.slice(0, 15).map((episode) => (
             <SwipeAway
               key={episode.id}
@@ -313,17 +290,14 @@ export default function Sparks() {
             />
             </SwipeAway>
           ))}
-        </Section>
+        </Folding>
       ) : null}
 
-      <Section label="Memory">
+      <Folding label="Memory" count={plain.length}>
         {plain.length === 0 ? (
-          <Card>
-            <Text style={[Type.bodySm, { color: palette.muted }]}>
-              Nothing yet. Tell Grove something about yourself — where you live, when you leave
-              for work — and it turns up here, where you can read it, correct it and delete it.
-            </Text>
-          </Card>
+          <Text style={[Type.bodySm, { color: palette.muted }]}>
+            Nothing yet. Tell Grove something about yourself and it turns up here.
+          </Text>
         ) : (
           plain.map((fact) => (
             <SwipeAway key={fact.id} label={fact.value} onDelete={() => void forgetFact(fact.id)}>
@@ -335,20 +309,12 @@ export default function Sparks() {
             </SwipeAway>
           ))
         )}
-        {facts.length > 0 ? (
-          <>
-            <Text style={[Type.bodySm, { color: palette.muted, marginTop: 9 }]}>
-              Open a line to correct it. Speech gets names wrong; this is where you fix that.
-            </Text>
-            <Button
-              label="Forget everything"
-              tone="quiet"
-              onPress={() => void forgetEverything()}
-              style={{ marginTop: 10 }}
-            />
-          </>
+        {plain.length > 0 ? (
+          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 9 }]}>
+            Open a line to correct it. Speech gets names wrong; this is where you fix that.
+          </Text>
         ) : null}
-      </Section>
+      </Folding>
     </Screen>
   );
 }
@@ -508,99 +474,6 @@ function ModeCard({
  * delete, exactly as a standing instruction is — and showing them in two
  * different shapes would suggest a difference that is not there.
  */
-
-/**
- * What Grove thinks "normal" is, with the evidence attached.
- *
- * This is the trust surface for the whole observed half of the memory. Grove
- * saying "you're usually up by eight" is an assertion about someone's life made
- * by a machine, and the difference between that being impressive and being
- * presumptuous is entirely whether they can see where it came from — so every
- * line here carries its count, and the count is the point.
- *
- * It also shows what the interruptions have cost today, because a budget nobody
- * can see is a promise rather than a mechanism.
- */
-function Normal() {
-  const palette = usePalette();
-  const { uid } = useSession();
-  const [usual, setUsual] = useState<Rhythms | null>(null);
-  const [budget, setBudget] = useState<{ used: number; of: number; bar: number } | null>(null);
-  const drop = (habits: Habit[]) => setUsual((was) => (was ? { ...was, habits } : was));
-  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-
-  useEffect(() => {
-    let alive = true;
-    void rhythms(uid).then((r) => alive && setUsual(r));
-    void budgetToday(uid).then((b) => alive && setBudget(b));
-    return () => {
-      alive = false;
-    };
-  }, [uid]);
-
-  if (!usual) return null;
-  const known = usual.usualStart !== null;
-  if (!known && usual.habits.length === 0) return null;
-
-  return (
-    <Section label="What it thinks is normal">
-      <Card>
-        {known ? (
-          <Text style={[Type.body, { color: palette.ink }]}>
-            Up and talking to it by about {clockOf(usual.usualStart ?? 0)}
-            {usual.usualEnd !== null ? `, done around ${clockOf(usual.usualEnd)}` : ''}.
-          </Text>
-        ) : (
-          <Text style={[Type.body, { color: palette.ink }]}>
-            Not enough days yet to know your hours.
-          </Text>
-        )}
-        {known ? (
-          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 3 }]}>
-            Counted over {usual.knownDays} days. Nothing here was typed in — if it looks wrong, it
-            is because the days it counted were.
-          </Text>
-        ) : null}
-        {usual.lateBy !== null ? (
-          <Text style={[Type.bodySm, { color: palette.ink, marginTop: 8 }]}>
-            Today started about {usual.lateBy >= 90 ? `${Math.round((usual.lateBy / 60) * 10) / 10} hours` : `${usual.lateBy} minutes`}{' '}
-            later than that.
-          </Text>
-        ) : null}
-      </Card>
-
-      {usual.habits.slice(0, 10).map((h) => (
-        <SwipeAway
-          key={`${h.what}-${h.weekday}`}
-          label={h.what}
-          onDelete={() => void forgetHabit(uid, h).then(drop)}
-        >
-          <Card style={{ marginTop: 6 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <View style={{ flex: 1 }}>
-                <Text style={[Type.body, { color: palette.ink }]}>{h.what}</Text>
-                <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
-                  {h.weekday === EVERY_DAY ? 'Most days' : `${days[h.weekday]}s`} around{' '}
-                  {clockOf(h.at)}
-                  {h.where ? ` · ${h.where}` : ''}
-                </Text>
-              </View>
-              <Mono>{h.weekday === EVERY_DAY ? `${h.seen} times` : `${h.seen} of 4`}</Mono>
-            </View>
-          </Card>
-        </SwipeAway>
-      ))}
-
-      {budget ? (
-        <Text style={[Type.bodySm, { color: palette.muted, marginTop: 8 }]}>
-          Swipe any of these away if it isn’t a pattern. It has spoken up without being asked{' '}
-          {budget.used} time{budget.used === 1 ? '' : 's'} today, out of {budget.of} — telling you
-          to leave for something never counts against that.
-        </Text>
-      ) : null}
-    </Section>
-  );
-}
 
 /**
  * The ledger, where you can see it.
