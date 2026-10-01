@@ -447,6 +447,64 @@ for (const m of source.matchAll(/spoken:\s*(['"`])((?:\\.|(?!\1).)*)\1/g)) {
   check(!bad, `spoken: "${text.slice(0, 52)}${text.length > 52 ? '…' : ''}"`, 'contains markup or a URL');
 }
 
+/*
+ * 12. Speaking first.
+ *
+ * Source checks, like the one above, because what matters about these two files
+ * is a property of what they say rather than of what they route to — and both
+ * properties are the kind that survive a type check and a review and then go
+ * wrong quietly months later.
+ */
+section('Nothing speaks first without having earned it');
+{
+  const reveal = fs.readFileSync(path.join(ROOT, 'src/lib/reveal.ts'), 'utf8');
+  const table = reveal.slice(reveal.indexOf('const DISCOVERIES'), reveal.indexOf('function lower('));
+
+  // A duplicate id is not a duplicate line: it is one of the two never being
+  // offered, for ever, because the first one to fire marks both as said.
+  const ids = [...table.matchAll(/^\s{4}id: '([a-z]+)',$/gm)].map((m) => m[1]);
+  check(ids.length >= 5, `${ids.length} discoveries in the first week`);
+  check(new Set(ids).size === ids.length, 'every discovery has its own id', ids.join(', '));
+
+  const days = [...table.matchAll(/^\s{4}day: (\d+),$/gm)].map((m) => Number(m[1]));
+  check(days.length === ids.length, 'every discovery is pinned to a day');
+  check(
+    days.every((d) => d >= 1 && d <= 7),
+    'none is offered before the first day or after the seventh',
+    days.join(', ')
+  );
+
+  // The whole point of these lines is that they are about the person. A line
+  // with nothing interpolated into it is an advert, and an advert read into
+  // someone's ear by the thing they are paying for is worse than silence.
+  const says = [...table.matchAll(/return `([^`]*)`/g)].map((m) => m[1]);
+  check(says.length >= ids.length, `${says.length} lines, one or more per discovery`);
+  for (const line of says) {
+    check(
+      line.includes('${'),
+      `says something of theirs: "${line.slice(0, 46)}${line.length > 46 ? '…' : ''}"`,
+      'a line with nothing of theirs in it is an advert'
+    );
+  }
+
+  // Grove started this and the phone is in a pocket. A microphone opened by an
+  // unprompted line hears nothing and closes with a second sound, which is one
+  // noise more than any of this is worth.
+  const agent = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
+  const speaking = agent.slice(agent.indexOf('const considerSpeaking'), agent.indexOf('const considerSpeaking') + 2200);
+  check(/\n\s*utter\(say\);/.test(speaking), 'an unprompted line is spoken and nothing else');
+  check(!/utter\(say,/.test(speaking), 'an unprompted line never opens the microphone');
+  check(/maySpeak\(/.test(speaking), 'the mode decides whether Grove may volunteer at all');
+  check(/checksIn === false/.test(speaking), 'switching checking-in off switches all of it off');
+
+  // Urgency before discovery: being told what you talk about most while you
+  // should be leaving the house is the wrong order.
+  check(
+    speaking.indexOf('whatMatters') < speaking.indexOf('nextDiscovery'),
+    'what is urgent is asked for before what is merely interesting'
+  );
+}
+
 /* ------------------------------------------------------------- verdict */
 
 console.log(
