@@ -741,11 +741,28 @@ export async function askGrove(
   // A question that needs a lookup. Kept separate from `acting` so it cannot
   // reach a schedule, a phrase trigger, or any ability that changes something.
   const looking = !acting && detectLookupIntent(userText);
-  const schedule = acting ? parseSchedule(userText) : null;
+
+  /*
+   * Ungated, which is the whole reason this function exists.
+   *
+   * The early return above already says a standing job is not gated on the
+   * action intent — "every morning at seven brief me" leads with "every" and
+   * has no verb the imperative test can see, so gating it sends the sentence
+   * to a tool loop with no way to save a spark. Then these two lines gated it
+   * anyway, and the result was the worst of both: past the early return, but
+   * with schedule and phrase both null, so nothing was ever saved. Grove said
+   * "Done." and no spark existed. Every standing job phrased that way — which
+   * is most of them — was quietly dropped.
+   *
+   * Safe to ungate because the strictness lives in parseSchedule itself, where
+   * the note about waking someone at seven every morning for something they
+   * asked once already is. Getting here at all means one of these two matched.
+   */
+  const schedule = parseSchedule(userText);
   // The other kind of standing job. Checked here rather than left to the
   // caller, because a caller that tests `schedule` alone silently drops every
   // phrase trigger — which is exactly what was happening.
-  const phrase = acting && !schedule ? phraseTrigger(userText) : null;
+  const phrase = schedule ? null : phraseTrigger(userText);
 
   // The mode narrows what may be reached for. This is a safety feature as much
   // as a focus one: commute deliberately has no mail, because reading a message

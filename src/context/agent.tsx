@@ -785,10 +785,19 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
      * what keeps it honest: if the tool fails, the failure is said instead and
      * this line is never heard.
      *
-     * A slow ability is the exception. Half a minute of silence while a
-     * document is written reads as a crash, so that one acknowledges first.
+     * Two exceptions, and both are cases where the ability never runs this
+     * turn:
+     *
+     *   - A slow ability. Half a minute of silence while a document is written
+     *     reads as a crash, so that one acknowledges first.
+     *   - A standing job. "Every morning at eight, tell me the weather" names
+     *     an ability and then saves a spark instead of running it, and the
+     *     branch that does so returns — so a line held here was never spoken
+     *     at all. Setting a spark went completely silent, which is the exact
+     *     shape of failure this app can least afford.
      */
-    const holdsReply = Boolean(reply.ability) && !reply.ability?.slow;
+    const standing = Boolean(reply.schedule || reply.phrase) && !taught;
+    const holdsReply = Boolean(reply.ability) && !reply.ability?.slow && !standing;
     if (!reply.holdForTool && !holdsReply) utter(reply.text, Boolean(reply.expectsReply));
 
     // Anything worth remembering was pulled locally, by keyword, from what was
@@ -1005,12 +1014,32 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
      * rather than what was done, and "at seven" coming back as "at six" is the
      * one difference that costs something.
      */
+    /*
+     * Some abilities answer; most only confirm.
+     *
+     * The model writes its line before the tool runs, so it can only ever
+     * confirm — and where the tool comes back with something the model could
+     * not have known, the tool has to win. Missing that swallowed a quiz
+     * question whole: study.quiz returned "Three questions. When would you use
+     * integration by parts instead of substitution?", the model's "well, you
+     * asked for it" replaced it, and the microphone opened for an answer to a
+     * question nobody had been asked. A finished document lost its result the
+     * same way.
+     *
+     * Three tells, and all three are already declared: a line the microphone
+     * opens after is a question, a slow ability was acknowledged before it
+     * started so its result is still owed, and a queued track is named by the
+     * tool and guessed at by the model.
+     */
+    const toolAnswers =
+      outcome.listenAfter === true || ability.slow === true || outcome.resumeMusicWhenQuiet === true;
+
     let heard = outcome.ok ? outcome.spoken : shortFailure(outcome.spoken);
-    if (outcome.ok && reply.text.trim() && (holdsReply || !reply.holdForTool)) {
+    if (outcome.ok && toolAnswers) {
+      heard = outcome.spoken;
+    } else if (outcome.ok && holdsReply && reply.text.trim()) {
       heard = agreesOnTime(reply.text, [outcome.spoken, outcome.detail].filter(Boolean).join(' '))
-        ? holdsReply
-          ? reply.text
-          : ''
+        ? reply.text
         : outcome.spoken;
     } else if (outcome.ok && phrasing) {
       const phrased = await phrasing;

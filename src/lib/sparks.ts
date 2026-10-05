@@ -171,7 +171,29 @@ function readClock(text: string): string | null {
  * Null is the common case and the safe one — it means "do this now and forget
  * it", which is what almost everything said to Grove is.
  */
+/**
+ * Sentences that say "every day" and are not asking for anything to happen.
+ *
+ * The strictness has to live here, because this is the only thing standing
+ * between a passing remark and being woken at seven every morning for ever.
+ * It used to be backed up by the action gate in grove.ts, which refused
+ * questions outright — but that gate also refused "every morning at seven
+ * brief me", which is the main thing this is for, so it had to go. These two
+ * shapes are what it was quietly catching:
+ *
+ *   - A question. "What's on every day this week" asks about a calendar.
+ *   - A habit of their own. "I go to the gym every day" is a fact about them,
+ *     not an instruction — and it is exactly the sentence someone says while
+ *     telling Grove about their life.
+ */
+const NOT_AN_INSTRUCTION = [
+  /^\s*(?:what|what'?s|when|where|who|which|why|how|is|are|was|were|do|does|did|have|has|can|could|should|would|will)\b/i,
+  /\?\s*$/,
+  /^\s*(?:and\s+)?i\s+(?:go|went|do|did|have|had|am|was|usually|always|normally|never|tend|like|try|used)\b/i,
+];
+
 export function parseSchedule(text: string): Schedule | null {
+  if (NOT_AN_INSTRUCTION.some((shape) => shape.test(text.trim()))) return null;
   const t = text.toLowerCase();
   const at = readClock(t) ?? '07:00';
 
