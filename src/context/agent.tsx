@@ -42,6 +42,7 @@ import {
 } from '@/lib/abilities';
 import { loadOverrides, maySpeak, modeById, withOverrides } from '@/lib/modes';
 import { askGrove, detectActIntent, newTurn, type Turn, type TurnTool } from '@/lib/grove';
+import { phraseAction } from '@/lib/brain';
 import { abortListening, isListening, startListening, stopListening } from '@/lib/listen';
 import {
   DEFAULT_PERSONA,
@@ -291,6 +292,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const [noteList, setNoteList] = useState<notesStore.Note[]>([]);
   const [lifeMemory, setLifeMemory] = useState<life.Life>({ entities: [], episodes: [], pending: [] });
   const [captures, setCaptures] = useState<inbox.Capture[]>([]);
+  /** Read inside a turn, which outlives the render that started it. */
+  const capturesRef = useRef<inbox.Capture[]>([]);
+  capturesRef.current = captures;
   const [focus, setFocus] = useState<inbox.Focus | null>(null);
   /**
    * Words to help the recogniser hear this person's world: Grove's name, the
@@ -643,6 +647,15 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     const taught = sparks.matchPhrase(text, live.current.sparks);
     const asked = taught ? taught.instruction : text;
 
+    // Whatever Grove was still saying is finished with.
+    //
+    // Without this, speaking to Grove while it was mid-sentence left the old
+    // sentence playing and queued the new answer behind it through
+    // whenQuiet() — so replies arrived minutes late, in order, like a backlog
+    // being worked through. The turn counter above has already invalidated the
+    // previous turn, so nothing it does after this can speak again.
+    stopSpeaking();
+
     setHeard('');
     setCaption(text);
     setState('thinking');
@@ -928,13 +941,48 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       void struggles.loadStruggles(account).then((list) => mounted.current && setStuck(list));
     }
 
-    const heard = outcome.ok ? outcome.spoken : shortFailure(outcome.spoken);
-
+    /*
+     * What gets said, and by whom.
+     *
+     * Three cases, and the old code only had one of them right:
+     *
+     *   - The model already replied in its own words and the tool then worked.
+     *     Reading the tool's line out as well says the same thing twice in two
+     *     different registers — a sentence, then a receipt.
+     *   - The model said nothing because it expected the tool to do the
+     *     talking. That is where "Focus mode." and "Added to your goals: run a
+     *     half marathon" came from, and it is most of what an action turn
+     *     sounds like. So the outcome goes back for one bounded line in the
+     *     right voice, with what else is waiting, and the tool's own line
+     *     stands in if that does not come back.
+     *   - It failed. Said plainly and immediately: a failure is the one thing
+     *     nobody should wait an extra second to hear phrased nicely.
+     */
+    let heard = outcome.ok ? outcome.spoken : shortFailure(outcome.spoken);
+    if (outcome.ok && !reply.holdForTool && reply.text.trim()) {
+      heard = '';
+    } else if (outcome.ok && !outcome.needsConfirming) {
+      const waiting = inbox.open(capturesRef.current).slice(0, 4).map((c) => c.text);
+      const phrased = await phraseAction(
+        { persona: voice, facts: known },
+        text,
+        [outcome.spoken, outcome.detail].filter(Boolean).join('\n'),
+        waiting.length ? `Still on their list: ${waiting.join('; ')}.` : ''
+      ).catch(() => null);
+      if (!mine()) return;
+      if (phrased) heard = phrased;
+    }
     // The result of work you interrupted is not something you still want read
     // out — you have already moved on and asked something else.
     // An ability that asked for a missing detail — "what's your home address?"
     // — is waiting on the answer, so the microphone opens for it.
-    if (mine()) utter(heard, pending.current !== null || outcome.listenAfter === true);
+    //
+    // Nothing left to say means the reply already said it. The state still has
+    // to settle, and anything queued behind the turn — a song waiting for the
+    // last word — still has to happen, so this does not return early.
+    if (!mine()) return;
+    if (heard) utter(heard, pending.current !== null || outcome.listenAfter === true);
+    else setState(restingState());
 
     // The song starts when the sentence ends. Anything else means a few seconds
     // of music, an interruption, and a track that has lost its opening.

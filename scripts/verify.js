@@ -653,6 +653,42 @@ section('A daily routine is one row, and is never chased');
   check(typeof rhythms.habitKey === 'function', 'and is identified across reads by a stable key');
 }
 
+/*
+ * 16. An action is reported in Grove's voice, not as a receipt.
+ *
+ * The phrasing pass turns "Added: Gym, tomorrow at 07:00" into a sentence —
+ * and once turned "at seven" into "set for six then", which is the only kind
+ * of liberty here that actually costs something. Every other one is a worse
+ * joke; this one makes someone late.
+ */
+section('A phrased action cannot invent a time');
+{
+  const brain = require(path.join(OUT, 'lib/brain.js'));
+  const hours = (text) => [...brain.hoursIn(text)].sort().join(',');
+
+  // Times, in the forms people write and say them.
+  check(hours('Added: Gym, tomorrow at 07:00.') === '7', 'reads 07:00', hours('Added: Gym, tomorrow at 07:00.'));
+  check(hours('Gym is locked in for seven') === '7', 'reads "for seven"');
+  check(hours('seven o\'clock') === '7', "reads \"seven o'clock\"");
+  check(hours('Reminder set for 3pm') === '3', 'reads 3pm');
+  check(hours('see you at 15:00') === '3', '15:00 and 3pm are the same hour');
+  check(hours('alarm set for six then') === '6', 'reads the invented hour too');
+
+  // And the things that only look like times. A guard that rejects these
+  // throws away the phrasing for nothing, which is how a feature gets turned
+  // off by its own safety check.
+  check(hours('that is one less thing to do') === '', '"one less thing" is not an hour');
+  check(hours('three things still on your list') === '', '"three things" is not an hour');
+  check(hours('nice, that leaves two') === '', 'a bare count is not an hour');
+
+  // The property the guard exists for.
+  const given = brain.hoursIn('Added: Gym, tomorrow at 07:00.');
+  const invented = brain.hoursIn("alarm's set for six then");
+  check([...invented].some((h) => !given.has(h)), 'a changed hour is detectable against the original');
+  const faithful = brain.hoursIn('Gym is in for tomorrow at seven, and your alarm will hate you.');
+  check([...faithful].every((h) => given.has(h)), 'and a faithful line is not');
+}
+
 /* ------------------------------------------------------------- verdict */
 
 console.log(

@@ -29,14 +29,7 @@
 
 import { abilityById, currentAccount, runAbility, type Ability } from './abilities';
 import type { GroveContext, GroveReply, Turn } from './grove';
-import {
-  asToolResults,
-  asUserTurn,
-  lastModelTrouble,
-  lightFallback,
-  toolTurn,
-  type ToolHistory,
-} from './lightModel';
+import { asToolResults, asUserTurn, lastModelTrouble, lightAfterAction, lightFallback, toolTurn, type ToolHistory } from './lightModel';
 import { asPromptBlock, factFrom } from './memory';
 import { lately, loadLife, whoIsWho } from './life';
 import { rhythmLines, rhythms } from './rhythms';
@@ -327,6 +320,105 @@ function resultFor(outcome: { ok: boolean; spoken: string; detail?: string }) {
     result: outcome.spoken,
     ...(outcome.detail ? { detail: outcome.detail.slice(0, 2500) } : {}),
   };
+}
+
+/**
+ * Clock times named in a sentence, however they are written or said.
+ *
+ * Normalised to a bare hour, because that is the part that goes wrong: "seven
+ * tomorrow" becoming "six" is the error worth catching, and "07:00" versus
+ * "7am" is not an error at all.
+ *
+ * Exported for the harness, which runs this rather than a copy of it — the
+ * whole value of the guard is in which sentences it does *not* reject.
+ */
+export function hoursIn(text: string): Set<string> {
+  const WORDS: Record<string, string> = {
+    one: '1', two: '2', three: '3', four: '4', five: '5', six: '6',
+    seven: '7', eight: '8', nine: '9', ten: '10', eleven: '11', twelve: '12',
+    midday: '12', noon: '12', midnight: '0',
+  };
+  const found = new Set<string>();
+
+  // 15:00, 7am, 7 pm, "at 7"
+  for (const m of text.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/gi)) {
+    const hour = Number(m[1]);
+    if (!Number.isFinite(hour) || hour > 23) continue;
+    // Only when it is actually being used as a time: a colon, am/pm, or a
+    // preposition in front of it. Otherwise "3 things on your list" is an hour.
+    const before = text.slice(Math.max(0, m.index - 12), m.index).toLowerCase();
+    if (!m[2] && !m[3] && !/\b(at|for|by|until|till|around|about)\s*$/.test(before)) continue;
+    found.add(String(hour % 12));
+  }
+  // "at seven", "for half seven", "seven o'clock"
+  for (const m of text.matchAll(
+    /\b(?:at|for|by|until|till|around|about|half)\s+(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|midday|noon|midnight)\b/gi
+  )) {
+    found.add(String(Number(WORDS[m[1].toLowerCase()]) % 12));
+  }
+  for (const m of text.matchAll(
+    /\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+o.?clock\b/gi
+  )) {
+    found.add(String(Number(WORDS[m[1].toLowerCase()]) % 12));
+  }
+  return found;
+}
+
+/**
+ * How an action is reported, once it has actually happened.
+ *
+ * Lives here rather than in agent.tsx because the voice is assembled from the
+ * same three pieces every other prompt in this file uses — the manner, the
+ * relationship, and how deep they want it — and a second copy of that
+ * assembly is a second place for the two to drift apart.
+ *
+ * Bounded at six seconds with no retry, for the same reason the phrasing step
+ * after a read is bounded: the tool has already done the work, the canned line
+ * is already correct, and waiting longer to say it more nicely is a worse
+ * trade than saying it plainly now.
+ */
+export async function phraseAction(
+  context: GroveContext,
+  said: string,
+  happened: string,
+  extra = ''
+): Promise<string | null> {
+  const { persona } = context;
+  const voice = [
+    `You are ${persona.name || 'Grove'}, their assistant.`,
+    friendDirective(persona, { greet: false }),
+    mannerDirective(persona),
+    depthRule(persona),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  const line = await Promise.race([
+    lightAfterAction(voice, said, happened, extra).catch(() => null),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), 6_000)),
+  ]);
+  // One line, whatever shape it came back in. A blank line in the middle is
+  // invisible when spoken and looks like two separate replies on screen.
+  const clean = plainSpeech((line ?? '').trim()).replace(/\s*\n+\s*/g, ' ').trim();
+  if (!clean) return null;
+
+  /*
+   * A time it was not given is a time it made up.
+   *
+   * "Added: Gym, tomorrow at 07:00" came back as "alarm's set for six then",
+   * which is the one kind of error here that actually costs something — every
+   * other liberty it takes is a worse joke, and this one makes someone late.
+   * Told not to restate times it mostly does not, and mostly is not a property
+   * worth having when the fallback is a line that is already correct.
+   *
+   * Only clock times, deliberately. Guarding every number would reject "one
+   * less thing to do" and throw away the phrasing for nothing.
+   */
+  const given = hoursIn(happened);
+  for (const hour of hoursIn(clean)) {
+    if (!given.has(hour)) return null;
+  }
+  return clean;
 }
 
 export async function askWithTools(

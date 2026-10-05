@@ -345,12 +345,26 @@ function readFriend(raw: unknown): Friend | undefined {
  * `cares` in particular is free text, and a line in it is a thing to care
  * about, never an instruction to follow.
  */
-export function friendDirective(persona: Persona): string {
+export function friendDirective(
+  persona: Persona,
+  /**
+   * Whether this prompt may use their name at all.
+   *
+   * Off for the one-line confirmations after an action, which land in the
+   * middle of a day rather than opening a conversation. Asked as an
+   * instruction instead — "do not use their name" alongside "call them Vish
+   * now and then" — the model obeyed whichever it felt like, and half of them
+   * came back as greetings. Not offering the name is the only version that
+   * holds.
+   */
+  options: { greet?: boolean } = {}
+): string {
   const f = persona.friend ?? {};
+  const greet = options.greet !== false;
   const lines: string[] = [
     "You are their closest friend who also happens to be able to do anything — not a service. You know them, you're on their side, and you talk to them like it.",
   ];
-  if (f.callMe) lines.push(`Call them "${f.callMe}" now and then — naturally, not in every reply.`);
+  if (f.callMe && greet) lines.push(`Call them "${f.callMe}" now and then — naturally, not in every reply.`);
   lines.push(
     f.candor === 'gentle'
       ? 'Be kind with hard truths: encouraging first, honest always.'

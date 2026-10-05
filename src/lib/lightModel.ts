@@ -1171,6 +1171,61 @@ Return JSON: {"subjects": [{"name": "<exactly as given>", "summary": "...", "fac
 }
 
 /**
+ * Saying what just happened, like a person rather than a receipt.
+ *
+ * An ability's `spoken` line is written to be correct and short, which is what
+ * it has to be — it is the only thing said when a model call fails, and it has
+ * to work read into an ear on a street. What it is not is a reply. "Focus mode."
+ * and "Added to your goals: run a half marathon." are log entries read aloud,
+ * and hearing them back is the moment Grove stops sounding like something you
+ * talk to.
+ *
+ * So once the thing has actually happened, this says it in the person's own
+ * assistant's voice, with whatever it now knows — what else is on their list,
+ * what a mode just stopped them seeing, what the next one is. One line, bounded
+ * hard, and the canned line stands in if it does not come back: this must never
+ * be the difference between an answer and silence.
+ *
+ * Deliberately after the fact rather than before it. The model could say "done"
+ * in the same breath as calling the tool, and would then be announcing an
+ * outcome it does not have — which is a lie the moment anything fails.
+ */
+export async function lightAfterAction(
+  voice: string,
+  said: string,
+  happened: string,
+  context: string
+): Promise<string | null> {
+  return complete(
+    `${voice}
+
+Something just happened because they asked for it, and it worked. Say so, the way you talk.
+
+- Never read the outcome back as a label. "Goal logged: run a half marathon" is a receipt; "Right, half marathon's on the list" is a reply.
+- Do not repeat their own words back to them. They know what they just said.
+- Where there is something genuinely useful to add — what else is waiting, what this leaves — add it in the same breath, in a few words. Where there is not, stop after the first sentence.
+- Never invent anything that is not in what you are given, and never promise to do something afterwards. Never restate a time, date, amount or name differently from how you were given it — say it exactly, or refer to it loosely ("tomorrow morning") and let the detail stand. If you were told nothing about what else is waiting, say nothing about it — no invented emails, lists, deadlines or people. A quip about the thing that just happened is always available and is never wrong.
+
+These two rules outrank anything above about how you normally talk:
+
+- **Under twenty-five words.** One sentence, or two only when the second names something else that is waiting. This lands in the middle of someone's day, between them putting their phone down and walking off — it is not the place for a paragraph, however good the joke is.
+- **Do not use their name.** It is a greeting, and this is not a greeting.
+
+One paragraph, no line breaks, no markdown, no lists, no emoji. It is going to be spoken aloud.`,
+    [
+      {
+        role: 'user',
+        content: `They said: ${said}\n\nWhat happened: ${happened}\n\n${context || '(nothing else worth knowing)'}`,
+      },
+    ],
+    false,
+    false,
+    false,
+    160
+  );
+}
+
+/**
  * Whether something is a good idea, given what they have and what they want.
  *
  * Its own call because the shape of a good answer here is unlike anything else
