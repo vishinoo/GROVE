@@ -42,7 +42,7 @@ import {
 } from '@/lib/abilities';
 import { loadOverrides, maySpeak, modeById, withOverrides } from '@/lib/modes';
 import { askGrove, detectActIntent, newTurn, type Turn, type TurnTool } from '@/lib/grove';
-import { phraseAction } from '@/lib/brain';
+import { agreesOnTime, phraseAction } from '@/lib/brain';
 import { abortListening, isListening, startListening, stopListening } from '@/lib/listen';
 import {
   DEFAULT_PERSONA,
@@ -775,7 +775,21 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       utter('I lost my train of thought there. Say that again?', true);
       return;
     }
-    if (!reply.holdForTool) utter(reply.text, Boolean(reply.expectsReply));
+    /*
+     * An action's reply waits for the action.
+     *
+     * The model writes the line it would say once the thing has worked, in the
+     * same breath as calling the tool — so the natural sentence costs nothing,
+     * where asking for it afterwards cost a whole extra round trip on every
+     * action. It is held here and spoken once the outcome is known, which is
+     * what keeps it honest: if the tool fails, the failure is said instead and
+     * this line is never heard.
+     *
+     * A slow ability is the exception. Half a minute of silence while a
+     * document is written reads as a crash, so that one acknowledges first.
+     */
+    const holdsReply = Boolean(reply.ability) && !reply.ability?.slow;
+    if (!reply.holdForTool && !holdsReply) utter(reply.text, Boolean(reply.expectsReply));
 
     // Anything worth remembering was pulled locally, by keyword, from what was
     // said — never inferred by a model and stored where you cannot see it.
@@ -860,6 +874,39 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       if (mine()) utter('Writing it now.', false, true);
     }
 
+    /*
+     * The sentence is written while the work is being done, not after it.
+     *
+     * When the model hands back an action without words — which it does more
+     * often than not, whatever the rules ask of it — the line has to come from
+     * a second call. Waiting for the tool first and then making that call adds
+     * both together; started here they overlap, and on a phone where writing a
+     * reminder or inserting a calendar event takes most of a second, that is
+     * the whole of the second call hidden behind work already happening.
+     *
+     * It is written from what was asked for rather than what came back, which
+     * is the trade: slightly less to go on, and it is checked against the real
+     * outcome before anything is said. Nothing is spoken if the tool fails.
+     */
+    const phrasing = reply.holdForTool
+      ? phraseAction(
+          { persona: voice, facts: known },
+          text,
+          `About to ${ability.name.toLowerCase()}${
+            Object.values(reply.args).filter(Boolean).length
+              ? `: ${Object.entries(reply.args)
+                  .filter(([name, value]) => value && name !== 'confirmed' && name !== 'draft')
+                  .map(([name, value]) => `${name} ${value}`)
+                  .join(', ')}`
+              : ''
+          }. It worked.`,
+          (() => {
+            const waiting = inbox.open(capturesRef.current).slice(0, 4).map((c) => c.text);
+            return waiting.length ? `Still on their list: ${waiting.join('; ')}.` : '';
+          })()
+        ).catch(() => null)
+      : null;
+
     // Bounded, so a hung ability can never leave a promise unanswered.
     const outcome = await runAbility(ability, reply.args);
     running.current = false;
@@ -942,35 +989,38 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     }
 
     /*
-     * What gets said, and by whom.
+     * What gets said, in the order it is cheapest to say it.
      *
-     * Three cases, and the old code only had one of them right:
+     *   - It failed: said plainly and now. A failure is the one thing nobody
+     *     should wait an extra second to hear phrased nicely.
+     *   - The model wrote the line already, held above. Free, and the usual
+     *     case now that the rules ask for it.
+     *   - It did not, so the outcome goes back for one bounded line in the
+     *     right voice with what else is waiting. A round trip, paid only when
+     *     the first one came back wordless.
+     *   - Spoken earlier, before a slow ability: nothing to add.
      *
-     *   - The model already replied in its own words and the tool then worked.
-     *     Reading the tool's line out as well says the same thing twice in two
-     *     different registers — a sentence, then a receipt.
-     *   - The model said nothing because it expected the tool to do the
-     *     talking. That is where "Focus mode." and "Added to your goals: run a
-     *     half marathon" came from, and it is most of what an action turn
-     *     sounds like. So the outcome goes back for one bounded line in the
-     *     right voice, with what else is waiting, and the tool's own line
-     *     stands in if that does not come back.
-     *   - It failed. Said plainly and immediately: a failure is the one thing
-     *     nobody should wait an extra second to hear phrased nicely.
+     * Either way the line is checked against what actually happened. The model
+     * writes it before the tool runs, so it is working from what was asked for
+     * rather than what was done, and "at seven" coming back as "at six" is the
+     * one difference that costs something.
      */
     let heard = outcome.ok ? outcome.spoken : shortFailure(outcome.spoken);
-    if (outcome.ok && !reply.holdForTool && reply.text.trim()) {
-      heard = '';
-    } else if (outcome.ok && !outcome.needsConfirming) {
-      const waiting = inbox.open(capturesRef.current).slice(0, 4).map((c) => c.text);
-      const phrased = await phraseAction(
-        { persona: voice, facts: known },
-        text,
-        [outcome.spoken, outcome.detail].filter(Boolean).join('\n'),
-        waiting.length ? `Still on their list: ${waiting.join('; ')}.` : ''
-      ).catch(() => null);
+    if (outcome.ok && reply.text.trim() && (holdsReply || !reply.holdForTool)) {
+      heard = agreesOnTime(reply.text, [outcome.spoken, outcome.detail].filter(Boolean).join(' '))
+        ? holdsReply
+          ? reply.text
+          : ''
+        : outcome.spoken;
+    } else if (outcome.ok && phrasing) {
+      const phrased = await phrasing;
       if (!mine()) return;
-      if (phrased) heard = phrased;
+      // Written before the tool answered, so it is checked against what the
+      // tool actually did — "at seven" coming back as "at six" is the one
+      // difference here that costs something.
+      if (phrased && agreesOnTime(phrased, [outcome.spoken, outcome.detail].filter(Boolean).join(' '))) {
+        heard = phrased;
+      }
     }
     // The result of work you interrupted is not something you still want read
     // out — you have already moved on and asked something else.

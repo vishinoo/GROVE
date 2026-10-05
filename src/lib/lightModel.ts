@@ -787,7 +787,17 @@ export async function lightSummarise(
 export type ToolCall = { name: string; args: Record<string, unknown> };
 
 export type ToolTurn =
-  | { kind: 'calls'; calls: ToolCall[]; raw: unknown }
+  /**
+   * `text` is whatever the model said alongside the calls, which is usually
+   * the reply it intends to give once they have run.
+   *
+   * It was dropped here for a long time, and that single omission is why an
+   * action turn sounded like a receipt: the model wrote "Right, half
+   * marathon's on the list", the parser kept the function call and threw the
+   * sentence away, and the app then paid for a second model call to ask what
+   * it had just been told.
+   */
+  | { kind: 'calls'; calls: ToolCall[]; text: string; raw: unknown }
   | { kind: 'text'; text: string; raw: unknown }
   | { kind: 'nothing' };
 
@@ -879,12 +889,12 @@ async function toolTurnOnce(
     const calls = parts
       .map((p) => p.functionCall)
       .filter((c): c is ToolCall => Boolean(c?.name));
+    const text = parts.map((p) => p.text ?? '').join('').trim();
     if (calls.length > 0) {
       modelTrouble = 'none';
-      return { kind: 'calls', calls, raw: content };
+      return { kind: 'calls', calls, text, raw: content };
     }
 
-    const text = parts.map((p) => p.text ?? '').join('').trim();
     if (text) {
       modelTrouble = 'none';
       return { kind: 'text', text, raw: content };
@@ -1206,10 +1216,9 @@ Something just happened because they asked for it, and it worked. Say so, the wa
 - Where there is something genuinely useful to add — what else is waiting, what this leaves — add it in the same breath, in a few words. Where there is not, stop after the first sentence.
 - Never invent anything that is not in what you are given, and never promise to do something afterwards. Never restate a time, date, amount or name differently from how you were given it — say it exactly, or refer to it loosely ("tomorrow morning") and let the detail stand. If you were told nothing about what else is waiting, say nothing about it — no invented emails, lists, deadlines or people. A quip about the thing that just happened is always available and is never wrong.
 
-These two rules outrank anything above about how you normally talk:
-
-- **Under twenty-five words.** One sentence, or two only when the second names something else that is waiting. This lands in the middle of someone's day, between them putting their phone down and walking off — it is not the place for a paragraph, however good the joke is.
-- **Do not use their name.** It is a greeting, and this is not a greeting.
+- This lands in the middle of someone's day, between them putting their phone down and walking off. Judge the length by that, the way you would judge it out loud. It is a reply to something that just happened, never a lesson about it — if they wanted teaching they will ask.
+- Never end on a question you want answered. Nothing is listening after this line, so a question goes unanswered and makes Grove look broken. A rhetorical one is fine; "want to try one now?" is not.
+- Do not use their name. It is a greeting, and this is not a greeting.
 
 One paragraph, no line breaks, no markdown, no lists, no emoji. It is going to be spoken aloud.`,
     [

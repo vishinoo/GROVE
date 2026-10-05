@@ -681,6 +681,15 @@ section('A phrased action cannot invent a time');
   check(hours('three things still on your list') === '', '"three things" is not an hour');
   check(hours('nice, that leaves two') === '', 'a bare count is not an hour');
 
+  // Counted things after a preposition, which is where this guard was wrong
+  // first: rejecting a good sentence is the expensive failure, because the
+  // whole point of it is to be invisible until something is actually wrong.
+  check(hours('about five months to get your knees ready') === '', '"about five months" is a duration');
+  check(hours('for three more days') === '', '"for three more days" is a duration');
+  check(hours('that is about 20 minutes away') === '', '"about 20 minutes" is a duration');
+  check(hours('by two of them') === '', '"by two of them" counts things');
+  check(hours('leave by seven') === '7', 'but "leave by seven" is still an hour');
+
   // The property the guard exists for.
   const given = brain.hoursIn('Added: Gym, tomorrow at 07:00.');
   const invented = brain.hoursIn("alarm's set for six then");

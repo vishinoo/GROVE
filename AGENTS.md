@@ -438,12 +438,25 @@ mode." and "Added to your goals: run a half marathon" are receipts read aloud,
 and hearing one back is the moment Grove stops sounding like something you talk
 to.
 
-So once the thing has **actually happened**, `phraseAction` in brain.ts asks for
-one line in the person's own assistant's voice, with what else is on their list.
-After the fact rather than before it, deliberately — a model saying "done" in
+**The cheapest line is the one already written.** When the model calls a tool it
+often writes the reply it means to give alongside it — and the parser threw that
+away, keeping the function call and dropping the text. That single omission is
+why an action sounded like a receipt *and* why fixing it cost a second model
+call. `ToolTurn` carries the text now, and the turn holds it until the tool has
+actually worked, which costs nothing and stays honest: if the tool fails, the
+failure is said and the line is never heard.
+
+When the model does stay silent — which it still does more often than not,
+whatever the rules ask — `phraseAction` writes the line instead. **Started
+before the tool runs, not after**, so the call overlaps work already happening;
+waiting for the outcome first added the two together. It is written from what
+was asked for rather than what came back, and checked against the real outcome
+before anything is said. Bounded at six seconds, and the canned line stands in
+whenever it does not come back.
+
+Never spoken before the tool has finished either way. A model saying "done" in
 the same breath as calling the tool is announcing an outcome it does not have,
-which is a lie the moment anything fails. Bounded at six seconds with no retry,
-and the canned line stands in whenever it does not come back.
+which is a lie the moment anything fails.
 
 **Said once, by one of them.** When the model already replied in its own words
 and the tool then worked, the tool's line is not read out as well — that is a
@@ -460,8 +473,11 @@ Two things instructions could not stop:
   clock times: guarding every number rejects "one less thing to do" and bins a
   good sentence for nothing.
 
-Capped under twenty-five words. This lands between someone putting their phone
-down and walking off.
+No word count. It is told where the line lands — between someone putting their
+phone down and walking off — and left to judge the length the way it would out
+loud. A cap produced lines that stopped mid-thought; the brief produces lines
+that end. It must not end on a question, though, because nothing is listening
+after it.
 
 **A new turn silences the last one.** `exchange` calls `stopSpeaking()` before
 anything else. Without it, talking to Grove mid-sentence left the old sentence

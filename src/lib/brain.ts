@@ -98,6 +98,9 @@ const TOOL_RULES = `How to use your tools:
 - To recap mail and then send that recap to someone, first get the recap, then send its text with the send-email tool.
 - Ordering: food goes to the food tool (Uber Eats, or DoorDash if they say so); things to buy go to the shopping tool (Amazon unless they name Instacart, Walmart or Costco). "My usual" is in what you know about them above; if it is not there, ask_back what their usual is — do not search for it.
 - For sending, booking, ordering, calling or messaging, just call the tool. The app asks the person to confirm before anything happens, so do not ask them yourself.
+- ALWAYS write a reply alongside a tool call. A tool call with no words is the one thing you must never send: the app then has to go and ask a second time what you meant to say, which costs the person a second of silence on every single request.
+- When you call a tool that DOES something — logs, sets, adds, switches, marks done, ticks off, starts, stops — write the line you would say once it has worked, in the same reply. The app holds it until the thing has actually happened and says it then, so write it as the reply and not as a promise: "Right, half marathon's on the list" rather than "I'll add that". If it fails, the app says so instead and your line is never spoken.
+- That line is a reply, never a receipt. Do not read the thing back as a label — "Goal logged: run a half marathon" is a form being filled in. Say it the way you talk, and where something else of theirs is genuinely worth raising in the same breath, raise it.
 - To write something they will read — an assignment, a report, a reading list, a summary — use the document tool. Pass what they want in as much detail as they gave you.
 - If they point at work they already have ("the assignment on here", "that brief"), find and read that document first and pass its text as the source, so what you write answers their actual question.
 - Set research on a document when it needs facts from the world — companies, prices, news, anything you would otherwise be guessing at.
@@ -340,6 +343,17 @@ export function hoursIn(text: string): Set<string> {
   };
   const found = new Set<string>();
 
+  /**
+   * What a number turns out to be counting rather than telling the time.
+   *
+   * "about five months to get your knees ready" is not five o'clock, and
+   * reading it as one threw away a perfectly good sentence — which is the
+   * expensive way for this guard to be wrong, because the whole point of it is
+   * to be invisible until something is actually wrong.
+   */
+  const COUNTED =
+    /^\s*(?:minutes?|mins?|hours?|days?|weeks?|months?|years?|times?|things?|people|quid|pounds?|dollars?|euros?|k|miles?|km|kilometres?|more|less|others?|of\b)/i;
+
   // 15:00, 7am, 7 pm, "at 7"
   for (const m of text.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/gi)) {
     const hour = Number(m[1]);
@@ -348,12 +362,14 @@ export function hoursIn(text: string): Set<string> {
     // preposition in front of it. Otherwise "3 things on your list" is an hour.
     const before = text.slice(Math.max(0, m.index - 12), m.index).toLowerCase();
     if (!m[2] && !m[3] && !/\b(at|for|by|until|till|around|about)\s*$/.test(before)) continue;
+    if (!m[2] && !m[3] && COUNTED.test(text.slice(m.index + m[0].length))) continue;
     found.add(String(hour % 12));
   }
   // "at seven", "for half seven", "seven o'clock"
   for (const m of text.matchAll(
     /\b(?:at|for|by|until|till|around|about|half)\s+(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|midday|noon|midnight)\b/gi
   )) {
+    if (COUNTED.test(text.slice(m.index + m[0].length))) continue;
     found.add(String(Number(WORDS[m[1].toLowerCase()]) % 12));
   }
   for (const m of text.matchAll(
@@ -362,6 +378,26 @@ export function hoursIn(text: string): Set<string> {
     found.add(String(Number(WORDS[m[1].toLowerCase()]) % 12));
   }
   return found;
+}
+
+/**
+ * Whether a sentence names a clock time the thing it describes did not.
+ *
+ * "Added: Gym, tomorrow at 07:00" said back as "alarm's set for six then" is
+ * the one liberty worth catching — every other one is a worse joke, and this
+ * one makes someone late. Used on both the line written before the tool ran
+ * and the line written after it, because the model can get a time wrong in
+ * either direction.
+ *
+ * Only clock times, deliberately. Checking every number would reject "one less
+ * thing to do" and throw away a good sentence for nothing.
+ */
+export function agreesOnTime(line: string, source: string): boolean {
+  const given = hoursIn(source);
+  for (const hour of hoursIn(line)) {
+    if (!given.has(hour)) return false;
+  }
+  return true;
 }
 
 /**
@@ -414,11 +450,7 @@ export async function phraseAction(
    * Only clock times, deliberately. Guarding every number would reject "one
    * less thing to do" and throw away the phrasing for nothing.
    */
-  const given = hoursIn(happened);
-  for (const hour of hoursIn(clean)) {
-    if (!given.has(hour)) return null;
-  }
-  return clean;
+  return agreesOnTime(clean, happened) ? clean : null;
 }
 
 export async function askWithTools(
@@ -573,13 +605,21 @@ export async function askWithTools(
       // "what's the weather and text Sam I'm late" answers the weather and then
       // asks about the text.
       if (!ability.reads) {
-        const said = ran
+        // What the model said alongside the call, where it said anything.
+        // That is the reply it means to give once this has worked, it has the
+        // whole conversation behind it, and it is already paid for — asking
+        // for it again afterwards is a second round trip on every action.
+        const wrote = plainSpeech(turn.text.trim());
+        // Otherwise, whatever the reads turned up this turn: "what's the
+        // weather and text Sam I'm late" still answers the weather.
+        const fromReads = ran
           .filter((r) => r.ok && !fedInto(r, args))
           .map((r) => r.spoken)
           .filter(unique)
           .join(' ');
+        const said = wrote || plainSpeech(fromReads);
         return {
-          text: plainSpeech(said),
+          text: said,
           ability,
           args,
           fact,
