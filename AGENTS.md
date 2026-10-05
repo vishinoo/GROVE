@@ -430,6 +430,44 @@ entity, the model did it anyway from a first-person intro, which put
 name for the rest of the pass* — skipping only the entity meant the name arrived
 again from an episode's `about` list and was minted as a bare topic.
 
+## An action is reported in Grove's voice
+
+An ability's `spoken` line is written to be correct and short, because it is the
+only thing said when a model call fails. What it is not is a reply: "Focus
+mode." and "Added to your goals: run a half marathon" are receipts read aloud,
+and hearing one back is the moment Grove stops sounding like something you talk
+to.
+
+So once the thing has **actually happened**, `phraseAction` in brain.ts asks for
+one line in the person's own assistant's voice, with what else is on their list.
+After the fact rather than before it, deliberately — a model saying "done" in
+the same breath as calling the tool is announcing an outcome it does not have,
+which is a lie the moment anything fails. Bounded at six seconds with no retry,
+and the canned line stands in whenever it does not come back.
+
+**Said once, by one of them.** When the model already replied in its own words
+and the tool then worked, the tool's line is not read out as well — that is a
+sentence followed by a receipt.
+
+Two things instructions could not stop:
+
+- **The name.** Told not to use it while `friendDirective` was separately
+  telling it to, the model obeyed whichever it preferred. `friendDirective(p,
+  { greet: false })` simply does not offer it. Nought out of six, from four.
+- **A changed time.** "at 07:00" came back once as "set for six then" — the one
+  liberty here that costs something. `hoursIn()` compares the clock times in the
+  phrasing against the outcome and throws the phrasing away on a mismatch. Only
+  clock times: guarding every number rejects "one less thing to do" and bins a
+  good sentence for nothing.
+
+Capped under twenty-five words. This lands between someone putting their phone
+down and walking off.
+
+**A new turn silences the last one.** `exchange` calls `stopSpeaking()` before
+anything else. Without it, talking to Grove mid-sentence left the old sentence
+playing and queued the new answer behind it through `whenQuiet()`, so replies
+arrived late and in order, like a backlog being drained.
+
 ## Capture, don't switch
 
 `src/lib/inbox.ts` is a flat list of raw thoughts, written the instant they are
