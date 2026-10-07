@@ -101,7 +101,7 @@ So:
   if one is configured. **The order matters**: while the server came first,
   every turn paid its timeout before falling through.
 - Identity — with no backend there is no account. `localIdentity()` mints a uid
-  into the Keychain, because uid keys memory, sparks and the transcript, and an
+  into the Keychain, because uid keys the memory and the transcript, and an
   unstable one forgets you every launch.
 
 The redirect scheme **is** the client id with its dotted parts reversed. It is
@@ -111,9 +111,8 @@ from `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`; never hardcode it. A mismatch fails
 after consent, which is the most confusing place a sign-in can break.
 
 What a backend would still buy you: one shared model key instead of one per
-device, and sparks that run with the phone in a drawer. Neither is needed for a
-single user, and iOS cannot wake a terminated app anyway, so `catchUp()` runs
-due sparks when Grove is next opened.
+device. Not needed for a
+single user.
 
 ## Where the rules live
 
@@ -375,7 +374,7 @@ person hearing "you're usually up by eight" can find out it came from counting.
 Every spoken claim about a pattern carries its count for the same reason — that
 sentence is an assertion about someone's life made by a machine, and the
 difference between impressive and presumptuous is whether they can see where it
-came from. The Sparks screen shows what Grove thinks is normal, with the count
+came from. The Memory screen shows what Grove thinks is normal, with the count
 beside each line, and what the interruptions have cost today.
 
 ## The first run teaches it about you
@@ -642,7 +641,7 @@ episodes out the other end.
 **The buffer is deleted once read.** That is the privacy line, and it is the
 same one `transcript.ts` draws at fifteen exchanges: Grove listens while you
 walk around, so it keeps what things meant and not what was said. Everything it
-keeps is readable and deletable on the Sparks screen, because a memory you
+keeps is readable and deletable on the Memory screen, because a memory you
 cannot see is one you cannot correct.
 
 **Memory is compacted, not just appended.** Every third consolidation,
