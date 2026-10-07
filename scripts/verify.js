@@ -732,6 +732,21 @@ section('A tool that answers is not talked over');
    * held back for the ability was never spoken at all. Setting a spark said
    * nothing whatsoever, which is the exact failure this app can least afford.
    */
+  /*
+   * A sentence that asked for two things answers both.
+   *
+   * "What's the weather and remind me to call mum at six" runs the weather
+   * inside the model's turn and hands back the reminder, so the line in hand
+   * is the forecast — which says nothing about the reminder. Substituting it
+   * for the confirmation set the reminder and never mentioned it.
+   */
+  check(/wroteForAction/.test(agent), 'a line about the action is told apart from one about the rest');
+  const both = agent.slice(agent.indexOf('reply.wroteForAction'), agent.indexOf('reply.wroteForAction') + 900);
+  check(
+    /\[reply\.text, outcome\.spoken\]/.test(both),
+    'and an answer to another part is said before the confirmation, not instead of it'
+  );
+
   const holds = agent.slice(agent.indexOf('const standing ='), agent.indexOf('const standing =') + 400);
   check(/reply\.schedule \|\| reply\.phrase/.test(holds), 'a standing job does not hold its reply');
   check(/!standing/.test(holds), 'and says it straight away instead');

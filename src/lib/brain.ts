@@ -619,6 +619,11 @@ export async function askWithTools(
           fact,
           ran,
           holdForTool: !said,
+          // Only the model's own words describe what is about to be done. A
+          // line assembled from reads answers a different part of the
+          // sentence and belongs in front of the confirmation, not instead
+          // of it.
+          wroteForAction: Boolean(wrote),
         };
       }
 

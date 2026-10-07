@@ -95,6 +95,17 @@ export type GroveReply = {
    */
   holdForTool?: boolean;
   /**
+   * Whether `text` is the model's own line about the action it is handing
+   * back, rather than the answer to some other part of the sentence.
+   *
+   * "What's the weather and remind me to call mum at six" runs the weather
+   * inside the loop and hands back the reminder, so `text` is the forecast —
+   * which says nothing whatever about the reminder. Substituting it for the
+   * tool's confirmation set the reminder and never mentioned it. The two have
+   * to be told apart: one replaces the confirmation, the other precedes it.
+   */
+  wroteForAction?: boolean;
+  /**
    * Reads that already ran while the model was working out its answer.
    *
    * Recorded so the Talk screen can show what was looked up — the answer is

@@ -1035,10 +1035,21 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     let heard = outcome.ok ? outcome.spoken : shortFailure(outcome.spoken);
     if (outcome.ok && toolAnswers) {
       heard = outcome.spoken;
-    } else if (outcome.ok && holdsReply && reply.text.trim()) {
+    } else if (outcome.ok && holdsReply && reply.text.trim() && reply.wroteForAction) {
       heard = agreesOnTime(reply.text, [outcome.spoken, outcome.detail].filter(Boolean).join(' '))
         ? reply.text
         : outcome.spoken;
+    } else if (outcome.ok && holdsReply && reply.text.trim()) {
+      /*
+       * The line answers a different part of the sentence.
+       *
+       * "What's the weather and remind me to call mum at six" runs the weather
+       * inside the model's own turn and hands back the reminder, so the line
+       * in hand is the forecast — which says nothing about the reminder.
+       * Substituting it set the reminder and never mentioned it. Both get
+       * said, in the order they were asked for.
+       */
+      heard = [reply.text, outcome.spoken].filter(Boolean).join(' ');
     } else if (outcome.ok && phrasing) {
       const phrased = await phrasing;
       if (!mine()) return;
