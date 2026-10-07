@@ -38,7 +38,7 @@ import * as inbox from './inbox';
 import * as money from './money';
 import { loadFacts } from './memory';
 import { loadLife, openCommitments } from './life';
-import { loadStruggles, frictionBlock, open as openStruggles } from './struggles';
+import { loadStruggles, frictionBlock } from './struggles';
 import type { CalendarEvent } from './google';
 
 /** One thing that narrows what a good answer looks like. */
@@ -170,16 +170,8 @@ export async function constraints(
     });
   }
 
-  /* ------------------------------------------------------ knowledge */
+  /* ------------------------------------------------------- friction */
 
-  const gaps = openStruggles(stuck).filter((x) => (x.kind ?? 'knowledge') === 'knowledge');
-  if (gaps.length > 0) {
-    out.push({
-      kind: 'knowledge',
-      says: `Not yet understood: ${gaps.slice(0, 4).map((g) => `${g.what}${g.raised > 1 ? ` (raised ${g.raised} times)` : ''}`).join('; ')}.`,
-      how: 'observed',
-    });
-  }
   const friction = frictionBlock(stuck);
   if (friction) out.push({ kind: 'knowledge', says: friction, how: 'observed' });
 

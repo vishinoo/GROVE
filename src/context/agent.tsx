@@ -157,7 +157,7 @@ type AgentValue = {
 
   /** Things they said they did not understand, hardest first. */
   struggles: struggles.Struggle[];
-  /** Tick one off by hand, when a quiz is not how they found out. */
+  /** Tick one off by hand, once it has stopped happening. */
   gotStruggle: (id: string) => Promise<void>;
   forgetStruggle: (id: string) => Promise<void>;
 
@@ -1019,12 +1019,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
      *
      * The model writes its line before the tool runs, so it can only ever
      * confirm — and where the tool comes back with something the model could
-     * not have known, the tool has to win. Missing that swallowed a quiz
-     * question whole: study.quiz returned "Three questions. When would you use
-     * integration by parts instead of substitution?", the model's "well, you
-     * asked for it" replaced it, and the microphone opened for an answer to a
-     * question nobody had been asked. A finished document lost its result the
-     * same way.
+     * not have known, the tool has to win. Missing that swallowed a question
+     * whole — the tool asked one, the model's own line replaced it, and the
+     * microphone opened for an answer to a question nobody had been asked —
+     * and a finished document lost its result the same way.
      *
      * Three tells, and all three are already declared: a line the microphone
      * opens after is a question, a slow ability was acknowledged before it

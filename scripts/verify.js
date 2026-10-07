@@ -703,9 +703,9 @@ section('A phrased action cannot invent a time');
  *
  * The model writes its line before the tool runs, so it can only ever confirm.
  * Where the tool comes back with something the model could not have known, the
- * tool has to win — and missing that swallowed a quiz question whole: the
- * question was replaced by "well, you asked for it", and the microphone then
- * opened for an answer to a question nobody had been asked.
+ * tool has to win — and missing that swallowed a tool's own question whole:
+ * it was replaced by the model's line, and the microphone then opened for an
+ * answer to a question nobody had been asked.
  */
 section('A tool that answers is not talked over');
 {

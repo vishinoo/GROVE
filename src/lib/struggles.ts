@@ -1,64 +1,27 @@
 /**
- * The things you repeatedly fail at.
+ * The things that keep going wrong.
  *
- * Every other memory in Grove records what is true: who someone is, what
- * happened, what you decided. This one records a gap — a thing you were told
- * and did not get — which is the only kind of memory that is useful precisely
- * because it is about something you cannot yet do.
+ * Every other memory in Grove records what is true. This one records friction —
+ * a thing that goes wrong more than once — which is the only kind of memory
+ * that earns its place by being about something the person cannot reliably do.
  *
- * It exists because the obvious version of an AI tutor is worthless. Anything
- * can explain integration by parts. The thing nobody else can do is remember
- * that *you* did not follow it on the fourth of October, that you asked again
- * two weeks later, and that you have still never got it right unprompted — and
- * then quiz you on that rather than on the syllabus.
+ * It began as a tutor: a record of concepts someone did not understand, so a
+ * quiz could test them on it. That was a different product wearing this one's
+ * clothes, and the quiz is gone. What survives is the half that makes Grove
+ * feel like it knows you — "you always forget your charger" — which costs one
+ * storage read and rides in the prompt, so it is in mind at the moment the
+ * thing is about to happen again.
  *
- * TWO KINDS OF FRICTION, AND THE SECOND ONE IS THE GENERAL CASE
- *
- * It started as a record of things someone did not know, which turned out to be
- * the narrow version of a better idea: Grove should remember not only what you
- * know, but **what you repeatedly fail to do**. "You keep forgetting your
- * charger" and "you skip the gym after a late class" are the same primitive as
- * "you confuse enterprise value and equity value" — a thing that goes wrong
- * more than once, which is the only reason it is worth recording at all.
- *
- * They are kept apart because they are used in opposite ways. A knowledge gap
- * can be *tested*, which is what the quiz is for. A habit cannot: you cannot
- * ask someone a question about forgetting their charger, and trying produces
- * the kind of hectoring that gets an app deleted. A habit's job is to be in
- * mind at the moment it is about to happen again.
- *
- * WHY A STRUGGLE IS NOT A FACT
- *
- * It could have gone in memory.ts as a fact with a flag, and that would have
- * been wrong in three ways. A struggle has a *state* that changes (open, got it
- * once, got it twice, closed), it has a count that matters (asked three times
- * is a different thing from asked once), and it is the input to a job — the
- * quiz — rather than context for a conversation. Facts ride in every prompt;
- * nothing here does, because "you don't understand the chain rule" in a prompt
- * about dinner is an insult.
- *
- * THE CLOSING RULE
- *
- * Two correct answers close it, not one. One correct answer to a question you
- * were just asked about a thing you just revised is a memory test. The second
- * one, days later, is understanding. A wrong answer reopens it and resets the
- * count, because this is the one memory in Grove where being optimistic costs
- * the person something real.
+ * **Twice is the bar.** Everyone forgets something once. A list that records
+ * the first time is a list of someone's bad days, which is the thing this must
+ * never become; the count is the whole signal, and it is shown on screen
+ * beside each line for the same reason.
  */
 
 import { vault } from './vault';
 
 export type Struggle = {
   id: string;
-  /**
-   * Which kind of friction this is.
-   *
-   * 'knowledge' can be tested and feeds the quiz. 'habit' cannot be tested and
-   * feeds the prompt instead, so it is in mind at the moment it is about to
-   * happen again. Optional rather than required, because every struggle
-   * written before this field existed was a knowledge gap.
-   */
-  kind?: 'knowledge' | 'habit';
   /** The concept or the behaviour, in their own words where possible. */
   what: string;
   /** What it belongs to — a course, a project, a topic. Lower-cased. */
@@ -75,27 +38,13 @@ export type Struggle = {
   gotItAt?: string;
 };
 
-/** A quiz in progress. Lives across turns, like a focus session. */
-export type Quiz = {
-  questions: { q: string; a: string; struggleId: string }[];
-  /** Which question they are on. */
-  at: number;
-  /** How many they have got right so far. */
-  score: number;
-  startedAt: string;
-};
-
 /** Plenty for years of one degree. */
 const LIMIT = 200;
 
 /** Closed and older than this is history nobody is quizzing on. */
 const KEEP_CLOSED_FOR_MS = 180 * 86_400_000;
 
-/** A quiz nobody finished is not hanging over them a day later. */
-const QUIZ_EXPIRES_MS = 2 * 3_600_000;
-
 const KEY = 'grove:struggles:v1';
-const QUIZ_KEY = 'grove:quiz:v1';
 
 function storageKey(uid: string): string {
   return `${KEY}:${uid}`;
@@ -153,18 +102,15 @@ function tidy(list: Struggle[]): Struggle[] {
 /**
  * Something the same, however it was worded.
  *
- * "I don't get integration by parts" and "integration by parts still isn't
- * clicking" are one struggle raised twice, and recording them separately is
- * how a quiz ends up asking the same question four ways. Matched on
+ * "I always forget my charger" and "I keep forgetting my charger" are one
+ * thing said twice, and recording them separately is
+ * how one habit becomes four entries. Matched on
  * containment either direction, which is loose on purpose: a false merge costs
  * a shared counter, and a false split costs the whole point of counting.
  */
-/** Every gap and any running quiz, gone. */
+/** Everything recorded here, gone. */
 export async function forgetAllStruggles(uid: string): Promise<void> {
-  await Promise.all([
-    vault.removeItem(storageKey(uid)).catch(() => {}),
-    vault.removeItem(`${QUIZ_KEY}:${uid}`).catch(() => {}),
-  ]);
+  await vault.removeItem(storageKey(uid)).catch(() => {});
 }
 
 export function same(list: Struggle[], what: string): Struggle | undefined {
@@ -181,8 +127,7 @@ export async function note(
   uid: string,
   what: string,
   about: string,
-  said?: string,
-  kind: 'knowledge' | 'habit' = 'knowledge'
+  said?: string
 ): Promise<{ list: Struggle[]; again: boolean }> {
   const clean = what.trim().slice(0, 140);
   if (!clean) return { list: await loadStruggles(uid), again: false };
@@ -195,7 +140,6 @@ export async function note(
       return [
         {
           id: newId(),
-          kind,
           what: clean,
           about: about.trim().toLowerCase().slice(0, 60),
           ...(said ? { said: said.trim().slice(0, 240) } : {}),
@@ -216,9 +160,6 @@ export async function note(
             raised: s.raised + 1,
             lastAt: stamp,
             right: 0,
-            // A thing first heard as a knowledge gap and raised again as a
-            // behaviour is a behaviour; the later telling is the better one.
-            kind: kind === 'habit' ? 'habit' : (s.kind ?? 'knowledge'),
             about: s.about || about.trim().toLowerCase().slice(0, 60),
             gotItAt: undefined,
           }
@@ -228,29 +169,22 @@ export async function note(
   return { list, again };
 }
 
-/** Still unresolved, hardest first — raised most, then most recent. */
+/** Still unresolved, worst first — raised most, then most recent. */
 export function open(list: Struggle[]): Struggle[] {
   return list
     .filter((s) => !s.gotItAt)
     .sort((a, b) => b.raised - a.raised || b.lastAt.localeCompare(a.lastAt));
 }
 
-/** The ones a question can be written about. Everything the quiz may use. */
-export function knowledge(list: Struggle[]): Struggle[] {
-  return open(list).filter((s) => (s.kind ?? 'knowledge') === 'knowledge');
-}
-
 /**
- * The ones that cannot be tested, only remembered.
+ * The few worth having in mind right now.
  *
  * These go into the turn's prompt rather than into a quiz, and they are capped
  * hard: three is enough to be useful and ten is a list of someone's failings
  * read back to them, which is the thing this feature must never become.
  */
 export function habits(list: Struggle[]): Struggle[] {
-  return open(list)
-    .filter((s) => s.kind === 'habit')
-    .slice(0, 3);
+  return open(list).slice(0, 3);
 }
 
 /**
@@ -309,7 +243,7 @@ export async function mark(uid: string, id: string, right: boolean): Promise<boo
   return closed;
 }
 
-/** Told outright that they have it — "I get the chain rule now". */
+/** Told outright that it has stopped being a problem. */
 export async function gotIt(uid: string, id: string): Promise<Struggle[]> {
   return update(uid, (list) =>
     list.map((s) => (s.id === id ? { ...s, right: 2, gotItAt: new Date().toISOString() } : s))
@@ -320,7 +254,7 @@ export async function forget(uid: string, id: string): Promise<Struggle[]> {
   return update(uid, (list) => list.filter((s) => s.id !== id));
 }
 
-/** What a model needs to write questions: the gap, the subject, the wording. */
+/** The list as prompt, for the card on screen and for the model. */
 export function studyBlock(list: Struggle[]): string {
   return list
     .map(
@@ -328,59 +262,4 @@ export function studyBlock(list: Struggle[]): string {
         `${i + 1}. ${s.what}${s.about ? ` (${s.about})` : ''} — raised ${s.raised} time${s.raised === 1 ? '' : 's'}${s.said ? `, originally: "${s.said}"` : ''}`
     )
     .join('\n');
-}
-
-/* ----------------------------------------------------------------- quiz */
-
-export async function loadQuiz(uid: string): Promise<Quiz | null> {
-  try {
-    const raw = await vault.getItem(`${QUIZ_KEY}:${uid}`);
-    if (!raw) return null;
-    const quiz = JSON.parse(raw) as Quiz;
-    if (!quiz || !Array.isArray(quiz.questions)) return null;
-    // An abandoned quiz is not still running two hours later. Picking one up
-    // mid-sentence the next morning is worse than starting again.
-    if (Date.now() - new Date(quiz.startedAt).getTime() > QUIZ_EXPIRES_MS) {
-      await setQuiz(uid, null);
-      return null;
-    }
-    return quiz;
-  } catch {
-    return null;
-  }
-}
-
-export async function setQuiz(uid: string, quiz: Quiz | null): Promise<void> {
-  try {
-    if (quiz) await vault.setItem(`${QUIZ_KEY}:${uid}`, JSON.stringify(quiz));
-    else await vault.removeItem(`${QUIZ_KEY}:${uid}`);
-  } catch {
-    // A lost quiz is a quiz that has to be restarted.
-  }
-}
-
-/** The question they are on, or null when the quiz has run out. */
-export function current(quiz: Quiz): { q: string; a: string; struggleId: string } | null {
-  return quiz.questions[quiz.at] ?? null;
-}
-
-/**
- * How the turn's prompt is told a quiz is running.
- *
- * The answer key goes in deliberately. Marking is the one job here a model is
- * genuinely good at — it can tell that "you swap which one you differentiate"
- * is the right answer to a question about integration by parts even though it
- * matches no string — and it cannot do that without knowing the answer.
- */
-export function quizDirective(quiz: Quiz): string {
-  const q = current(quiz);
-  if (!q) return '';
-  return [
-    `You are quizzing them on things they have told you they did not understand. This is question ${quiz.at + 1} of ${quiz.questions.length}.`,
-    `The question you asked: ${q.q}`,
-    `What a right answer amounts to: ${q.a}`,
-    'Their next message is their answer. Mark it in one short line — say plainly whether they got it, and if not, give the answer in a sentence or two. Do not be gentle about a wrong answer; they asked to be tested.',
-    'Then call study_next with right set to yes or no. That asks the next question, so do not write one yourself and do not ask them if they are ready.',
-    'If they say they want to stop, or ask about something else entirely, call study_stop instead and leave it.',
-  ].join('\n');
 }

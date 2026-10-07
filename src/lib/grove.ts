@@ -184,7 +184,7 @@ const BARE_YES =
  * Address forms are allowed in front of it, because people say "please" and
  * "hey Grove" and mean the imperative that follows.
  */
-const VERBS = String.raw`make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up|play|read|brief|tell me about|email|text|message|call|switch to|switch into|go into|turn on|turn off|open|handle|push|reschedule|delay|shift|dim|start|stop|queue|skip|pause|resume|let .{2,20} know|give me|reply|respond|answer|forward|let'?s go|take me|drive me|directions|navigate|which way|delete|remove|take|summari[sz]e|catch me up|recap|digest|remember|note|jot|keep in mind|don'?t let me forget|tick|mark|ring|dial|complete|finished|get me|order|uber|book me|share|capture|focus(?: on)?|jot|quiz|test|forget|set|talk me out of`;
+const VERBS = String.raw`make|create|build|draft|write|plan|book|schedule|send|order|buy|find|check|update|add|put|move|cancel|remind|track|log|sync|generate|prepare|set up|play|read|brief|tell me about|email|text|message|call|switch to|switch into|go into|turn on|turn off|open|handle|push|reschedule|delay|shift|dim|start|stop|queue|skip|pause|resume|let .{2,20} know|give me|reply|respond|answer|forward|let'?s go|take me|drive me|directions|navigate|which way|delete|remove|take|summari[sz]e|catch me up|recap|digest|remember|note|jot|keep in mind|don'?t let me forget|tick|mark|ring|dial|complete|finished|get me|order|uber|book me|share|capture|focus(?: on)?|jot|forget|set|talk me out of`;
 
 /** "hey Grove, please …" — anything that can precede an instruction. */
 /**
@@ -297,7 +297,7 @@ const STRUGGLE_STATEMENT = new RegExp(
     // The behavioural half: a thing that keeps going wrong rather than a thing
     // not understood. Same primitive, same gate, and the same reason — it is a
     // statement about themselves with no verb the imperative test can see.
-    String.raw`|i (?:always|keep|constantly|never) (?:forget|forgetting|skip|skipping|miss|missing|put off|leave|leaving|lose|losing|mess up|get .{0,20} wrong)\b` +
+    String.raw`|i (?:always|keep|constantly|never) (?:remember|forget|forgetting|skip|skipping|miss|missing|put off|leave|leaving|lose|losing|mess up|get .{0,20} wrong)\b` +
     ')',
   'i'
 );

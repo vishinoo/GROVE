@@ -33,7 +33,7 @@ import { asToolResults, asUserTurn, lastModelTrouble, lightAfterAction, lightFal
 import { asPromptBlock, factFrom } from './memory';
 import { lately, loadLife, whoIsWho } from './life';
 import { rhythmLines, rhythms } from './rhythms';
-import { frictionBlock, loadStruggles, loadQuiz, quizDirective } from './struggles';
+import { frictionBlock, loadStruggles } from './struggles';
 import { loadFocus, loadInbox, open as openCaptures, remaining } from './inbox';
 import { calculate } from './calc';
 import { abilitiesFor, modeById } from './modes';
@@ -464,7 +464,7 @@ export async function askWithTools(
   // A line of names, not the archive: enough that "my cofounder" and "Jason"
   // are the same person without a lookup, and cheap enough to ride on every
   // turn. Everything else about them is a tool call away.
-  const [roster, session, waiting, usual, quiz, friction] = await Promise.all([
+  const [roster, session, waiting, usual, friction] = await Promise.all([
     loadLife(currentAccount())
       .then((l) => [whoIsWho(l), lately(l)].filter(Boolean).join('\n'))
       .catch(() => ''),
@@ -479,7 +479,6 @@ export async function askWithTools(
     rhythms(currentAccount())
       .then((r) => rhythmLines(r))
       .catch(() => ''),
-    loadQuiz(currentAccount()).catch(() => null),
     // The things that go wrong for them more than once. Cheap — it is already
     // on the phone — and the only constraint worth paying for on every turn,
     // because its whole value is being in mind at the moment it recurs.
@@ -498,12 +497,7 @@ export async function askWithTools(
   const focusing = session
     ? `They are in a focus session on ${session.what}${remaining(session) ? ` — ${remaining(session)}` : ''}. Anything that is not that: capture it and point them back in one short line, and do not expand on it. Answer anything that IS about ${session.what} properly. If they ask what they should be doing, the answer is ${session.what}.`
     : '';
-  // A quiz in progress rewrites what a good reply is more completely than
-  // anything else here: their next sentence is an answer to a question, not a
-  // request, and routing it as a request is how "the chain rule" became a web
-  // search. So it goes last, where it has the most say.
-  const quizzing = quiz ? quizDirective(quiz) : '';
-  const system = [systemFor(context, available), roster, usual, friction, list, focusing, quizzing]
+  const system = [systemFor(context, available), roster, usual, friction, list, focusing]
     .filter(Boolean)
     .join('\n\n');
   const fact = factFrom(userText) ?? undefined;

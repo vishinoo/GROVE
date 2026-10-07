@@ -1280,39 +1280,6 @@ Never say to buy it, never say it is fine, and never tell them what they want to
 }
 
 /**
- * Questions about the things someone did not understand.
- *
- * Its own call, and a short one, because the job is unusually easy to get
- * wrong in a way that wastes the person's time: asked to "quiz them", a model
- * writes exam questions about the subject. The point is narrower than that —
- * each question has to test the specific gap they reported, which is why the
- * list it is given carries how many times each came up and the words they used.
- *
- * An answer key comes back with every question because the marking happens on
- * the next turn, and a model cannot tell a right answer from a confident wrong
- * one without knowing what right was.
- */
-export async function lightQuiz(block: string, howMany: number): Promise<string | null> {
-  if (!block.trim()) return null;
-  return complete(
-    `Someone has been keeping a list of things they did not understand. Write ${howMany} questions that test exactly those gaps — not the subject in general.
-
-Rules:
-- One question per gap, in the order given, until you run out of gaps or questions.
-- Spoken aloud, so no multiple choice, no "which of the following", no symbols that only work on paper. A question someone can answer in a sentence or two while walking.
-- Test whether they understand it, not whether they remember a definition. "When would you use it instead of substitution?" beats "what is integration by parts?".
-- The answer is what a right answer amounts to, in one or two sentences — the substance, not the wording, because their answer will be in their own words.
-
-Return JSON: {"questions":[{"q":"...","a":"...","n":1}]} where n is the number of the gap it came from. Nothing else.`,
-    [{ role: 'user', content: block.slice(0, 4000) }],
-    true,
-    false,
-    false,
-    1200
-  );
-}
-
-/**
  * The person themselves, out of the way they describe their own life.
  *
  * A companion to lightConsolidate rather than part of it, because the two

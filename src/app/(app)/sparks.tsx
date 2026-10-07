@@ -194,14 +194,14 @@ export default function Sparks() {
         not need a panel.
       */}
       {stuck.length > 0 ? (
-        <Section label="Not clicking yet">
+        <Section label="Keeps tripping you up">
           {stuck.slice(0, 20).map((item) => (
             <SwipeAway key={item.id} label={item.what} onDelete={() => void forgetStruggle(item.id)}>
             <Card style={{ marginBottom: 6 }}>
               <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`I understand ${item.what} now`}
+                  accessibilityLabel={`${item.what} is no longer a problem`}
                   onPress={() => void gotStruggle(item.id)}
                   hitSlop={8}
                   style={({ pressed }) => ({ paddingTop: 1, opacity: pressed ? 0.5 : 1 })}
@@ -213,7 +213,6 @@ export default function Sparks() {
                   <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
                     {item.about ? `${item.about} · ` : ''}
                     {item.raised === 1 ? 'once' : `${item.raised} times`}
-                    {item.right > 0 ? ' · one right answer so far' : ''}
                   </Text>
                 </View>
               </View>
@@ -221,8 +220,7 @@ export default function Sparks() {
             </SwipeAway>
           ))}
           <Text style={[Type.bodySm, { color: palette.muted, marginTop: 6 }]}>
-            Tick one off when it clicks, or swipe it away. Say &ldquo;quiz me&rdquo; and these are
-            the questions.
+            Tick one off once it stops happening, or swipe it away.
           </Text>
         </Section>
       ) : null}

@@ -69,7 +69,6 @@ import {
   lightEmail,
   lightAdvice,
   lightPlan,
-  lightQuiz,
   lightResearch,
 } from './lightModel';
 
@@ -3816,269 +3815,72 @@ const SET_MODE: Ability = {
 };
 
 
-/* ----------------------------------------------------------- struggling */
+/* ------------------------------------------------------------- friction */
 
 /**
- * "I don't get this."
+ * The things that keep going wrong for them.
  *
- * The cheapest ability in the file and the one that makes the next two worth
- * having. It writes down a gap, which is the one thing a tutor that knows you
- * can do and a tutor that does not cannot.
+ * Not a tutor. It was one briefly — it recorded what someone did not
+ * understand so a quiz could test them on it later — and that was a different
+ * product wearing this one's clothes. What survives is the half that makes
+ * Grove feel like it knows you: a thing that goes wrong more than once is
+ * worth remembering, and worth having in mind at the moment it is about to
+ * happen again.
  *
- * Not a read, because it writes — but harmless enough that there is no
- * confirmation: the worst a misheard sentence can do here is add a question to
- * a quiz, which is also what the right sentence does.
+ * Cheap, and the only thing in the long memory that rides in every prompt
+ * besides the facts. Not a read, because it writes — but harmless enough that
+ * there is no confirmation: the worst a misheard sentence can do is add a line
+ * to a list the person can see and swipe away.
  */
-const STUDY_STUCK: Ability = {
-  id: 'study.stuck',
-  name: 'Note what you did not understand',
-  what: "Writes down a concept they did not follow, so it can be quizzed later. Use when they say they don't understand, don't get, are confused by or are stuck on something — including right after you have explained it. Also use for something they keep getting wrong rather than not understanding — they always forget their charger, they keep skipping the gym after a late class — with kind set to habit. And when they say outright that a thing has finally clicked, with got_it set — their own claim to understand it, never your judgement that their answer was good.",
+const FRICTION: Ability = {
+  id: 'memory.friction',
+  name: 'Note what keeps going wrong',
+  what: "Writes down something that goes wrong for them more than once, so you can mention it at the moment it is about to happen again. Use when they say they always, keep or never do something — forgetting a charger, skipping the gym after a late class, leaving things to the last minute. Also use when they say it has stopped being a problem, with fixed set.",
   where: 'device',
   wired: true,
   needs: [],
   args: {
     what: {
       type: 'string',
-      what: 'the concept itself, named as specifically as the conversation allows — "integration by parts", not "this" or "the thing we just discussed"',
+      what: 'the thing that keeps going wrong, in their words — "forgets their charger when leaving", not "this"',
       required: true,
     },
     about: {
       type: 'string',
-      what: 'what it belongs to: a course code, a subject, a project. Leave empty if unclear.',
+      what: 'what it belongs to, if it is obviously about one thing: a course, a project, the gym. Leave empty otherwise.',
     },
-    got_it: {
+    fixed: {
       type: 'string',
-      what: "'yes' when they are telling you they now understand it, rather than that they do not",
-    },
-    kind: {
-      type: 'string',
-      what: "'habit' when it is something they keep DOING wrong — forgetting their charger, skipping the gym after a late class. 'knowledge' (the default) when it is something they do not understand.",
+      what: "'yes' when they are saying it has stopped being a problem, rather than that it is one",
     },
   },
   examples: [
-    "I don't understand integration by parts",
-    "remember that I don't get this concept",
-    "this still isn't clicking for me",
-    "I'm confused about how the chain rule works",
     'I always forget my charger when I leave',
-    'okay I actually get beta now',
+    'I keep skipping the gym after a late class',
+    'I never remember to take my keys',
+    'I always leave this to the last minute',
   ],
   run: async (args) => {
     const what = (args.what || '').trim();
-    if (!what) return { ok: false, spoken: 'What was it you did not follow?' };
+    if (!what) return { ok: false, spoken: 'What is it that keeps happening?' };
 
     const list = await struggles.loadStruggles(CURRENT_UID);
-    if (/^y/i.test(args.got_it || '')) {
+    if (/^y/i.test(args.fixed || '')) {
       const known = struggles.same(list, what);
-      if (!known) return { ok: true, spoken: `Good. I had nothing written down about ${what} anyway.` };
+      if (!known) return { ok: true, spoken: `Good. I had nothing written down about that anyway.` };
       await struggles.gotIt(CURRENT_UID, known.id);
       return { ok: true, spoken: `Right, ${known.what} is off the list.` };
     }
 
-    const habit = /^h/i.test(args.kind || '');
-    const { again } = await struggles.note(
-      CURRENT_UID,
-      what,
-      args.about || '',
-      undefined,
-      habit ? 'habit' : 'knowledge'
-    );
+    const { again } = await struggles.note(CURRENT_UID, what, args.about || '');
     const stillOpen = struggles.open(await struggles.loadStruggles(CURRENT_UID));
     return {
       ok: true,
-      spoken: again
-        ? `Noted again — that keeps happening.`
-        : habit
-          ? `Written down. I'll bring it up when it is about to happen again.`
-          : `Written down. I will test you on ${what}.`,
+      spoken: again ? 'Noted again — that keeps happening.' : "Written down. I'll bring it up when it matters.",
       detail: `${stillOpen.length} open:\n${struggles.studyBlock(stillOpen.slice(0, 10))}`,
     };
   },
 };
-
-/**
- * "Quiz me on what I've been struggling with."
- *
- * Reads the gaps, has questions written for exactly those gaps, stores the set
- * as a session and asks the first one — with `listenAfter`, because unlike
- * every other answer in this file this one is a question and the microphone has
- * to open for it.
- *
- * Marked `slow` only mildly: one model call to write five questions, which
- * measures at two to three seconds.
- */
-const STUDY_QUIZ: Ability = {
-  id: 'study.quiz',
-  name: 'Test me',
-  what: 'Quizzes them on the things they said they did not understand. Use for "quiz me", "test me on what I have been struggling with", "ask me about FIN 312".',
-  where: 'device',
-  wired: true,
-  needs: [],
-  timeoutMs: 40_000,
-  args: {
-    about: {
-      type: 'string',
-      what: 'a course, subject or topic to narrow to, if they named one. Empty means everything open.',
-    },
-    days: {
-      type: 'string',
-      what: "a number of days, when they said something like 'this week' (7) or 'today' (1). Empty means no limit.",
-    },
-  },
-  examples: [
-    'quiz me on the things I have struggled with this week',
-    'test me',
-    'test me on MARK 312',
-    'quiz me on what I do not understand',
-  ],
-  run: async (args) => {
-    const all = await struggles.loadStruggles(CURRENT_UID);
-    const days = Number.parseInt(args.days || '', 10);
-    // Knowledge only: you cannot write a question about forgetting a charger,
-    // and trying is the kind of hectoring that gets an app deleted.
-    const askable = struggles.knowledge(all);
-    let picked = Number.isFinite(days) && days > 0
-      ? struggles.openSince(all, days).filter((x) => askable.some((k) => k.id === x.id))
-      : askable;
-    if ((args.about || '').trim()) {
-      const narrowed = struggles.about(all, args.about);
-      // A named subject with nothing open under it is worth saying rather than
-      // silently quizzing them on something else.
-      if (narrowed.length === 0) {
-        return { ok: false, spoken: `I have nothing written down that you struggled with on ${args.about}.` };
-      }
-      picked = narrowed;
-    }
-    if (picked.length === 0) {
-      return {
-        ok: false,
-        spoken:
-          "I have nothing on your list. Tell me when you don't follow something and I'll test you on it later.",
-      };
-    }
-
-    const wanted = Math.min(picked.length, 5);
-    const block = struggles.studyBlock(picked.slice(0, wanted));
-
-    // Two goes. This is one model call standing between someone asking to be
-    // tested and being tested, and a blip on the first attempt threw the whole
-    // request away — which was seen happening on the second run of a test and
-    // not the first, which is the definition of the thing worth retrying.
-    let made: { q: string; a: string; n?: number }[] = [];
-    for (let attempt = 0; attempt < 2 && made.length === 0; attempt += 1) {
-      const raw = await lightQuiz(block, wanted);
-      try {
-        const parsed = JSON.parse((raw ?? '').replace(/^```(?:json)?\s*|\s*```$/g, '').trim()) as {
-          questions?: { q?: string; a?: string; n?: number }[];
-        };
-        made = (parsed.questions ?? [])
-          .filter((x): x is { q: string; a: string; n?: number } => Boolean(x?.q && x?.a))
-          .slice(0, wanted);
-      } catch {
-        made = [];
-      }
-    }
-    if (made.length === 0) {
-      return { ok: false, spoken: 'I could not get the questions written. Ask me again in a moment.' };
-    }
-
-    const questions = made.map((m, i) => ({
-      q: m.q.trim(),
-      a: m.a.trim(),
-      // The model numbers from one against the list it was given; anything out
-      // of range falls back to position, so a bad number costs the marking of
-      // one struggle rather than the whole quiz.
-      struggleId: picked[(m.n ?? i + 1) - 1]?.id ?? picked[Math.min(i, picked.length - 1)].id,
-    }));
-    await struggles.setQuiz(CURRENT_UID, {
-      questions,
-      at: 0,
-      score: 0,
-      startedAt: new Date().toISOString(),
-    });
-
-    return {
-      ok: true,
-      spoken: `${questions.length} question${questions.length === 1 ? '' : 's'}. ${questions[0].q}`,
-      detail: questions.map((q, i) => `${i + 1}. ${q.q}`).join('\n'),
-      listenAfter: true,
-    };
-  },
-};
-
-/**
- * Marks the last answer and asks the next question.
- *
- * The model has already said whether they got it, in its own words, by the
- * time this runs — this is the part that cannot be left to it: the score, the
- * struggle's state, and whether two right answers in a row have closed it.
- */
-const STUDY_NEXT: Ability = {
-  id: 'study.next',
-  name: 'Next question',
-  what: 'Marks their answer to the current quiz question and asks the next one. Only ever called during a quiz.',
-  where: 'device',
-  wired: true,
-  needs: [],
-  args: {
-    right: { type: 'string', what: "'yes' if their answer was right, 'no' if it was not", required: true },
-  },
-  // Realistic phrasings that still pass a keyword gate. In practice the model
-  // calls this from the quiz directive rather than from anything said.
-  examples: ['give me the next question', 'move on to the next one'],
-  run: async (args) => {
-    const quiz = await struggles.loadQuiz(CURRENT_UID);
-    if (!quiz) return { ok: false, spoken: 'There is no quiz running.' };
-    const asked = struggles.current(quiz);
-    const right = /^y/i.test(args.right || '');
-
-    const closed = asked ? await struggles.mark(CURRENT_UID, asked.struggleId, right) : false;
-    const at = quiz.at + 1;
-    const score = quiz.score + (right ? 1 : 0);
-    const next = quiz.questions[at];
-
-    if (!next) {
-      await struggles.setQuiz(CURRENT_UID, null);
-      const left = struggles.open(await struggles.loadStruggles(CURRENT_UID)).length;
-      return {
-        ok: true,
-        spoken: `${score} out of ${quiz.questions.length}.${closed ? ' And that one is off your list.' : ''}${
-          left ? ` ${left} thing${left === 1 ? '' : 's'} still on it.` : ' Nothing left on it.'
-        }`,
-      };
-    }
-
-    await struggles.setQuiz(CURRENT_UID, { ...quiz, at, score });
-    return {
-      ok: true,
-      spoken: `${closed ? "That's it twice now, so it's off your list. " : ''}${next.q}`,
-      listenAfter: true,
-    };
-  },
-};
-
-/** Stopping, which has to be as easy as starting or the quiz is a trap. */
-const STUDY_STOP: Ability = {
-  id: 'study.stop',
-  name: 'Stop the quiz',
-  what: 'Ends a quiz in progress. Use the moment they say stop, enough, later, or ask about something unrelated.',
-  where: 'device',
-  wired: true,
-  needs: [],
-  args: {},
-  // Not a bare "stop": focus.end owns that, and a quiz is not the only thing
-  // someone stops. During a quiz the directive names this ability outright.
-  examples: ['stop the quiz', 'forget the quiz'],
-  run: async () => {
-    const quiz = await struggles.loadQuiz(CURRENT_UID);
-    await struggles.setQuiz(CURRENT_UID, null);
-    return {
-      ok: true,
-      spoken: quiz ? `Stopped. ${quiz.score} right out of the ${quiz.at} you answered.` : 'Nothing running.',
-    };
-  },
-};
-
 
 /* ---------------------------------------------------------------- money */
 
@@ -4310,10 +4112,7 @@ const MONEY_ADVISE: Ability = {
 
 export const ABILITIES: Ability[] = [
   NOW,
-  STUDY_STUCK,
-  STUDY_QUIZ,
-  STUDY_NEXT,
-  STUDY_STOP,
+  FRICTION,
   MONEY_ADVISE,
   MONEY_BUDGET,
   MONEY_SPENT,
