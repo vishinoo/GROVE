@@ -25,18 +25,10 @@
  * for something you asked once.
  */
 
-import { ABILITIES, abilityById, isSchedulable, usableAbilities, type Ability } from './abilities';
+import { usableAbilities, type Ability } from './abilities';
 import { askWithTools, type RanTool } from './brain';
-import { abilitiesFor, modeById, type Mode } from './modes';
-import { asPromptBlock, factFrom, type Extracted, type Fact } from './memory';
-import {
-  isLightModelConfigured,
-  lastModelTrouble,
-  lightTurn,
-  type LightMessage,
-} from './lightModel';
-import { activePreset, fallback, mannerDirective, type Persona, notedFor } from './persona';
-import { describeSchedule, parseSchedule, phraseTrigger, type Schedule } from './sparks';
+import { type Extracted, type Fact } from './memory';
+import { type Persona } from './persona';
 
 export type TurnTool = {
   name: string;
@@ -68,7 +60,7 @@ export type GroveReply = {
    * Set when the sentence carried a recurrence, so the caller saves a spark
    * instead of just running the thing once.
    */
-  schedule?: Schedule;
+  schedule?: never;
   /**
    * Set when the sentence taught a phrase — "whenever I say X". The other kind
    * of standing job, and the reason a caller must not test `schedule` alone to
@@ -144,31 +136,6 @@ const QUESTION_OPENERS =
  * upstairs" are untouched — only a sentence that is nothing but a mode name
  * counts as asking for one.
  */
-/**
- * Any way of asking for a mode.
- *
- * Needs a switching word AND a mode name, so "I need to focus" and "the study
- * is upstairs" are untouched, while every phrasing people actually use —
- * turn it on, put me in, switch to, activate, set — reaches mode.set.
- */
-/**
- * The modes, as words. Written once: when these lived separately in two
- * regexes, adding a mode meant remembering to edit both, and "travel mode"
- * silently did nothing.
- */
-const MODE_WORDS = 'focus|wind[-\\s]?down|normal|gym';
-
-const MODE_COMMAND = new RegExp(
-  `\\b(?:turn|switch|go|put|set|activate|enter|start|enable|into)\\b[^.?!]{0,24}?\\b(?:${MODE_WORDS})\\b(?:\\s+mode)?`,
-  'i'
-);
-
-const BARE_MODE = new RegExp(`^\\s*(?:back to\\s+)?(?:${MODE_WORDS})(?:\\s+mode)?\\s*[.!]?\\s*$`, 'i');
-
-/** Being asked outright to remember something. */
-const EXPLICIT_REMEMBER =
-  /\b(?:remember|note that|make a note|don'?t (?:let me )?forget|keep in mind|jog my memory|for the record)\b/i;
-
 const BARE_GO_AHEAD =
   /^\s*(?:(?:ok|okay|yes|yeah|yep|sure|right)[,.\s]+)?(?:please\s+)?(?:do it|do that|go ahead|go on|run it|sort it|handle it|get on with it|make it so|please do|go|now)[.!\s]*$/i;
 
@@ -415,15 +382,6 @@ export function detectActIntent(text: string): boolean {
   if (MONEY_STATEMENT.test(t)) return true;
   // A bare go-ahead beats the question test, because it is the whole sentence.
   if (BARE_GO_AHEAD.test(t) || BARE_YES.test(t)) return true;
-  // "Study mode." "Back to normal." No verb anywhere, and unmistakably an
-  // instruction — naming a mode is the whole sentence, the way a go-ahead is.
-  if (BARE_MODE.test(t)) return true;
-  // "Turn focus mode on" splits its verb around the object, so the imperative
-  // test — which looks for a verb at the start — saw "turn" and no match, the
-  // gate stayed shut, and mode.set never ran. Grove said "focus mode" and
-  // changed nothing, which is the most annoying way to fail: it sounds like it
-  // worked.
-  if (MODE_COMMAND.test(t)) return true;
   // Asking to be taken somewhere is a request however it is phrased, and most
   // phrasings put the verb after the subject: "I want to go to the airport"
   // led with "I", so the imperative test refused it — and the goal extractor
@@ -656,18 +614,6 @@ export function senderIn(text: string): string | null {
 const CATEGORY_IN =
   /\b(unread|important|urgent|starred|flagged|new)\b/i;
 
-/**
- * Things Grove holds itself, so the web has nothing to add.
- *
- * Grounding costs a round trip to Google before a word is written, and the
- * answer to "what is on my calendar" was never going to be out there. The
- * router usually catches these, but only when one ability clearly wins — and a
- * long sentence with two thoughts in it beats the router while still plainly
- * being about the diary.
- */
-const ANSWERED_HERE =
-  /\b(my |the )?(calendar|schedule|diary|agenda|inbox|email|emails|mail|reminder|reminders|memory|goals?|playlist|library)\b|\bweather\b|\bwhat'?s on\b|\bmy day\b/i;
-
 /** Any wording that names a position rather than a window. */
 const POSITION_WORD =
   /\b(first|last|next|final|latest|earliest|upcoming|after (?:this|that))\b/i;
@@ -705,370 +651,41 @@ export function pickAbility(text: string): Ability | null {
   return scored[0]?.ability ?? null;
 }
 
-/** The shape the cheap tier wants: role and content, oldest first. */
-function toLightHistory(history: Turn[]): LightMessage[] {
-  return history.map((t) => ({ role: t.role, content: t.text.slice(0, 4000) }));
-}
-
 export type GroveContext = {
+  /**
+   * How they talk, as a line of prompt. Worked out by rapport.ts rather than
+   * set on a screen; passed in so the one caller that already has it does not
+   * make every prompt load it again.
+   */
+  rapport?: string;
   persona: Persona;
   facts: Fact[];
 };
 
 /**
- * One turn of conversation with Grove.
+ * One turn.
  *
- * Two tiers now, not three:
+ * This used to be the whole router: a keyword tier that decided whether
+ * anything was allowed to run, then a light model call, then argument
+ * recovery. All of that is gone — the model is handed every ability as a typed
+ * function and chooses, which it does better than any keyword list could.
  *
- *   0  local rules   free   act intent, recurrence, and a keyword fallback
- *   1  light model   cheap  the conversation, and choosing the ability
+ * What kept this function alive afterwards was standing jobs: a schedule or a
+ * phrase trigger saved a spark rather than doing something now, and that path
+ * had its own gate and its own reply. Sparks are gone too — iOS cannot wake a
+ * terminated app, so a job scheduled for eight in the morning only ever fired
+ * if Grove happened to be open, which is not a schedule.
  *
- * The tier that was capped is gone, so there is no budget to run out of and no
- * branch here that has to apologise for one.
+ * So this is a delegation, kept because every caller and the harness names it,
+ * and because the gates below it are still the harness's way of asking whether
+ * a sentence can reach a tool at all.
  */
 export async function askGrove(
   history: Turn[],
   userText: string,
   context: GroveContext
 ): Promise<GroveReply> {
-  const { persona, facts } = context;
-
-  // Ordinary turns go to the model with tools. Only standing jobs stay here.
-  //
-  // A schedule or a phrase trigger saves a spark rather than doing something
-  // now, and that path has its own gate and its own reply. Everything else —
-  // which is nearly everything — is a question or a request the model can
-  // route better than any keyword list could, and did, in testing.
-  //
-  // Detected without the action gate on purpose: "every morning at seven brief
-  // me" puts no verb first, so gating detection on it sent standing jobs to a
-  // tool loop that has no way to save one.
-  if (!parseSchedule(userText) && !phraseTrigger(userText)) {
-    return askWithTools(history, userText, context);
-  }
-
-  // Tier 0. Whether anything is allowed to run, and whether it recurs.
-  const acting = detectActIntent(userText);
-  // A question that needs a lookup. Kept separate from `acting` so it cannot
-  // reach a schedule, a phrase trigger, or any ability that changes something.
-  const looking = !acting && detectLookupIntent(userText);
-
-  /*
-   * Ungated, which is the whole reason this function exists.
-   *
-   * The early return above already says a standing job is not gated on the
-   * action intent — "every morning at seven brief me" leads with "every" and
-   * has no verb the imperative test can see, so gating it sends the sentence
-   * to a tool loop with no way to save a spark. Then these two lines gated it
-   * anyway, and the result was the worst of both: past the early return, but
-   * with schedule and phrase both null, so nothing was ever saved. Grove said
-   * "Done." and no spark existed. Every standing job phrased that way — which
-   * is most of them — was quietly dropped.
-   *
-   * Safe to ungate because the strictness lives in parseSchedule itself, where
-   * the note about waking someone at seven every morning for something they
-   * asked once already is. Getting here at all means one of these two matched.
-   */
-  const schedule = parseSchedule(userText);
-  // The other kind of standing job. Checked here rather than left to the
-  // caller, because a caller that tests `schedule` alone silently drops every
-  // phrase trigger — which is exactly what was happening.
-  const phrase = schedule ? null : phraseTrigger(userText);
-
-  // The mode narrows what may be reached for. This is a safety feature as much
-  // as a focus one: commute deliberately has no mail, because reading a message
-  // aloud at a junction is worse than not having mail at all.
-  const mode = modeById(persona.mode ?? 'normal');
-  const available = abilitiesFor(mode, ABILITIES);
-
-  // Tier 1. Answers, and names the ability that fits.
-  const light = await lightTurn(toLightHistory(history), userText, {
-    abilities: available.map((a) => ({ id: a.id, what: a.what })),
-    manner: [mannerDirective(persona), mode.manner].filter(Boolean).join('\n\n'),
-    memory: asPromptBlock(facts),
-    name: persona.name,
-    // If a tool here can answer it, do not search the web on the way. The one
-    // exception is the briefing, which IS the web.
-    grounded: (() => {
-      // The briefing IS the web, so it always searches.
-      const local = pickAbility(userText);
-      if (local?.id === 'brief.web') return true;
-      if (local) return false;
-
-      // A rambling sentence — "what's the weather today, I want to go here and
-      // I'm not sure what it's like" — matches no ability cleanly, so the
-      // keyword router returned nothing and the turn paid for a web search
-      // before it could say anything. Naming something Grove holds locally is
-      // enough to skip it, whether or not a single ability falls out.
-      return !ANSWERED_HERE.test(userText);
-    })(),
-  });
-
-  // The model sees the whole set and the sentence, so it beats keywords on
-  // anything phrased indirectly. It also invents ids, so a pick matching no
-  // real ability is discarded rather than trusted.
-  const named = light?.abilityId ? abilityById(light.abilityId) : undefined;
-  const allowed = (a: Ability | undefined) => Boolean(a && available.some((x) => x.id === a.id));
-  // The keyword fallback has to respect the mode as well, or a narrowed mode is
-  // only narrowed when the model happens to be reachable.
-  const pick = (): Ability | null => {
-    if (allowed(named) && named?.wired) return named ?? null;
-    const guess = pickAbility(userText);
-    return allowed(guess ?? undefined) ? guess : null;
-  };
-
-  // A read the model itself named, on a question that matched no keyword.
-  //
-  // LOOKUP_QUESTION is a keyword list, and no keyword list covers how people
-  // actually ask: "what time is my long walk at again" names nothing lookable,
-  // so no tool ran, and the model — which cannot see the calendar — answered
-  // that it has no access. The model had already picked calendar.find; the gate
-  // just refused to let it.
-  //
-  // Trusting it costs nothing that matters, because `reads` is the whole
-  // permission: the worst a wrong pick can do is look something up nobody asked
-  // about. mail.send, calendar.move and message.compose carry no such mark and
-  // remain unreachable from any question, which is the property that has to
-  // hold and still does.
-  // ...but only on something actually being asked.
-  //
-  // Trusting the model's read pick on any turn at all was too much: told
-  // "it's hooked up, Google is hooked up", the model reached for the calendar
-  // and Grove read the whole day out instead of answering. A statement is not a
-  // question, and the model reaching for a tool during conversation is it being
-  // eager, not the person asking for anything.
-  const askedSomething = QUESTION_OPENERS.test(userText) || userText.trim().endsWith('?');
-  const namedRead =
-    (askedSomething || looking) && allowed(named) && named?.wired && named.reads ? named : null;
-
-  // Two gates, and the narrower one can only ever return a read. Whatever the
-  // router suggested, a question cannot come out of here holding mail.send.
-  const chosen = acting
-    ? pick()
-    : (namedRead ?? (looking && pick()?.reads ? pick() : null));
-
-  // Something would fit, but it is not built or connected yet. Saying which is
-  // the difference between a dead end and an instruction.
-  const blocked = !chosen && (acting || looking) && named && !named.wired ? named : null;
-
-  /**
-   * Wired, built, connected — and switched off by the mode you are in.
-   *
-   * This was indistinguishable from a missing feature. Asked to read mail in
-   * focus mode, Grove said "I can't do that yet", which is what it says about
-   * things nobody has built — so a setting the person turned on five minutes
-   * ago reads as a gap in the product. A restriction you chose should say so,
-   * and say how to lift it.
-   */
-  const offInThisMode =
-    !chosen && named?.wired && !available.some((a) => a.id === named.id) ? named : null;
-
-  const fact = factFrom(userText) ?? undefined;
-
-  /**
-   * Remembering something needs no model at all.
-   *
-   * "Remember that Sam owes me twelve quid for lunch" was going through the
-   * full turn — including a web search, since grounding is on — and taking the
-   * better part of a minute to do something the local extractor had already
-   * finished before the request left the phone. The answer was always going to
-   * be "noted"; there was nothing to think about.
-   *
-   * Only when nothing else is going on: a sentence that also asks for something
-   * still gets a proper turn.
-   */
-  // ...and only when being told to remember is the whole of it.
-  //
-  // The shortcut used to fire on anything the extractor recognised, which is a
-  // much wider net than it sounds: "I need to know what time my class is" and
-  // "I am a bit confused" both looked like facts, so both were answered with
-  // "noted" and nothing else happened. The extractor is narrower now, but the
-  // rule matters on its own — a sentence gets this treatment because the person
-  // asked Grove to remember something, not because it happens to parse as one.
-  //
-  // The fact is still recorded on the ordinary path, so nothing is lost by
-  // falling through: this only decides whether the model is worth waking.
-  if (fact && EXPLICIT_REMEMBER.test(userText) && !chosen && !acting && !schedule && !phrase) {
-    return {
-      text: notedFor(persona, fact.value.replace(/^i /i, 'you ')),
-      args: {},
-      fact,
-    };
-  }
-
-  // Said before anything else can paper over it, because the model does not
-  // know the mode narrowed its own tool list and will happily improvise a
-  // reason it cannot help.
-  if (offInThisMode) {
-    return {
-      text: `${offInThisMode.name} is off in ${mode.label.toLowerCase()} mode. Say "back to normal" and I'll do it.`,
-      args: {},
-    };
-  }
-
-  const settle = (text: string): GroveReply => {
-    let usable = text.trim();
-
-    // A read is answered by the tool, so the model must not answer it first.
-    //
-    // The model's reply is spoken immediately and the ability runs behind it,
-    // which is fine when the ability DOES something — "putting that on now" is
-    // true before the song starts. It is not fine when the ability is the only
-    // source of the answer: asked what was next in the calendar, the model said
-    // "next up is your team sync at three thirty" while the calendar was still
-    // running, and there was no team sync. It invented a plausible day.
-    //
-    // Nothing the model writes can be trusted about data it has not seen yet,
-    // so for a read its prose is replaced by a holding line and the tool's
-    // answer is the answer. It also removes a whole utterance from the turn,
-    // which is the other half of why these felt slow.
-    // Nothing is said before a read. The tool's answer is the whole answer.
-    //
-    // Replacing the model's prose with a holding line was the wrong half of the
-    // fix: exchange() already speaks a holding line when a turn runs long, so a
-    // read said "let me check" twice and, if the lookup then failed, that was
-    // the entire reply — Grove announcing it was looking and never coming back.
-    // Silence here, the existing timer for slowness, the result when it lands.
-    // A remark survives; an invented answer does not.
-    //
-    // Silencing everything before a read stopped the model fabricating calendar
-    // entries, and threw away the lines that make Grove worth talking to along
-    // with them. The difference is testable: an answer carries specifics —
-    // times, dates, counts — and a remark carries none. So anything short and
-    // free of numbers is kept and said before the lookup, and anything that
-    // looks like it is answering is dropped in favour of the tool that
-    // actually can.
-    const looksLikeAnAnswer = /\d/.test(usable) || usable.length > 90;
-    const holdForTool = Boolean(chosen?.reads) && looksLikeAnAnswer;
-
-    return {
-      text:
-        usable ||
-        offlineLine(userText, {
-          acting: acting || looking,
-          ability: chosen,
-          blocked,
-          schedule,
-          mode,
-          voice: activePreset(persona),
-        }),
-      ability: chosen ?? undefined,
-      holdForTool,
-      // The model fills these normally, but it drops the title often enough to
-      // matter: asked for Playboi Carti it named music.play with no `what` at
-      // all, an empty title means shuffle, and a random jazz cover started
-      // playing. An empty argument on a sentence that plainly names something
-      // is a gap to fill, not an instruction to pick at random — so the local
-      // reader backfills it whether or not the model ran.
-      args: fillArgs(chosen, light?.args, userText),
-      schedule: schedule ?? undefined,
-      phrase: phrase ?? undefined,
-      blocked: blocked ?? undefined,
-      title: light?.title ?? (schedule || phrase ? titleFrom(userText) : undefined),
-      instruction: schedule || phrase ? instructionFrom(userText) : undefined,
-      fact,
-    };
-  };
-
-  // A recurrence is worth confirming out loud, because it is the one thing
-  // here that keeps happening after the conversation ends.
-  if (phrase) {
-    return settle(`Right — say “${phrase}” and I'll do that.`);
-  }
-
-  if (schedule && chosen) {
-    const when = describeSchedule(schedule);
-    const caveat = isSchedulable([chosen.id])
-      ? ''
-      : ' It needs Grove running, so it will catch up when you next pick me up.';
-    return settle(`${when}. I'll tell you what comes back.${caveat}`);
-  }
-
-  // The model still sometimes says it is off to check something while naming no
-  // ability. There is no later turn to redeem that with, so the promise is
-  // caught here and replaced rather than spoken.
-  if (light?.text) {
-    // A promise is only allowed to stand when something is actually about to
-    // run and report back. With no ability behind it, "I'll check that for you"
-    // is the last thing the person hears — there is no second turn to redeem
-    // it with — so it is replaced rather than spoken.
-    if (!chosen && promisesAction(light.text)) {
-      return settle(blocked ? offlineLine(userText, { acting, blocked }) : fallback.cannot());
-    }
-    // With an ability running, a promise is honest but useless on its own: the
-    // outcome is spoken a few seconds later, so leading with "let me check"
-    // just doubles the talking. Say what is being done instead.
-    if (chosen && promisesAction(light.text)) {
-      return settle(fallback.onIt(userText));
-    }
-    return settle(light.text);
-  }
-  return settle('');
-}
-
-/**
- * What Grove says when no model answered at all.
- *
- * Reached on an unconfigured build, a dead network, or a light tier that timed
- * out — exactly when silence would read as a crash. Every branch is written to
- * be true whatever went wrong: none of them claims that anything ran.
- */
-function offlineLine(
-  userText: string,
-  context: {
-    acting: boolean;
-    ability?: Ability | null;
-    blocked?: Ability | null;
-    schedule?: Schedule | null;
-    mode?: Mode;
-    voice?: { stuck: string; empty: string };
-  }
-): string {
-  if (context.blocked) {
-    return context.blocked.needs.length > 0
-      ? `${context.blocked.name} would cover that, but it needs ${readableNeeds(context.blocked.needs)} first.`
-      : `${context.blocked.name} would cover that, but it isn't built yet.`;
-  }
-  if (context.schedule && context.ability) {
-    return `${describeSchedule(context.schedule)}. I'll tell you what comes back.`;
-  }
-  if (context.ability || context.acting) return fallback.onIt(userText);
-
-  // A real reason beats a stylish one.
-  //
-  // Rate limiting is what actually happens in normal use: ask three things in
-  // quick succession and the free tier starts refusing, and "Can't get to
-  // anything right now" then reads as Grove being broken rather than busy. The
-  // fix is to wait five seconds, and nobody can guess that from the stock line.
-  const trouble = lastModelTrouble();
-  if (trouble === 'rate-limited') return 'Too many at once — give me about five seconds.';
-  if (trouble === 'timeout') return 'That took too long to come back. Ask me again.';
-  if (trouble === 'offline') return 'I have no connection right now.';
-  if (trouble === 'no-model')
-    return 'The model I am set to use has been retired. That needs changing in my settings.';
-  if (trouble === 'no-key') return fallback.unconfigured();
-  // 'refused' is the model answering with nothing usable — a safety block, an
-  // empty candidate, an unparseable reply. It used to fall through to the
-  // persona's stock line, which is the one sentence that tells you nothing at
-  // all, and it was the sentence people saw most.
-  if (trouble === 'refused') return 'The model gave me nothing back on that one. Try wording it differently.';
-
-  // In the voice's own words, falling back to the mode's. A stock line after a
-  // personality has been talking to you for ten minutes is the moment the
-  // character drops, and that is exactly when someone stops believing any of it.
-  if (context.voice?.stuck) return context.voice.stuck;
-  if (context.mode?.stuck) return context.mode.stuck;
-  // "Try again" is a lie when there is no model to try. An unconfigured build
-  // fails this way on every single turn, and telling someone to wait a moment
-  // sends them round that loop for as long as their patience lasts.
-  if (!isLightModelConfigured()) return fallback.unconfigured();
-  return fallback.stuck();
-}
-
-function readableNeeds(keys: string[]): string {
-  const words = keys.map((k) => k.replace(/[_-]/g, ' '));
-  if (words.length <= 1) return words[0] ?? 'something connected';
-  return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
+  return askWithTools(history, userText, context);
 }
 
 /**

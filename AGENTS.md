@@ -139,13 +139,12 @@ due sparks when Grove is next opened.
   data in `detail`. `spoken` is shortened for an ear; the model answers from
   `detail`, and handing it the shortened line is how "what's my first thing
   tomorrow" was answered from two events out of four.
-- `src/lib/grove.ts` — standing jobs only now: schedules and phrase triggers,
-  which save a spark rather than doing something this turn. The keyword gates
-  still live here for that path and for the harness.
-- `src/lib/sparks.ts` — `parseSchedule` decides whether something keeps
-  happening. Same rule, same reason: a false positive here wakes you at seven
-  every morning for something you asked once. Its clock parser is written for
-  speech, not for a form — people say "half four", not "16:30".
+- `src/lib/grove.ts` — a delegation and the keyword gates. It was the whole
+  router once, then the standing-job path; **sparks are gone**, because iOS
+  cannot wake a terminated app and a job scheduled for eight in the morning
+  only ever fired if Grove happened to be open, which is not a schedule. The
+  gates stay because they are how the harness asks whether a sentence can reach
+  a tool at all.
 - `src/lib/persona.ts` — the manner is user-authored and goes into a system
   prompt, so `mannerDirective` wraps it to quarantine it as style-only. It is a
   guard, not a guarantee; keep the framing when editing.
@@ -154,9 +153,6 @@ due sparks when Grove is next opened.
   personal build on a prepaid key, and to be moved behind a server before a
   build reaches anyone else. Everything outside this file is provider-agnostic,
   so that move is one file.
-- `src/lib/modes.ts` — a mode is a manner, a set of allowed abilities, and how
-  freely Grove may speak first. Commute has no mail on purpose: a message read
-  aloud at a junction is worse than no mail at all.
 - `src/lib/memory.ts` — facts carry a subject, so "what was I supposed to ask
   Sarah about" is answerable. Capped at 40 and sent whole; there is no retrieval
   step because at this size sending everything is cheaper than fetching some.
@@ -165,8 +161,8 @@ due sparks when Grove is next opened.
   evicted before a passing note about lunch, and recency is the wrong measure
   for a goal. They also carry their own heading in the prompt, so the model can
   tell "wants to run a half marathon" from "ran a half marathon". Memory is read
-  and edited on the Sparks screen rather than in Settings — a spark is a
-  standing instruction and a fact is standing context.
+  and edited on its own screen rather than in Settings: a memory you cannot see
+  is one you cannot correct.
 
 ## Documents, and why a scope change needs a reconnect
 
@@ -474,60 +470,36 @@ anything else. Without it, talking to Grove mid-sentence left the old sentence
 playing and queued the new answer behind it through `whenQuiet()`, so replies
 arrived late and in order, like a backlog being drained.
 
-## Capture, don't switch
-
-`src/lib/inbox.ts` is a flat list of raw thoughts, written the instant they are
-said, plus the focus session that defends it. The point is what capture does
-NOT do: no date, no list, no category, no question back, and a two-word reply —
-"Got it. Back to FIN 312." Anything that turns a capture into a small
-conversation has already cost more attention than the thought was worth.
-
-**Everything caught also goes to the Reminders app**, dated when a time was
-given. Two homes on purpose and by request: the phone is the thing that shouts
-at you, and the inbox is the copy Grove can see when it asks what you should be
-doing. Notes are different again (long, dictated on purpose), as is the long
-memory (written by a model after the fact).
-
-**Everything they say they have to do goes somewhere.** With a time on it
-("tomorrow", "at three") it is a reminder; without one ("I have to do the
-dishes") it is a capture. Missing that rule, the model answered "I have to do
-the dishes" with a joke and logged nothing, which is the one outcome this
-feature exists to prevent. The keyword fallback learned the same shape
-(`TODO_STATEMENT`), deliberately without "I should": "I should probably cancel
-that" is thinking aloud, and that gate can reach the ability that cancels
-things.
-
-A focus session — "I'm on FIN 312 for the next hour" — is what makes it work.
-While one runs, brain.ts puts it in the system prompt: anything that is not the
-session gets captured and pointed back at in one line; anything that IS the
-session gets answered properly. `now.context` leads with it, so "what am I
-supposed to be doing" answers with the session and the time left. Durations
-("40 minutes", "half an hour") are parsed by `endsIn` — `readWhen` reads clock
-times and days, and dropped every length, leaving sessions open-ended. A session
-nobody ends expires after four hours.
-
-**Asked what to do, Grove names the path of least resistance** — the smallest
-thing that can be started now, with anything overdue winning — not the biggest
-or most important. And in casual talk it may nudge about ONE thing on the list
-when the moment fits, which is why the first few open captures ride in the
-prompt: a nudge that costs a tool call to discover there was nothing to nudge
-about would not be worth having. Never mid-task, never a list, and never twice
-in a row.
-
-`memory.done` checks the inbox before commitments: "I emailed the PE guy" ticks
-off the capture. The list is on the Sparks screen, where a tap ticks off and a
-tap deletes.
-
 ## A friend, not a service
 
-`persona.friend` is the relationship, beside the manner (which is only how
-Grove sounds): what it calls you, how straight it is (gentle, honest, blunt),
-swearing, how deep it goes (always brief, depends, properly), what to look out
-for, and whether it checks in. `friendDirective` and `depthRule` turn these into
-prompt; `cares` is free text and is quarantined like the manner — context,
-never instructions. `life.lately()` puts the last few days' episode titles and
-anything outstanding on every turn, which is what lets it say "you've got the
-demo tomorrow" without being asked.
+`persona` is now two things: a name and a manner. Everything else it used to
+ask — what to call you, how blunt to be, whether it may swear, how deep to go,
+what to look out for, whether it checks in — was **six screens-worth of
+preference standing in for a character**, and every one of them asked you to
+describe in the abstract something you demonstrate every time you open your
+mouth.
+
+`src/lib/rapport.ts` reads it instead. Swearing is a word list, length is a
+mean, formality is a count of greetings and contractions. **Counting, not a
+model**: it runs on every turn, a call to decide how to speak would cost more
+than the answer it shapes, and counting gives the same answer twice — a
+personality that drifts every turn reads as instability rather than adaptation.
+
+Two axes, not one. A single enum had to choose between "brief" and "informal"
+for someone who says "nah leave it", and threw half of them away. Length decides
+how long a reply is; tone decides what it sounds like.
+
+**It matches register, never mistakes.** Someone dictating through glasses
+produces fragments and mishearings, and a Grove that copied those would be
+unreadable.
+
+**Counts only — never the sentence.** The window slides by halving the tally
+rather than keeping a list of turns, so a register can change within about
+thirty turns and nothing of what was said is ever held. The harness asserts no
+field of it is a string.
+
+One switch survives, `persona.speaksUp`, because it cannot be observed: someone
+who has never been interrupted has given no sign either way.
 
 Length is the person's choice, not a rule about glasses: quick questions stay at
 one or two sentences, but a decision or "what do you think" gets a real opinion.
@@ -535,20 +507,16 @@ one or two sentences, but a decision or "what do you think" gets a real opinion.
 **Voices.** Grove will not imitate a real person's voice — asked for Tommy Lee
 Jones or Ralph Fiennes, it offers the register instead: `characterVoice()` picks
 the best installed low British or low American voice and slows and lowers it.
-The Premium iOS voices (a free download) are what make that convincing. The
-chosen voice lives on `persona.voiceId`; speech used to read only
-`delivery.voiceId`, so choosing a voice changed the preview and nothing else.
+The chosen voice lives on `persona.voiceId`.
 
-**Hearing.** The names in the long memory, Grove's name and what it calls you
-are passed to iOS as `contextualStrings`, so the recogniser stops mishearing the
-people and projects it hears about most.
+**Hearing.** The names in the long memory and Grove's own name are passed to iOS
+as `contextualStrings`, so the recogniser stops mishearing the people and
+projects it hears about most.
 
 **Ordering** is three hand-offs, all behind a press, none holding a basket:
 `ride.request` (Uber), `food.order` (Uber Eats or DoorDash) and `shop.order`
-(Amazon, Instacart, Walmart, Costco, on the phone's own country's site). "My
-usual is…" is saved as a fact keyed by the place, so each place keeps its own
-and "order my usual" works next week, not just while the sentence is in the
-conversation.
+(Amazon, Instacart, Walmart, Costco). "My usual is…" is saved as a fact keyed by
+the place.
 
 ## Email in your words, sent in better ones
 
@@ -667,8 +635,7 @@ always be in mind, the other is what must be findable in March.
 
 **Nothing here costs a model call per turn.** A finished turn appends to a
 buffer; every dozen turns, or when Grove is next opened, `consolidate.ts` makes
-one call that reads the buffer and returns entities and episodes. A voice note
-or meeting log gets the same read as it closes. Measured: twelve turns of real
+one call that reads the buffer and returns entities and episodes. Measured: twelve turns of real
 conversation, one call, 3.6 seconds, six people and projects and six dated
 episodes out the other end.
 
@@ -760,23 +727,6 @@ first time is a list of someone's bad days. The count is the whole signal and
 is shown beside each line. Capped at three in the prompt: ten is a list of
 someone's failings read back to them.
 
-## Money
-
-See also the section further down on why nothing spends any. `src/lib/money.ts`
-is a ledger and an opinion. The numbers are numbers, not facts: "you spent £80
-on shoes" as a sentence can be read back and cannot be added up, and a budget
-you cannot subtract from is a feeling.
-
-**It asks before it answers.** A missing price and a monthly figure nobody has
-stated both come back as questions, through the same path as "which town?", and
-both answers are kept so it only ever asks once. Advice with a number missing
-sounded certain while doing arithmetic on a budget that did not exist.
-
-**It never says buy it** — not as a moral position, but because Grove can only
-see what it has been told and never the bank, and a confident yes off a partial
-ledger is the one output here that could cost money. Where the numbers are
-comfortable it says so and leaves the decision alone.
-
 ## The memory is encrypted at rest
 
 `src/lib/vault.ts` sits under the ten stores that hold someone's life: AES-256
@@ -801,42 +751,6 @@ is how "encrypted at rest" ends up in a changelog and nowhere else.
 a one-import regression that type-checks and whose only symptom would be a
 sentence in Settings quietly becoming untrue. It also asserts `startAgain`
 clears all of them; it used to clear three stores and leave five.
-
-## Voice notes
-
-"Listen to this" starts a note: Grove stops replying and listens at length
-until a press, or "that's it" / "stop listening" held as the last thing said.
-The transcript is written up by the model into a title, summary, points and
-actions, and stored on the phone in `src/lib/notes.ts`. `notes.search` finds
-them again.
-
-Three things are deliberate:
-
-- **Starting is decided on the phone, not by the model.** People talk the
-  instant they have said "listen to this"; a model round trip first loses the
-  opening sentence, which is usually the one saying what the note is about.
-- **iOS ends recognition sessions on its own schedule**, so a note is a series
-  of sessions. Results within a session are cumulative and replace the buffer;
-  when a session ends the buffer is kept and a new one starts. A result much
-  shorter than the buffer is treated as a new session rather than a revision.
-- **The transcript is saved even when the write-up fails.** A summary can be
-  made again; a recording cannot.
-
-Notes are not memory. Facts are one sentence and go into every prompt; notes are
-long and are searched when asked about. A memory server was considered and not
-used, because it would bring back the backend Grove was made standalone to shed.
-
-## Modes, and what they are for
-
-Four: normal, focus, gym and wind down. There were nine; the five that only
-changed the manner were cut, because a mode earns its place by making a tool
-actively wrong, not by having an opinion. Gym has no mail and no sending: out of
-breath, mid-set, is not when you deal with your inbox.
-
-Adding one is three things — a palette, a manner, an allow list — and one trap:
-the mode words live in `MODE_WORDS` in grove.ts, used by both keyword patterns.
-They were two separate regexes once, and the first mode added after that
-silently did nothing when spoken.
 
 ## Money
 

@@ -29,7 +29,6 @@ import {
   type Life,
 } from './life';
 import { remember } from './memory';
-import type { Note } from './notes';
 
 /**
  * What the model is told it already knows.
@@ -260,19 +259,3 @@ async function keepSelf(uid: string, said: string): Promise<boolean> {
   return true;
 }
 
-/** Reads a finished voice note or meeting log into the long memory. */
-export async function rememberNote(uid: string, note: Note, id: string): Promise<void> {
-  const material = [
-    `A voice note taken on ${new Date(note.createdAt).toLocaleString('en-GB')}.`,
-    note.people && note.people.length > 0 ? `Present: ${note.people.join(', ')}.` : '',
-    `Title: ${note.title}`,
-    note.summary,
-    note.points.length ? `Points:\n${note.points.map((p) => `- ${p}`).join('\n')}` : '',
-    note.actions.length ? `To do:\n${note.actions.map((a) => `- ${a}`).join('\n')}` : '',
-    `What was said:\n${note.transcript.slice(0, 6000)}`,
-  ]
-    .filter(Boolean)
-    .join('\n\n');
-
-  await learn(uid, material, id);
-}

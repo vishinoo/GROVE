@@ -39,15 +39,11 @@ import { capabilities } from './capabilities';
 import { loadFacts, recall,
   remember,
 } from './memory';
-import { loadNotes, searchNotes } from './notes';
 import { loadPlayed, playedLines, recordPlayed } from './listening';
 import { loadDocs, rememberDoc } from './docs';
-import * as inbox from './inbox';
 import { constraints, constraintLines } from './constraints';
 import { rhythmLines, rhythms, structurally } from './rhythms';
-import * as money from './money';
 import * as struggles from './struggles';
-import { loadFocus } from './inbox';
 import {
   closeEpisode,
   entityLines,
@@ -59,7 +55,6 @@ import {
   updateLife,
 } from './life';
 import { localTime, shortDate, windowFor, within as inWindow } from './when';
-import { MODES } from './modes';
 import * as google from './google';
 import { isGoogleConnected } from './googleAuth';
 import {
@@ -67,7 +62,6 @@ import {
   lightDigest,
   lightDocument,
   lightEmail,
-  lightAdvice,
   lightPlan,
   lightResearch,
 } from './lightModel';
@@ -106,12 +100,6 @@ let CURRENT_UID = 'anon';
  * to reach back into app state do it through a handler the provider registers,
  * rather than by growing a dependency on React.
  */
-let onModeChange: ((mode: string) => Promise<void>) | null = null;
-
-export function setModeHandler(fn: (mode: string) => Promise<void>): void {
-  onModeChange = fn;
-}
-
 /** Whose memory and notes are being read. Set by the provider on sign-in. */
 export function currentAccount(): string {
   return CURRENT_UID;
@@ -2601,67 +2589,6 @@ const CALL: Ability = {
  * about the budget" can only be answered from the whole thing.
  */
 /**
- * Several things to do, put in the list in one go.
- *
- * Exists for the end of a meeting log, where the alternative is four separate
- * confirmations for four action items — which nobody presses through. One
- * press for the set, and no press means none of them, which is the safe way
- * round for something that writes into a list you keep.
- */
-const REMIND_BATCH: Ability = {
-  id: 'reminders.batch',
-  name: 'Reminders',
-  what: 'Adds several things to your reminders at once.',
-  where: 'device',
-  wired: capabilities().calendar,
-  needs: ['reminders-permission'],
-  args: {
-    items: { type: 'string', what: 'the things to do, one per line', required: true },
-    confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
-  },
-  examples: ['add those to my reminders', 'put all of that in my reminders'],
-  run: async (args) => {
-    const items = (args.items || '')
-      .split('\n')
-      .map((line) => line.replace(/^[-*\d.\s]+/, '').trim())
-      .filter(Boolean)
-      .slice(0, 12);
-    if (items.length === 0) return { ok: false, spoken: 'Add what?' };
-
-    if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
-      return {
-        ok: false,
-        needsConfirming: true,
-        spoken: `Adding ${items.length} ${items.length === 1 ? 'reminder' : 'reminders'}`,
-        detail: items.map((i) => `- ${i}`).join('\n'),
-      };
-    }
-
-    if (!(await ensureRemindersAccess())) {
-      return { ok: false, spoken: 'I need access to your reminders. It is in iOS Settings.' };
-    }
-
-    let added = 0;
-    let list = '';
-    for (const item of items) {
-      // The date is read out of the sentence it came in — "send Jason the build
-      // by Friday" is due Friday, and the reminder keeps the whole sentence.
-      const outcome = await addReminder(item.slice(0, 200), readWhen(item));
-      if (outcome.ok) {
-        added += 1;
-        list = outcome.list ?? list;
-      }
-    }
-    if (added === 0) return { ok: false, spoken: 'None of those went in.' };
-    return {
-      ok: true,
-      spoken: `${added} ${added === 1 ? 'reminder' : 'reminders'} in ${list || 'Reminders'}.`,
-      detail: items.map((i) => `- ${i}`).join('\n'),
-    };
-  },
-};
-
-/**
  * The long memory, searched.
  *
  * Everything the voice notes, meetings and conversations have left behind —
@@ -2764,160 +2691,6 @@ const LIFE_SEARCH: Ability = {
 };
 
 /**
- * Capture, don't switch.
- *
- * The whole value is in what this does not do: no date, no list, no category,
- * no question back, and a reply short enough that the thought is gone in five
- * seconds and the person is back on what they were doing. Anything that turns
- * a capture into a small conversation defeats the point.
- */
-const CAPTURE: Ability = {
-  id: 'inbox.add',
-  name: 'Capture',
-  what: 'Puts a passing thought straight into their inbox to deal with later — an idea, someone to contact, something they promised, a thing to look up. Instant, no questions.',
-  where: 'device',
-  wired: true,
-  needs: [],
-  args: {
-    what: { type: 'string', what: 'the thought or task, in their words', required: true },
-    when: { type: 'string', what: 'when it is due, if they said: "tomorrow", "Friday", "at 3"' },
-  },
-  examples: [
-    'I have to do the dishes',
-    'I need to book the dentist',
-    'I have to hand in the lab report by Friday',
-    'capture: email the PE guy',
-    'jot down that I need to book the dentist',
-    'add to my list: look into thermal sensors',
-    'note down ask Priya about the survey',
-  ],
-  run: async (args) => {
-    const what = (args.what || '').trim();
-    if (!what) return { ok: false, spoken: 'Capture what?' };
-    const focus = await loadFocus(CURRENT_UID);
-    const next = await inbox.capture(CURRENT_UID, what, focus?.what);
-    const waiting = inbox.open(next).length;
-
-    // Everything caught also goes to the Reminders app, dated when they gave a
-    // time. Two homes on purpose: the phone is what shouts at you, and the
-    // inbox is what Grove can see when it asks what you should be doing.
-    const due = readWhen(args.when || '');
-    const reminded = await addReminder(inbox.tidy(what).slice(0, 200), due).catch(() => ({ ok: false }));
-    // Two or three words. A capture that gets a sentence back has already
-    // cost more attention than the thought was worth.
-    return {
-      ok: true,
-      spoken: focus
-        ? `Got it. Back to ${focus.what}.`
-        : reminded.ok
-          ? due
-            ? `Got it — reminders, ${sayWhen(due)}.`
-            : 'Got it — in your reminders.'
-          : 'Got it.',
-      detail: `Captured: ${inbox.tidy(what)}${due ? ` (due ${sayWhen(due)})` : ''}\n${waiting} waiting in the inbox${reminded.ok ? ', and in the Reminders app' : ''}.`,
-    };
-  },
-};
-
-/** Everything caught and not yet dealt with. */
-const INBOX_REVIEW: Ability = {
-  id: 'inbox.review',
-  name: 'Inbox',
-  what: 'Reads back what they have captured and not yet dealt with.',
-  where: 'device',
-  wired: true,
-  needs: [],
-  reads: true,
-  args: {},
-  examples: ["what's in my inbox", 'what did I capture today', 'read me my list', 'what is on my list'],
-  run: async () => {
-    const items = inbox.open(await inbox.loadInbox(CURRENT_UID));
-    if (items.length === 0) return { ok: true, spoken: 'Your inbox is empty.' };
-    return {
-      ok: true,
-      spoken: `${items.length} thing${items.length === 1 ? '' : 's'} waiting. Newest: ${items[0].text}.`,
-      detail: inbox.inboxLines(items),
-    };
-  },
-};
-
-/**
- * "I'm on FIN 312 for the next hour."
- *
- * The session is what makes capture work: while one is running Grove knows
- * what they are meant to be doing, so a thought about something else is caught
- * and handed back at the end rather than becoming the next half hour.
- */
-const FOCUS_START: Ability = {
-  id: 'focus.start',
-  name: 'Focus on something',
-  what: 'Starts a focus session on one thing, so anything unrelated gets captured for later instead of pursued.',
-  where: 'device',
-  wired: true,
-  needs: [],
-  args: {
-    what: { type: 'string', what: 'what they are working on, in their words', required: true },
-    how_long: { type: 'string', what: 'how long, if they said: "an hour", "40 minutes", "until 3"' },
-  },
-  examples: [
-    'I am working on FIN 312 for the next hour',
-    'focus on the Noctus build for 40 minutes',
-    'start a focus session on my assignment',
-  ],
-  run: async (args) => {
-    const what = (args.what || '').trim();
-    if (!what) return { ok: false, spoken: 'Focusing on what?' };
-    // A length ("40 minutes") first, then a clock time ("until 3").
-    const until = inbox.endsIn(args.how_long || '') ?? readWhen(args.how_long || '');
-    await inbox.setFocus(CURRENT_UID, {
-      what,
-      startedAt: new Date().toISOString(),
-      ...(until ? { until: until.toISOString() } : {}),
-    });
-    const waiting = inbox.open(await inbox.loadInbox(CURRENT_UID)).length;
-    return {
-      ok: true,
-      spoken: until
-        ? `${what} until ${clockOnly(until)}. Anything else I'll catch for later.`
-        : `${what} it is. Anything else I'll catch for later.`,
-      detail: waiting > 0 ? `${waiting} already in the inbox for afterwards.` : undefined,
-    };
-  },
-};
-
-/** The end of a session, and what got caught during it. */
-const FOCUS_END: Ability = {
-  id: 'focus.end',
-  name: 'Done focusing',
-  what: 'Ends the focus session and reads back anything caught during it.',
-  where: 'device',
-  wired: true,
-  needs: [],
-  args: {},
-  examples: ['I am done focusing', 'end the focus session', 'stop focus mode', 'finished studying'],
-  run: async () => {
-    const focus = await loadFocus(CURRENT_UID);
-    await inbox.setFocus(CURRENT_UID, null);
-    if (!focus) return { ok: true, spoken: 'You were not focusing on anything.' };
-
-    const caught = inbox
-      .open(await inbox.loadInbox(CURRENT_UID))
-      .filter((i) => new Date(i.at).getTime() >= new Date(focus.startedAt).getTime());
-    const minutes = Math.round((Date.now() - new Date(focus.startedAt).getTime()) / 60_000);
-    // "0 minutes on FIN 312" is what a stopwatch says, not a person.
-    const spent = minutes < 1 ? `on ${focus.what}` : `${minutes} minutes on ${focus.what}`;
-    if (caught.length === 0) {
-      return { ok: true, spoken: `Done ${spent}, nothing caught.` };
-    }
-    return {
-      ok: true,
-      spoken: `Done ${spent}. ${caught.length} thing${caught.length === 1 ? '' : 's'} came up: ${caught[0].text}${caught.length > 1 ? ', and more' : ''}.`,
-      detail: inbox.inboxLines(caught),
-    };
-  },
-};
-
-/**
  * "I sent Jason the build."
  *
  * A promise the long memory recorded stays outstanding until something says
@@ -2943,14 +2716,6 @@ const COMMITMENT_DONE: Ability = {
   run: async (args) => {
     const what = (args.what || '').trim();
     if (!what) return { ok: false, spoken: 'What did you finish?' };
-    // The inbox first: a captured thought is the thing most likely to be
-    // finished and said out loud, and it is cheaper to match than an episode.
-    const caught = inbox.bestMatch(await inbox.loadInbox(CURRENT_UID), what);
-    if (caught) {
-      await inbox.complete(CURRENT_UID, caught.id);
-      return { ok: true, spoken: `Ticked off: ${caught.text}.` };
-    }
-
     const life = await loadLife(CURRENT_UID);
     const open = openCommitments(life);
     if (open.length === 0) return { ok: true, spoken: 'Nothing was outstanding — noted all the same.' };
@@ -3007,7 +2772,6 @@ const PERSON_BRIEF: Ability = {
     const withThem = first
       ? (events ?? []).filter((e) => new RegExp(`\\b${first}\\b(?!\\s*\\d)`, 'i').test(e.title))
       : [];
-    const notes = searchNotes(await loadNotes(CURRENT_UID), who).slice(0, 3);
 
     const detail = [
       entity ? entityLines(life, entity) : '',
@@ -3018,7 +2782,6 @@ const PERSON_BRIEF: Ability = {
       mail && mail.length > 0
         ? `Recent mail from them:\n${mail.map((m) => `- ${m.date}: ${m.subject} — ${m.snippet}`).join('\n')}`
         : '',
-      notes.length ? `Notes mentioning them:\n${notes.map((n) => `- ${n.title}: ${n.summary}`).join('\n')}` : '',
     ]
       .filter(Boolean)
       .join('\n\n');
@@ -3059,16 +2822,11 @@ const NOW: Ability = {
   ],
   run: async () => {
     const now = new Date();
-    const [focus, caught] = await Promise.all([
-      loadFocus(CURRENT_UID),
-      inbox.loadInbox(CURRENT_UID).then(inbox.open),
-    ]);
-    const [events, reminders, life, facts, notes, pattern] = await Promise.all([
+    const [events, reminders, life, facts, pattern] = await Promise.all([
       google.readCalendar(2).catch(() => null),
       openReminders(15).catch(() => null),
       loadLife(CURRENT_UID),
       loadFacts(CURRENT_UID),
-      loadNotes(CURRENT_UID),
       rhythms(CURRENT_UID).catch(() => null),
     ]);
 
@@ -3097,19 +2855,8 @@ const NOW: Ability = {
     const owed = facts.filter((f) => f.open).map((f) => f.value);
     const commitments = openCommitments(life).map((e) => `${e.title}${e.summary ? ` — ${e.summary}` : ''}`);
     // Anything said in the last week that someone still has to do.
-    const recentNotes = notes
-      .filter((n) => Date.now() - new Date(n.createdAt).getTime() < 7 * 86_400_000)
-      .slice(0, 5);
-    const todo = recentNotes.flatMap((n) => n.actions.map((a) => `${a} (from "${n.title}")`));
-
     const detail = [
       `Now: ${now.toLocaleString('en-GB', { weekday: 'long', hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'long' })}`,
-      focus
-        ? `They are in a focus session on ${focus.what}${inbox.remaining(focus) ? ` — ${inbox.remaining(focus)}` : ''}. That is what they should be doing.`
-        : '',
-      caught.length
-        ? `Captured and not dealt with (${caught.length}):\n${inbox.inboxLines(caught)}`
-        : '',
       on ? `Happening now: ${on.title} until ${localTime(on.end || on.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : 'Nothing on right now.',
       next
         ? `Next: ${next.title} at ${localTime(next.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}${gap !== null ? ` — ${gap} minutes from now` : ''}`
@@ -3129,7 +2876,6 @@ const NOW: Ability = {
           : 'Nothing outstanding in reminders.',
       commitments.length ? `Promised and not done:\n${commitments.map((c) => `- ${c}`).join('\n')}` : '',
       owed.length ? `Still owed:\n${owed.map((o) => `- ${o}`).join('\n')}` : '',
-      todo.length ? `From recent notes:\n${todo.slice(0, 8).map((t) => `- ${t}`).join('\n')}` : '',
       goals.length ? `Working towards: ${goals.join('; ')}` : '',
       // What a normal day looks like, and how today differs from it — the one
       // comparison nobody can make about their own day while they are in it.
@@ -3144,169 +2890,12 @@ const NOW: Ability = {
       .filter(Boolean)
       .join('\n');
 
-    const spoken = focus
-      ? `You are meant to be on ${focus.what}${inbox.remaining(focus) ? `, ${inbox.remaining(focus)}` : ''}.`
-      : on
+    const spoken = on
       ? `${on.title} is on now.`
       : next && gap !== null && gap < 180
         ? `${next.title} in ${gap} minutes.`
         : 'Nothing on right now.';
     return { ok: true, spoken, detail };
-  },
-};
-
-/**
- * "Anything important?"
- *
- * The inbox sorted by whether a person needs something from you, which is not
- * what an inbox is sorted by. The test is deliberately crude and local: mail
- * from a no-reply address or carrying the vocabulary of marketing is not
- * something to be told about while walking. The model gets both the sorted
- * list and the reasoning, and writes the sentence.
- */
-const MAIL_IMPORTANT: Ability = {
-  id: 'mail.important',
-  name: 'What needs attention',
-  what: 'The mail that actually needs them — real people and replies waiting — with the newsletters left out.',
-  where: 'server',
-  wired: true,
-  needs: ['email'],
-  reads: true,
-  args: { since: { type: 'string', what: 'how far back, as Gmail writes it: newer_than:3d' } },
-  examples: ['anything important', 'anything I need to deal with', 'what needs my attention', 'is there anything urgent'],
-  run: async (args) => {
-    const messages = await google.searchMail({
-      category: 'primary',
-      since: (args.since || '').trim() || 'newer_than:3d',
-      limit: 20,
-    });
-    if (messages === null) return { ok: false, spoken: google.explain('your inbox') };
-    if (messages.length === 0) return { ok: true, spoken: 'Nothing new worth bothering you with.' };
-
-    const life = await loadLife(CURRENT_UID);
-    const known = new Set(
-      life.entities.filter((e) => e.kind === 'person').map((e) => e.name.toLowerCase().split(' ')[0])
-    );
-
-    const scored = messages
-      .map((m) => {
-        const from = m.from.replace(/"/g, '').toLowerCase();
-        const text = `${m.subject} ${m.snippet}`.toLowerCase();
-        let score = 0;
-        const why: string[] = [];
-        if (/no-?reply|donotreply|notifications?@|newsletter|marketing|updates@|info@/.test(from)) score -= 4;
-        if (/unsubscribe|% off|sale|deal|webinar|promo|offer ends/.test(text)) score -= 3;
-        if (known.has(from.replace(/<.*/, '').trim().split(/\s+/)[0])) {
-          score += 3;
-          why.push('someone you know');
-        }
-        // A person writing to you, rather than a system writing at you: a
-        // display name of two or more words. "Prof. Chen" counts and
-        // "LinkedIn" does not, which is the whole distinction being drawn.
-        if (
-          !/@(?:no-?reply|mailer|bounce)/.test(from) &&
-          /^[A-Za-z][\w.,'-]*(?:\s+[A-Za-z][\w.,'-]*)+\s*</.test(m.from.replace(/"/g, '').trim())
-        ) {
-          score += 2;
-          why.push('a person, not a service');
-        }
-        if (/\?/.test(text)) {
-          score += 2;
-          why.push('asks you something');
-        }
-        // Every weekday, not the two that happened to be written down first:
-        // "the draft by Thursday" is exactly the mail this tool exists to find,
-        // and it was scoring zero.
-        if (
-          /\bby (?:today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|the \d|end of|next week|then)\b|deadline|\bdue\b|asap|urgent|waiting on|waiting for|follow(?:ing)? up|chase|need (?:it|this|them|the \w+) by/.test(
-            text
-          )
-        ) {
-          score += 3;
-          why.push('has a deadline');
-        }
-        if (/^re:/i.test(m.subject)) {
-          score += 1;
-          why.push('part of a thread');
-        }
-        return { m, score, why };
-      })
-      .sort((a, b) => b.score - a.score);
-
-    const needed = scored.filter((s) => s.score >= 2).slice(0, 5);
-    if (needed.length === 0) {
-      return {
-        ok: true,
-        spoken: 'Nothing that needs you — it is all newsletters and notifications.',
-        detail: scored.map((s) => `- ${s.m.from}: ${s.m.subject}`).join('\n'),
-      };
-    }
-
-    return {
-      ok: true,
-      spoken: `${needed.length} ${needed.length === 1 ? 'email needs' : 'emails need'} you.`,
-      detail: [
-        `Needs attention (${needed.length}):`,
-        ...needed.map((s) => `- ${s.m.from} — ${s.m.subject}: ${s.m.snippet}${s.why.length ? ` [${s.why.join(', ')}]` : ''}`),
-        '',
-        `The rest, not worth mentioning unless asked: ${scored
-          .filter((s) => s.score < 2)
-          .slice(0, 8)
-          .map((s) => s.m.from.replace(/<.*/, '').trim())
-          .join(', ')}`,
-      ].join('\n'),
-    };
-  },
-};
-
-const NOTES_SEARCH: Ability = {
-  id: 'notes.search',
-  name: 'Notes',
-  what: 'Finds what they said in their voice notes and answers from it.',
-  where: 'device',
-  wired: true,
-  needs: [],
-  reads: true,
-  args: {
-    about: { type: 'string', what: 'what they want to find, in their own words', required: true },
-  },
-  examples: [
-    "what did I say about Jason's demo",
-    'find my note about the budget',
-    'what were the action items in my last note',
-    'read me my latest note',
-  ],
-  run: async (args) => {
-    const all = await loadNotes(CURRENT_UID);
-    if (all.length === 0) {
-      return { ok: true, spoken: 'You have no notes yet. Say "listen to this" to start one.' };
-    }
-
-    const about = (args.about || '').trim();
-    // "My last note" names a position, not a subject — searching its words
-    // would match whichever note happened to use the word "last".
-    const newest = /\b(last|latest|most recent|newest|previous)\b/i.test(about);
-    const found = newest ? [all[0]] : searchNotes(all, about);
-    if (found.length === 0) return { ok: true, spoken: `Nothing in your notes about ${about}.` };
-
-    const top = found[0];
-    return {
-      ok: true,
-      spoken: top.summary ? `${top.title}. ${top.summary}` : top.title,
-      detail: found
-        .map((n) =>
-          [
-            `NOTE "${n.title}" — ${new Date(n.createdAt).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}`,
-            n.summary && `Summary: ${n.summary}`,
-            n.points.length > 0 && `Points: ${n.points.join(' | ')}`,
-            n.actions.length > 0 && `To do: ${n.actions.join(' | ')}`,
-            `Transcript: ${n.transcript.slice(0, 1800)}`,
-          ]
-            .filter(Boolean)
-            .join('\n')
-        )
-        .join('\n\n'),
-    };
   },
 };
 
@@ -3769,52 +3358,6 @@ const MESSAGE: Ability = {
   },
 };
 
-/**
- * Switching mode by voice.
- *
- * This was missing, and its absence was invisible from the outside: asked to go
- * into focus mode, Grove correctly reported that it could not touch the
- * device's settings, because nothing here could. A mode you can only reach by
- * tapping is a mode you cannot use with your phone in your pocket, which is the
- * only situation Grove exists for.
- *
- * Matched loosely on the mode's own name, because "focus", "focus mode" and
- * "go into focus" are the same request.
- */
-const SET_MODE: Ability = {
-  id: 'mode.set',
-  name: 'Mode',
-  what: 'Switches which mode you are in, and runs whatever that mode starts.',
-  where: 'device',
-  wired: true,
-  needs: [],
-  args: { mode: { type: 'string', what: 'which one: normal, focus, gym or wind down', required: true } },
-  examples: ['go into focus mode', 'switch to wind down', 'gym mode', 'back to normal'],
-  run: async (args) => {
-    const asked = (args.mode || '').toLowerCase().replace(/\bmode\b/g, '').trim();
-    if (!asked) return { ok: false, spoken: 'Which mode?' };
-
-    const wanted = MODES.find((m) => {
-      const label = m.label.toLowerCase();
-      const id = m.id.replace('-', ' ');
-      return asked.includes(label) || label.includes(asked) || asked.includes(id) || id.includes(asked);
-    });
-    if (!wanted) {
-      return {
-        ok: false,
-        spoken: `There's no ${asked} mode. There's focus, gym, wind down, or normal.`,
-      };
-    }
-    if (!onModeChange) return { ok: false, spoken: 'I can\'t switch modes right now.' };
-
-    await onModeChange(wanted.id);
-    // The mode's own instruction runs from the provider, and speaks for itself,
-    // so this stays short rather than announcing something twice.
-    return { ok: true, spoken: wanted.id === 'normal' ? 'Back to normal.' : `${wanted.label} mode.` };
-  },
-};
-
-
 /* ------------------------------------------------------------- friction */
 
 /**
@@ -3885,227 +3428,105 @@ const FRICTION: Ability = {
 /* ---------------------------------------------------------------- money */
 
 /**
- * What they have to spend. Asked for rather than assumed.
+ * "Anything important?"
  *
- * The first thing `money.advise` does when it has no figure is ask for one,
- * and this is where that answer lands — so it is also the ability that makes
- * every later piece of advice specific instead of hedged.
+ * The inbox sorted by whether a person needs something from you, which is not
+ * what an inbox is sorted by. The test is deliberately crude and local: mail
+ * from a no-reply address or carrying the vocabulary of marketing is not
+ * something to be told about while walking. The model gets both the sorted
+ * list and the reasoning, and writes the sentence.
  */
-const MONEY_BUDGET: Ability = {
-  id: 'money.budget',
-  name: 'Set a budget',
-  what: 'Records what they have to spend in a month, overall or for one kind of thing. Use when they state a figure: "I have 400 a month", "my food budget is 300", "I can spend about 2k on this trip". Also use with nothing set to read back what they have.',
-  where: 'device',
+const MAIL_IMPORTANT: Ability = {
+  id: 'mail.important',
+  name: 'What needs attention',
+  what: 'The mail that actually needs them — real people and replies waiting — with the newsletters left out.',
+  where: 'server',
   wired: true,
-  needs: [],
-  args: {
-    amount: { type: 'string', what: 'the figure they said, digits or words — "400", "two thousand"' },
-    category: {
-      type: 'string',
-      what: 'what the figure is for, in their words: food, clothes, going out. Empty when it is their whole monthly spend.',
-    },
-    currency: { type: 'string', what: 'a three-letter code, only if they named a currency' },
-  },
-  examples: [
-    'I have 400 a month to spend',
-    'set my food budget to 300 a month',
-    'my monthly budget is two thousand',
-  ],
+  needs: ['email'],
+  reads: true,
+  args: { since: { type: 'string', what: 'how far back, as Gmail writes it: newer_than:3d' } },
+  examples: ['anything important', 'anything I need to deal with', 'what needs my attention', 'is there anything urgent'],
   run: async (args) => {
-    const held = await money.loadMoney(CURRENT_UID);
-    const amount = money.readAmount(args.amount || '');
-    if (amount === null) {
-      const s = money.standing(held);
-      if (held.monthly === undefined && !held.caps) {
-        return { ok: false, spoken: 'You have not told me what you are working with. How much a month?' };
-      }
+    const messages = await google.searchMail({
+      category: 'primary',
+      since: (args.since || '').trim() || 'newer_than:3d',
+      limit: 20,
+    });
+    if (messages === null) return { ok: false, spoken: google.explain('your inbox') };
+    if (messages.length === 0) return { ok: true, spoken: 'Nothing new worth bothering you with.' };
+
+    const life = await loadLife(CURRENT_UID);
+    const known = new Set(
+      life.entities.filter((e) => e.kind === 'person').map((e) => e.name.toLowerCase().split(' ')[0])
+    );
+
+    const scored = messages
+      .map((m) => {
+        const from = m.from.replace(/"/g, '').toLowerCase();
+        const text = `${m.subject} ${m.snippet}`.toLowerCase();
+        let score = 0;
+        const why: string[] = [];
+        if (/no-?reply|donotreply|notifications?@|newsletter|marketing|updates@|info@/.test(from)) score -= 4;
+        if (/unsubscribe|% off|sale|deal|webinar|promo|offer ends/.test(text)) score -= 3;
+        if (known.has(from.replace(/<.*/, '').trim().split(/\s+/)[0])) {
+          score += 3;
+          why.push('someone you know');
+        }
+        // A person writing to you, rather than a system writing at you: a
+        // display name of two or more words. "Prof. Chen" counts and
+        // "LinkedIn" does not, which is the whole distinction being drawn.
+        if (
+          !/@(?:no-?reply|mailer|bounce)/.test(from) &&
+          /^[A-Za-z][\w.,'-]*(?:\s+[A-Za-z][\w.,'-]*)+\s*</.test(m.from.replace(/"/g, '').trim())
+        ) {
+          score += 2;
+          why.push('a person, not a service');
+        }
+        if (/\?/.test(text)) {
+          score += 2;
+          why.push('asks you something');
+        }
+        // Every weekday, not the two that happened to be written down first:
+        // "the draft by Thursday" is exactly the mail this tool exists to find,
+        // and it was scoring zero.
+        if (
+          /\bby (?:today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|the \d|end of|next week|then)\b|deadline|\bdue\b|asap|urgent|waiting on|waiting for|follow(?:ing)? up|chase|need (?:it|this|them|the \w+) by/.test(
+            text
+          )
+        ) {
+          score += 3;
+          why.push('has a deadline');
+        }
+        if (/^re:/i.test(m.subject)) {
+          score += 1;
+          why.push('part of a thread');
+        }
+        return { m, score, why };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    const needed = scored.filter((s) => s.score >= 2).slice(0, 5);
+    if (needed.length === 0) {
       return {
         ok: true,
-        spoken:
-          held.monthly === undefined
-            ? `No overall figure, but ${Object.entries(held.caps ?? {}).map(([k, v]) => `${k} ${money.asMoney(v, held.currency)}`).join(', ')}.`
-            : `${money.asMoney(held.monthly, held.currency)} a month, and ${money.asMoney(s.thisMonth, held.currency)} of it is gone.`,
-        detail: money.moneyBlock(held),
+        spoken: 'Nothing that needs you — it is all newsletters and notifications.',
+        detail: scored.map((s) => `- ${s.m.from}: ${s.m.subject}`).join('\n'),
       };
     }
 
-    const next = await money.setBudget(CURRENT_UID, amount, args.category, (args.currency || '').toUpperCase() || undefined);
-    const where = (args.category || '').trim();
     return {
       ok: true,
-      spoken: where
-        ? `${money.asMoney(amount, next.currency)} a month for ${where}.`
-        : `Right — ${money.asMoney(amount, next.currency)} a month.`,
-      detail: money.moneyBlock(next),
-    };
-  },
-};
-
-/**
- * "I spent eighty on shoes."
- *
- * A number with a date on it, which is the whole reason this is not a fact in
- * memory.ts: a ledger you can add up produces advice that names a figure, and
- * a sentence you can read back does not.
- */
-const MONEY_SPENT: Ability = {
-  id: 'money.spent',
-  name: 'Log what you spent',
-  what: 'Records money spent, so later advice knows about it. Use whenever they mention buying something or what it cost: "I spent 80 on shoes", "dinner was 140", "just bought a monitor for 300".',
-  where: 'device',
-  wired: true,
-  needs: [],
-  args: {
-    what: { type: 'string', what: 'what they bought, in their words', required: true },
-    amount: { type: 'string', what: 'what it cost', required: true },
-    category: {
-      type: 'string',
-      what: 'a loose grouping in their own words if it is obvious: food, clothes, transport, going out. Empty if not.',
-    },
-  },
-  examples: [
-    'I spent 80 on running shoes',
-    'dinner last night was 140',
-    'I just bought a monitor for 300',
-    'put 45 down for petrol',
-  ],
-  run: async (args) => {
-    const amount = money.readAmount(args.amount || '');
-    const what = (args.what || '').trim();
-    if (!what) return { ok: false, spoken: 'What was it you bought?' };
-    if (amount === null) return { ok: false, spoken: `How much for the ${what}?` };
-
-    const next = await money.spent(CURRENT_UID, what, amount, args.category || '');
-    const s = money.standing(next);
-    const left = s.left === null ? '' : ` ${money.asMoney(s.left, next.currency)} left this month.`;
-    return {
-      ok: true,
-      spoken: `Logged — ${money.asMoney(amount, next.currency)} on ${what}.${left}`,
-      detail: money.moneyBlock(next),
-    };
-  },
-};
-
-/** "How much have I spent this month?" */
-const MONEY_REVIEW: Ability = {
-  id: 'money.review',
-  name: 'Where the money went',
-  what: 'Reads back what they have spent — the total this month, where it went, and what is left. Use for "how much have I spent", "where is my money going", "how am I doing this month".',
-  where: 'device',
-  wired: true,
-  needs: [],
-  reads: true,
-  args: {},
-  examples: [
-    'how much have I spent this month',
-    'what is my budget',
-    'where is my money going',
-    'how am I doing on my budget',
-    'what have I spent on food',
-  ],
-  run: async () => {
-    const held = await money.loadMoney(CURRENT_UID);
-    if (held.purchases.length === 0 && held.monthly === undefined) {
-      return {
-        ok: false,
-        spoken: 'I have nothing on your spending yet. Tell me what you spend and what you have a month and I can keep track.',
-      };
-    }
-    const s = money.standing(held);
-    const c = held.currency;
-    const top = s.byCategory[0];
-    return {
-      ok: true,
-      spoken: [
-        `${money.asMoney(s.thisMonth, c)} so far this month`,
-        s.left === null ? '' : `, ${money.asMoney(s.left, c)} left`,
-        top ? `. Most of it on ${top.category}, ${money.asMoney(top.amount, c)}` : '',
-        '.',
-      ].join(''),
-      detail: money.moneyBlock(held),
-    };
-  },
-};
-
-/**
- * "Should I buy this?"
- *
- * The one money question a phone cannot answer, because answering it needs the
- * budget, the month so far, and the thing they said they were saving for.
- *
- * It asks before it answers. A price it was not given and a monthly figure
- * nobody has ever stated both come back as questions — which the turn handles
- * through the same path as "which town?", so the answer arrives as the next
- * sentence and fills the gap. Guessing either produces advice that sounds
- * certain and is arithmetic about numbers nobody supplied.
- */
-const MONEY_ADVISE: Ability = {
-  id: 'money.advise',
-  name: 'Should I buy this',
-  what: 'Weighs a purchase against their budget, what they have already spent and what they are saving for. Use for "should I buy this", "can I afford X", "is this a good idea", "talk me out of this". It never buys anything.',
-  where: 'device',
-  wired: true,
-  needs: [],
-  reads: true,
-  timeoutMs: 30_000,
-  args: {
-    item: { type: 'string', what: 'what they are thinking of buying, as specifically as the conversation allows', required: true },
-    price: { type: 'string', what: 'what it costs', required: true },
-    monthly: {
-      type: 'string',
-      what: 'only when they have just told you what they have a month. Normally left empty — it is already stored.',
-    },
-  },
-  examples: [
-    'should I buy these headphones',
-    'can I afford a 300 dollar monitor',
-    'is it a good idea to get a new laptop',
-    'talk me out of buying this',
-  ],
-  run: async (args) => {
-    const item = (args.item || '').trim();
-    if (!item) return { ok: false, spoken: 'What are you thinking of buying?' };
-    const price = money.readAmount(args.price || '');
-    if (price === null) return { ok: false, spoken: `How much for the ${item}?` };
-
-    // A figure they have just said is recorded before it is used, so the next
-    // question of this kind does not ask again.
-    const stated = money.readAmount(args.monthly || '');
-    if (stated !== null) await money.setBudget(CURRENT_UID, stated);
-    const held = await money.loadMoney(CURRENT_UID);
-
-    // No budget and none offered: ask, rather than advise around a hole. The
-    // turn routes the answer back into this same ability.
-    if (held.monthly === undefined && !held.caps) {
-      return {
-        ok: false,
-        spoken: `Before I say anything useful — what are you working with a month?`,
-      };
-    }
-
-    const facts = await loadFacts(CURRENT_UID);
-    const goals = facts.filter((f) => f.kind === 'goal').map((f) => f.value).join('; ');
-    const before = money.similar(held, item);
-    const advice = (
-      await lightAdvice(
-        item,
-        money.asMoney(price, held.currency),
-        money.moneyBlock(held),
-        goals,
-        before.map((p) => `${p.what} — ${money.asMoney(p.amount, held.currency)} on ${shortDate(p.at)}`).join('\n')
-      )
-    )?.trim();
-
-    const s = money.standing(held);
-    // The arithmetic is said whether or not the model answered, because the
-    // numbers are the part that was actually asked for.
-    const sums = `${money.asMoney(price, held.currency)} against ${
-      s.left === null ? `${money.asMoney(s.thisMonth, held.currency)} already spent` : `${money.asMoney(s.left, held.currency)} left`
-    } this month.`;
-    return {
-      ok: true,
-      spoken: advice || sums,
-      detail: [sums, money.moneyBlock(held), goals ? `Working towards: ${goals}` : ''].filter(Boolean).join('\n'),
+      spoken: `${needed.length} ${needed.length === 1 ? 'email needs' : 'emails need'} you.`,
+      detail: [
+        `Needs attention (${needed.length}):`,
+        ...needed.map((s) => `- ${s.m.from} — ${s.m.subject}: ${s.m.snippet}${s.why.length ? ` [${s.why.join(', ')}]` : ''}`),
+        '',
+        `The rest, not worth mentioning unless asked: ${scored
+          .filter((s) => s.score < 2)
+          .slice(0, 8)
+          .map((s) => s.m.from.replace(/<.*/, '').trim())
+          .join(', ')}`,
+      ].join('\n'),
     };
   },
 };
@@ -4113,20 +3534,10 @@ const MONEY_ADVISE: Ability = {
 export const ABILITIES: Ability[] = [
   NOW,
   FRICTION,
-  MONEY_ADVISE,
-  MONEY_BUDGET,
-  MONEY_SPENT,
-  MONEY_REVIEW,
-  CAPTURE,
-  INBOX_REVIEW,
-  FOCUS_START,
-  FOCUS_END,
   COMMITMENT_DONE,
   LIFE_SEARCH,
   PERSON_BRIEF,
   MAIL_IMPORTANT,
-  REMIND_BATCH,
-  NOTES_SEARCH,
   MAC_TASK,
   RIDE,
   DELIVERY,
@@ -4144,7 +3555,6 @@ export const ABILITIES: Ability[] = [
   DOC_CREATE,
   DOC_RECENT,
   DOC_APPEND,
-  SET_MODE,
   RECALL,
   MESSAGE,
   DAY,

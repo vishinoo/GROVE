@@ -23,8 +23,7 @@ import { Linking, Pressable, Switch, Text, TextInput, View } from 'react-native'
 import * as Updates from 'expo-updates';
 
 import { Icon } from '@/components/icon';
-import { Orb } from '@/components/orb';
-import { modeById } from '@/lib/modes';
+import { Orb, SPECTRUM } from '@/components/orb';
 import { Button, Card, Dot, Mono, Notice, Row, Screen, Section } from '@/components/ui';
 import { Radius, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
@@ -33,7 +32,7 @@ import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
 import { runSelfCheck, type CheckResult } from '@/lib/selfCheck';
 import { checkNow, runningLabel, type Caught } from '@/lib/updates';
-import { CARES_LIMIT, MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona, type Preset } from '@/lib/persona';
+import { MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona, type Preset } from '@/lib/persona';
 import { hasOwnKey, setOwnKey } from '@/lib/lightModel';
 import { availableVoices, bestVoiceId, characterVoice, hasEnhancedVoice, speak } from '@/lib/speak';
 import * as trigger from '@/lib/trigger';
@@ -63,9 +62,9 @@ export default function Settings() {
   // list somewhere you pass anyway beats burying it in Settings.
   const { persona, updatePersona, armed, route } = useAgent();
   // What the preview shows: your colours if you have chosen any, otherwise the
-  // current mode's, so tapping a circle starts from what is on screen rather
-  // than from a default nobody picked.
-  const draftPalette = persona.palette ?? modeById(persona.mode ?? 'normal').palette;
+  // orb's own, so tapping a circle starts from what is on screen rather than
+  // from a default nobody picked.
+  const draftPalette = persona.palette ?? SPECTRUM;
   /** Which lobe is being recoloured, or null when the picker is closed. */
   const [editing, setEditing] = useState<number | null>(null);
   const updateLabel = runningLabel();
@@ -207,104 +206,29 @@ export default function Settings() {
       </Section>
 
       {/*
-        The relationship, beside the manner rather than inside it. The manner
-        is how Grove sounds; this is how it treats you — and each choice is one
-        tap, because nobody writes a paragraph about how honest they want their
-        friends to be.
+        One switch, where six used to be.
+        
+        What it calls you, how blunt it is, whether it may swear, how deep it
+        goes — all of that was asked on this screen, in the abstract, about
+        something the person demonstrates every time they open their mouth. It
+        is read from how they actually talk now; see rapport.ts. This one is
+        left because it cannot be observed: someone who has never been
+        interrupted has given no sign either way.
       */}
-      <Section label="Your friend">
-        <Card>
-          <Text style={[Type.bodySm, { color: palette.muted }]}>What it calls you</Text>
-          <TextInput
-            value={persona.friend?.callMe ?? ''}
-            onChangeText={(callMe) => set({ friend: { ...persona.friend, callMe: callMe.slice(0, 40) } })}
-            placeholder="Your name, a nickname, or leave it"
-            placeholderTextColor={palette.muted}
-            style={{ fontFamily: Type.body.fontFamily, fontSize: 15, color: palette.ink, paddingVertical: 6 }}
-          />
-        </Card>
-        <Choice
-          label="How straight it is with you"
-          value={persona.friend?.candor ?? 'honest'}
-          options={[
-            ['gentle', 'Gentle'],
-            ['honest', 'Honest'],
-            ['blunt', 'Blunt'],
-          ]}
-          onChange={(candor) => set({ friend: { ...persona.friend, candor } })}
-        />
-        <Choice
-          label="How far it goes into things"
-          value={persona.friend?.depth ?? 'balanced'}
-          options={[
-            ['brief', 'Always brief'],
-            ['balanced', 'Depends'],
-            ['deep', 'Properly'],
-          ]}
-          onChange={(depth) => set({ friend: { ...persona.friend, depth } })}
-        />
+      <Section label="Speaking up">
         <Card style={{ paddingVertical: 2 }}>
           <Row
-            label="Swearing"
-            right={
-              <Switch
-                value={persona.friend?.swearing ?? false}
-                onValueChange={(swearing) => set({ friend: { ...persona.friend, swearing } })}
-                trackColor={{ true: palette.mark, false: palette.sunken }}
-                thumbColor={palette.raised}
-              />
-            }
-          />
-          <Row
-            label="Checks in on you"
-            right={
-              <Switch
-                value={persona.friend?.checksIn ?? true}
-                onValueChange={(checksIn) => set({ friend: { ...persona.friend, checksIn } })}
-                trackColor={{ true: palette.mark, false: palette.sunken }}
-                thumbColor={palette.raised}
-              />
-            }
-          />
-          {/*
-            The answer to the question asked on the seventh day, changeable
-            afterwards — a one-time decision you cannot revisit is a trap. Off
-            does not mean silent: a leave-by time is not chat, and it still
-            comes.
-          */}
-          <Row
             label="Speaks up unprompted"
-            hint="Urgent things come either way."
+            hint="Leave-by times, and a fixture missing from your diary. At most three a day."
             right={
               <Switch
-                value={persona.friend?.proactive ?? false}
-                onValueChange={(proactive) => set({ friend: { ...persona.friend, proactive } })}
+                value={persona.speaksUp !== false}
+                onValueChange={(speaksUp) => set({ speaksUp })}
                 trackColor={{ true: palette.mark, false: palette.sunken }}
                 thumbColor={palette.raised}
               />
             }
           />
-        </Card>
-        <Card>
-          <Text style={[Type.bodySm, { color: palette.muted }]}>What it should look out for</Text>
-          <TextInput
-            value={persona.friend?.cares ?? ''}
-            onChangeText={(cares) => set({ friend: { ...persona.friend, cares: cares.slice(0, CARES_LIMIT) } })}
-            placeholder="Shipping Noctus this term. My sleep. Don't let me skip the gym."
-            placeholderTextColor={palette.muted}
-            multiline
-            style={{
-              minHeight: 60,
-              fontFamily: Type.body.fontFamily,
-              fontSize: 14.5,
-              lineHeight: 21,
-              color: palette.ink,
-              paddingTop: 6,
-            }}
-          />
-          <Mono style={{ marginTop: 8 }}>
-            {(persona.friend?.cares ?? '').length}/{CARES_LIMIT}
-          </Mono>
         </Card>
       </Section>
 
@@ -1151,49 +1075,3 @@ function Stepper({
   );
 }
 
-/** Three options, one tap each. */
-function Choice<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: T;
-  options: [T, string][];
-  onChange: (value: T) => void;
-}) {
-  const palette = usePalette();
-  return (
-    <Card>
-      <Text style={[Type.bodySm, { color: palette.muted, marginBottom: 8 }]}>{label}</Text>
-      <View style={{ flexDirection: 'row', gap: 8 }}>
-        {options.map(([key, text]) => {
-          const on = key === value;
-          return (
-            <Pressable
-              key={key}
-              accessibilityRole="button"
-              accessibilityState={{ selected: on }}
-              accessibilityLabel={`${label}: ${text}`}
-              onPress={() => onChange(key)}
-              style={({ pressed }) => ({
-                flex: 1,
-                minHeight: 44,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: Radius.well,
-                borderWidth: 1,
-                borderColor: on ? palette.ink : palette.line,
-                backgroundColor: on ? palette.ink : 'transparent',
-                opacity: pressed ? 0.75 : 1,
-              })}
-            >
-              <Text style={[Type.bodySm, { color: on ? palette.raised : palette.ink }]}>{text}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-    </Card>
-  );
-}

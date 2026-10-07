@@ -74,6 +74,9 @@ type Lobe = {
  * Deliberately co-prime-ish periods. Four lobes on 11/13/17/15 seconds take
  * over six hours to return to the same arrangement.
  */
+/** The orb's own colours, and what a chosen palette starts from. */
+export const SPECTRUM = [Spectrum.mint, Spectrum.indigo, Spectrum.pink, Spectrum.green];
+
 const LOBES: Lobe[] = [
   { colour: Spectrum.mint, r: 0.30, travel: 0.11, period: 11000, phase: 0 },
   { colour: Spectrum.indigo, r: 0.28, travel: 0.10, period: 13000, phase: 0.25 },
@@ -103,8 +106,7 @@ export function Orb({
    */
   tint?: string;
   /**
-   * The mode's whole palette, four colours, replacing the default spectrum.
-   * A mode should be visible at a glance rather than as a tinted edge.
+   * Four colours of their own, replacing the default spectrum.
    */
   palette?: string[];
 }) {

@@ -34,8 +34,6 @@
  */
 
 import { localTime } from './when';
-import * as inbox from './inbox';
-import * as money from './money';
 import { loadFacts } from './memory';
 import { loadLife, openCommitments } from './life';
 import { loadStruggles, frictionBlock } from './struggles';
@@ -78,27 +76,15 @@ export async function constraints(
   events: CalendarEvent[] | null,
   now = new Date()
 ): Promise<Constraint[]> {
-  const [held, facts, life, captures, focus, stuck] = await Promise.all([
-    money.loadMoney(uid).catch(() => null),
+  const [facts, life, stuck] = await Promise.all([
     loadFacts(uid).catch(() => []),
     loadLife(uid).catch(() => null),
-    inbox.loadInbox(uid).then(inbox.open).catch(() => []),
-    inbox.loadFocus(uid).catch(() => null),
     loadStruggles(uid).catch(() => []),
   ]);
 
   const out: Constraint[] = [];
 
   /* ------------------------------------------------------------ time */
-
-  if (focus) {
-    const left = inbox.remaining(focus);
-    out.push({
-      kind: 'attention',
-      says: `They are deliberately on ${focus.what}${left ? `, ${left}` : ''}. Anything else is an interruption they asked you to defend them from.`,
-      how: 'told',
-    });
-  }
 
   const timed = (events ?? []).filter((e) => !e.allDay);
   const next = timed
@@ -119,21 +105,6 @@ export async function constraints(
     out.push({ kind: 'time', says: 'Nothing else in the diary today.', how: 'told' });
   }
 
-  /* ----------------------------------------------------------- money */
-
-  if (held && (held.monthly !== undefined || held.purchases.length > 0)) {
-    const s = money.standing(held, now);
-    const through = Math.round(s.through * 100);
-    out.push({
-      kind: 'money',
-      says:
-        s.left === null
-          ? `${money.asMoney(s.thisMonth, held.currency)} spent this month, with no budget set. Do not assume anything about what they can afford.`
-          : `${money.asMoney(s.left, held.currency)} left of ${money.asMoney(held.monthly ?? 0, held.currency)} for the month, which is ${through}% through. Nothing you suggest should quietly cost money.`,
-      how: 'told',
-    });
-  }
-
   /* ----------------------------------------------- commitments owed */
 
   const promised = life ? openCommitments(life) : [];
@@ -147,16 +118,6 @@ export async function constraints(
   const owed = facts.filter((f) => f.open).map((f) => f.value);
   if (owed.length > 0) {
     out.push({ kind: 'commitment', says: `Still owed: ${owed.slice(0, 4).join('; ')}.`, how: 'told' });
-  }
-  if (captures.length > 0) {
-    out.push({
-      kind: 'attention',
-      says: `${captures.length} caught and not dealt with, oldest first: ${captures
-        .slice(-3)
-        .map((c) => c.text)
-        .join('; ')}.`,
-      how: 'told',
-    });
   }
 
   /* ---------------------------------------------------------- goals */

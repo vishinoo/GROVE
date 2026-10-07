@@ -34,13 +34,10 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import { capabilities } from '@/lib/capabilities';
 import {
-  abilityById,
   runAbility,
   setCurrentAccount,
-  setModeHandler,
   type Ability,
 } from '@/lib/abilities';
-import { loadOverrides, maySpeak, modeById, withOverrides } from '@/lib/modes';
 import { askGrove, detectActIntent, newTurn, type Turn, type TurnTool } from '@/lib/grove';
 import { agreesOnTime, phraseAction } from '@/lib/brain';
 import { abortListening, isListening, startListening, stopListening } from '@/lib/listen';
@@ -53,19 +50,14 @@ import {
   type Persona,
 } from '@/lib/persona';
 import { isSpeaking, speak, stopSpeaking } from '@/lib/speak';
-import { lightNotes } from '@/lib/lightModel';
 import * as memory from '@/lib/memory';
 import * as life from '@/lib/life';
 import { whatMatters, nextUp, type Attention, type NextUp } from '@/lib/attention';
-import { dayIn, nextDiscovery } from '@/lib/reveal';
 import { noteAnswered } from '@/lib/interrupt';
 import { learnWeek, noteTurn } from '@/lib/rhythms';
-import * as money from '@/lib/money';
+import { forgetRapport, notice as noticeRapport } from '@/lib/rapport';
 import * as struggles from '@/lib/struggles';
-import { afterTurn, consolidateNow, rememberNote } from '@/lib/consolidate';
-import * as notesStore from '@/lib/notes';
-import * as inbox from '@/lib/inbox';
-import * as sparks from '@/lib/sparks';
+import { afterTurn, consolidateNow } from '@/lib/consolidate';
 import * as transcript from '@/lib/transcript';
 import * as trigger from '@/lib/trigger';
 import { useSession } from './session';
@@ -123,24 +115,6 @@ type AgentValue = {
   forgetFact: (id: string) => Promise<void>;
   forgetEverything: () => Promise<void>;
 
-  /** Standing jobs, newest first. */
-  sparks: sparks.Spark[];
-  setSparkEnabled: (id: string, enabled: boolean) => Promise<void>;
-  editSpark: (id: string, patch: Parameters<typeof sparks.editSpark>[2]) => Promise<void>;
-  deleteSpark: (id: string) => Promise<void>;
-
-  /** Voice notes, newest first. */
-  notes: notesStore.Note[];
-  forgetNote: (id: string) => Promise<void>;
-
-  /** Thoughts caught on the way past, newest first. */
-  captures: inbox.Capture[];
-  tickOff: (id: string) => Promise<void>;
-  dropCapture: (id: string) => Promise<void>;
-  /** What they are focused on, if anything. */
-  focus: inbox.Focus | null;
-  endFocus: () => Promise<void>;
-
   /** The long memory: who and what is in their life, and what happened. */
   life: life.Life;
   forgetEntity: (id: string) => Promise<void>;
@@ -148,12 +122,6 @@ type AgentValue = {
 
   /** The next thing in the day, and when to leave for it. Shown, never spoken. */
   next: NextUp;
-
-  /**
-   * How many days since Grove was first opened. Used for the one question it
-   * asks on the seventh — see `proactive` in persona.ts.
-   */
-  dayOne: number;
 
   /** Things they said they did not understand, hardest first. */
   struggles: struggles.Struggle[];
@@ -202,7 +170,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const attention = useRef<Attention>({ said: new Set<string>() });
   const [next, setNext] = useState<NextUp>(null);
   const [stuck, setStuck] = useState<struggles.Struggle[]>([]);
-  const [dayOne, setDayOne] = useState(0);
   /** So a listen can retry itself without `press` being rebuilt. */
   const beginListeningRef = useRef<((continuous: boolean, retrying?: boolean) => void) | null>(null);
 
@@ -289,13 +256,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const [persona, setPersona] = useState<Persona>(DEFAULT_PERSONA);
   const [activity, setActivity] = useState<transcript.Entry[]>([]);
   const [facts, setFacts] = useState<memory.Fact[]>([]);
-  const [noteList, setNoteList] = useState<notesStore.Note[]>([]);
   const [lifeMemory, setLifeMemory] = useState<life.Life>({ entities: [], episodes: [], pending: [] });
-  const [captures, setCaptures] = useState<inbox.Capture[]>([]);
-  /** Read inside a turn, which outlives the render that started it. */
-  const capturesRef = useRef<inbox.Capture[]>([]);
-  capturesRef.current = captures;
-  const [focus, setFocus] = useState<inbox.Focus | null>(null);
   /**
    * Words to help the recogniser hear this person's world: Grove's name, the
    * people and projects in their life, what it calls them. Rebuilt whenever
@@ -308,7 +269,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       ...new Set(
         [
           persona.name,
-          persona.friend?.callMe ?? '',
           ...byRecency.flatMap((e) => [e.name, ...e.aliases]),
           'Grove',
         ]
@@ -316,30 +276,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           .filter((w) => w.length > 1)
       ),
     ].slice(0, 100);
-  }, [lifeMemory, persona.name, persona.friend?.callMe]);
-
-  /**
-   * The voice note being taken, if one is.
-   *
-   * Speech arrives in sessions, because iOS ends a recognition task on its own
-   * schedule however long someone is still talking. `committed` is every
-   * session that has ended; `buffer` is the one still running. A note is both,
-   * joined — which is what lets a five-minute ramble survive the recogniser
-   * restarting under it three times.
-   */
-  const memo = useRef<{
-    committed: string[];
-    buffer: string;
-    startedAt: number;
-    finishing: boolean;
-    endTimer: ReturnType<typeof setTimeout> | null;
-    quietTimer: ReturnType<typeof setTimeout> | null;
-    /** Set when this was started as a meeting rather than a note to self. */
-    meeting?: boolean;
-    /** Who is in the room, when they were named. */
-    people: string[];
-  } | null>(null);
-  const [sparkList, setSparkList] = useState<sparks.Spark[]>([]);
+  }, [lifeMemory, persona.name]);
 
   /**
    * Refs, not state, for everything the trigger callback reads.
@@ -350,8 +287,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    * forever. These are the live values.
    */
   const history = useRef<Turn[]>([]);
-  const live = useRef({ state, persona, facts, uid, sparks: sparkList });
-  live.current = { state, persona, facts, uid, sparks: sparkList };
+  const live = useRef({ state, persona, facts, uid });
+  live.current = { state, persona, facts, uid };
   const mounted = useRef(true);
   /** Claims a listening turn, so an interrupted start cannot finish. */
   const listenSeq = useRef(0);
@@ -448,18 +385,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const updatePersona = useCallback(async (next: Persona) => {
-    const was = live.current.persona.mode ?? 'normal';
     setPersona(next);
     await savePersona(next);
-
-    // Entering a mode can carry an instruction — "every time I'm in commute
-    // mode put on my driving playlist". Run it as though it had been said out
-    // loud, which is what makes a mode conditional rather than a label.
-    const now = next.mode ?? 'normal';
-    if (now === was) return;
-    const rule = withOverrides(modeById(now), await loadOverrides()).onEnter;
-    if (rule?.trim()) void say(rule);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ------------------------------------------------------------ activity */
@@ -468,7 +395,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     if (status !== 'signed-in') {
       setActivity([]);
       setFacts([]);
-      setSparkList([]);
       return;
     }
     void transcript.loadActivity(uid).then((entries) => {
@@ -477,22 +403,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // Abilities read per-account state through this rather than through a
     // parameter, so it has to be set before any of them can run.
     setCurrentAccount(uid);
-    // Lets mode.set reach back into persona state without abilities.ts growing
-    // a dependency on React.
-    setModeHandler(async (mode) => {
-      await updatePersona({ ...live.current.persona, mode });
-    });
     void memory.loadFacts(uid).then((f) => {
       if (mounted.current) setFacts(f);
-    });
-    void notesStore.loadNotes(uid).then((n) => {
-      if (mounted.current) setNoteList(n);
-    });
-    void inbox.loadInbox(uid).then((items) => {
-      if (mounted.current) setCaptures(items);
-    });
-    void inbox.loadFocus(uid).then((f) => {
-      if (mounted.current) setFocus(f);
     });
     void life.loadLife(uid).then((l) => {
       if (mounted.current) setLifeMemory(l);
@@ -503,23 +415,13 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         if (mounted.current) setLifeMemory(fresh);
       });
     });
-    void sparks.loadSparks(uid).then((s) => {
-      if (mounted.current) setSparkList(s);
-      // Opening the app is the only reliable moment a device-side spark gets.
-      void catchUp();
-    });
     // What their week normally looks like. Held for a day inside rhythms.ts, so
     // this is a network call on the first open of the day and free after that.
     void learnWeek(uid);
     void struggles.loadStruggles(uid).then((list) => {
       if (mounted.current) setStuck(list);
     });
-    void dayIn(uid).then((day) => {
-      if (mounted.current) setDayOne(day);
-    });
-    // catchUp is declared below and is stable (useCallback with no deps), so
-    // naming it here would be a forward reference for no benefit.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [status, uid]);
 
   const clearActivity = useCallback(async () => {
@@ -556,24 +458,17 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     turnSeq.current += 1;
     setCaption('');
     setHeard('');
-    const [entries, facts, list] = await Promise.all([
+    const [entries, facts] = await Promise.all([
       transcript.clearActivity(account),
       memory.forgetAll(account),
-      sparks.clearSparks(account),
       life.forgetAllLife(account),
-      notesStore.forgetAllNotes(account),
-      inbox.forgetAllCaptures(account),
       struggles.forgetAllStruggles(account),
-      money.forgetAllMoney(account),
+      forgetRapport(account),
     ]);
     if (!mounted.current) return;
     setActivity(entries);
     setFacts(facts);
-    setSparkList(list);
     setLifeMemory({ entities: [], episodes: [], pending: [] });
-    setNoteList([]);
-    setCaptures([]);
-    setFocus(null);
     setStuck([]);
     setNext(null);
   }, []);
@@ -584,21 +479,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
   const forgetEverything = useCallback(async () => {
     setFacts(await memory.forgetAll(live.current.uid));
-  }, []);
-
-  const setSparkEnabled = useCallback(async (id: string, enabled: boolean) => {
-    setSparkList(await sparks.setSparkEnabled(live.current.uid, id, enabled));
-  }, []);
-
-  const editSpark = useCallback(
-    async (id: string, patch: Parameters<typeof sparks.editSpark>[2]) => {
-      setSparkList(await sparks.editSpark(live.current.uid, id, patch));
-    },
-    []
-  );
-
-  const deleteSpark = useCallback(async (id: string) => {
-    setSparkList(await sparks.deleteSpark(live.current.uid, id));
   }, []);
 
   /* ------------------------------------------------------------- talking */
@@ -617,15 +497,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // "Listen to this" is decided here, before the model, because people start
-    // talking the instant they have said it. A round trip first would reopen
-    // the microphone after the opening sentence of the note — usually the one
-    // saying what it is about.
-    if (notesStore.isStartingNote(text)) {
-      startNote(notesStore.meetingStart(text));
-      return;
-    }
-
     const turn = ++turnSeq.current;
     /** Whether this turn is still the one the user is waiting on. */
     const mine = () => mounted.current && turn === turnSeq.current;
@@ -641,11 +512,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // nothing at all unless there is a recent one to credit.
     void noteAnswered(account);
 
-    // A phrase trigger turns your own words into a button, so it is checked
-    // before anything is routed: "play my favourite song" should run the spark
-    // you taught, not be re-interpreted from scratch every time.
-    const taught = sparks.matchPhrase(text, live.current.sparks);
-    const asked = taught ? taught.instruction : text;
+    // How they talk, counted locally from their own words. Shapes every reply
+    // after this one; see rapport.ts.
+    void noticeRapport(account, text);
+    const asked = text;
 
     // Whatever Grove was still saying is finished with.
     //
@@ -796,8 +666,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
      *     at all. Setting a spark went completely silent, which is the exact
      *     shape of failure this app can least afford.
      */
-    const standing = Boolean(reply.schedule || reply.phrase) && !taught;
-    const holdsReply = Boolean(reply.ability) && !reply.ability?.slow && !standing;
+    const holdsReply = Boolean(reply.ability) && !reply.ability?.slow;
     if (!reply.holdForTool && !holdsReply) utter(reply.text, Boolean(reply.expectsReply));
 
     // Anything worth remembering was pulled locally, by keyword, from what was
@@ -840,30 +709,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     setActivity(entries);
     const entryId = entries[0]?.id;
 
-    // A standing job is worth saving even when nothing can carry it out yet —
-    // the instruction is re-read on every run, so it starts working the day the
-    // ability behind it exists. Returning here first meant "whenever I say X,
-    // email Y" was thrown away because mail happened to be unwired.
-    if (!reply.ability && !reply.schedule && !reply.phrase) return;
-
-    // A recurrence makes this a standing job rather than a one-off. Saved and
-    // not run now: the point of "every morning" is that it happens then.
-    // Either kind of standing job. Testing `schedule` alone silently dropped
-    // every "whenever I say..." — the spark was never created, and nothing said
-    // so, which is the worst shape a bug can take in something you talk to.
-    if ((reply.schedule || reply.phrase) && !taught) {
-      const spark = await sparks.createSpark(account, {
-        said: text,
-        title: reply.title,
-        instruction: reply.instruction,
-        abilityId: reply.ability?.id ?? null,
-      });
-      if (spark && mounted.current) setSparkList(await sparks.loadSparks(account));
-      return;
-    }
-
-    // Past the spark branch, so this is a one-off. Nothing to run means nothing
-    // to do — the reply has already been spoken.
+    // Nothing to run means nothing to do — the reply has already been spoken.
     const ability = reply.ability;
     if (!ability) return;
 
@@ -909,10 +755,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
                   .join(', ')}`
               : ''
           }. It worked.`,
-          (() => {
-            const waiting = inbox.open(capturesRef.current).slice(0, 4).map((c) => c.text);
-            return waiting.length ? `Still on their list: ${waiting.join('; ')}.` : '';
-          })()
+          ''
         ).catch(() => null)
       : null;
 
@@ -985,15 +828,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
     rememberQuestion(ability, reply.args, outcome);
     if (outcome.ok && !ability.reads) doneChime();
-    // The inbox and the session are shown on screen, so they refresh as soon
-    // as something changes them rather than on the next launch.
-    if (outcome.ok && ability.id.startsWith('inbox.')) {
-      void inbox.loadInbox(account).then((items) => mounted.current && setCaptures(items));
-    }
-    if (outcome.ok && (ability.id.startsWith('focus.') || ability.id === 'inbox.add')) {
-      void inbox.loadFocus(account).then((f) => mounted.current && setFocus(f));
-    }
-    if (outcome.ok && ability.id.startsWith('study.')) {
+    // Shown on screen, so it refreshes as soon as something changes it rather
+    // than on the next launch.
+    if (outcome.ok && ability.id === 'memory.friction') {
       void struggles.loadStruggles(account).then((list) => mounted.current && setStuck(list));
     }
 
@@ -1100,35 +937,22 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const considerSpeaking = useCallback(async () => {
     if (!mounted.current) return;
     const resting = stateNow.current === 'idle' || stateNow.current === 'asleep';
-    if (!resting || running.current || isSpeaking() || memo.current || awaitingYes.current) return;
+    if (!resting || running.current || isSpeaking() || awaitingYes.current) return;
+    // One switch, and it is theirs. The rationing is interrupt.ts's job.
+    if (live.current.persona.speaksUp === false) return;
 
-    const mode = modeById(live.current.persona.mode ?? 'normal');
-    if (!maySpeak(mode, lastVolunteered.current)) return;
-    // Checking in is theirs to switch off; nothing here overrides that.
-    if (live.current.persona.friend?.checksIn === false) return;
-
-    // Urgency first, always. A discovery is only ever offered when there is
-    // nothing to be late for — being told what you talk about most while you
-    // should be leaving the house is the wrong order.
     const account = live.current.uid;
-    const moment = await whatMatters(
-      attention.current,
-      account,
-      live.current.persona.friend?.proactive === true
-    );
-    // Both of these record what they offered before it is spoken, so the state
-    // is re-checked here rather than after — a press that landed during the
-    // calendar read means this turn is over, and a discovery marked as said
-    // and then dropped is gone for good.
+    const moment = await whatMatters(attention.current, account, true);
+    // It records what it offered before it is spoken, so the state is
+    // re-checked here rather than after: a press that landed during the
+    // calendar read means this turn is over.
     if (!mounted.current || (stateNow.current !== 'idle' && stateNow.current !== 'asleep')) return;
 
-    const say = moment
-      ? moment.say
-      : ((await nextDiscovery(account).catch(() => null))?.say ?? null);
+    const say = moment?.say ?? null;
     if (!say || !mounted.current) return;
     if (stateNow.current !== 'idle' && stateNow.current !== 'asleep') return;
 
-    if (moment) attention.current.said.add(moment.id);
+    attention.current.said.add(moment!.id);
     lastVolunteered.current = new Date().toISOString();
     setCaption(say);
     // Spoken, never listened after — even the lines that end in a question.
@@ -1141,54 +965,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       const entries = await transcript.record(account, { said: '', replied: say });
       if (mounted.current) setActivity(entries);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /**
-   * Runs anything that was due while Grove was closed.
-   *
-   * iOS will not wake the app at a chosen moment, so a device-side spark can
-   * only ever catch up — which is what the Sparks screen promises and what
-   * nothing was actually doing: dueSparks() existed and was never called, so a
-   * scheduled job had no path to running at all.
-   *
-   * One at a time, and only the oldest: coming back after a week away should
-   * produce one briefing, not seven talking over each other.
-   */
-  const catchUp = useCallback(async () => {
-    const account = live.current.uid;
-    if (!account || account === 'anon') return;
-
-    // The mode decides whether Grove may speak first at all. Without this the
-    // rate control is decorative: focus mode would still be interrupted by a
-    // spark catching up, which is the exact behaviour it exists to prevent.
-    const mode = modeById(live.current.persona.mode ?? 'normal');
-    if (!maySpeak(mode, lastVolunteered.current)) return;
-
-    const all = await sparks.loadSparks(account);
-    const due = sparks.dueSparks(all);
-    if (due.length === 0) return;
-
-    const spark = due[due.length - 1];
-    const ability = spark.abilityId ? abilityById(spark.abilityId) : undefined;
-    // Marked before running, so a failing spark cannot retry on a loop every
-    // time the app comes forward.
-    setSparkList(await sparks.markRun(account, spark.id));
-    if (!ability?.wired) return;
-
-    const outcome = await runAbility(ability, {});
-    if (!mounted.current || !outcome.ok) return;
-
-    const entries = await transcript.record(account, {
-      said: spark.title,
-      replied: outcome.spoken,
-      tool: { name: ability.name, state: 'done', detail: outcome.spoken },
-    });
-    if (!mounted.current) return;
-    setActivity(entries);
-    lastVolunteered.current = new Date().toISOString();
-    setCaption(outcome.spoken);
-    utter(outcome.spoken);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1301,242 +1077,6 @@ function shortFailure(text: string): string {
     []
   );
 
-  /* --------------------------------------------------------- voice notes */
-
-  /** Everything heard so far in the note, in order. */
-  const noteText = (): string => {
-    const m = memo.current;
-    if (!m) return '';
-    return [...m.committed, m.buffer]
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .join(' ');
-  };
-
-  /**
-   * Take in a new transcript for the running session.
-   *
-   * On iOS each result is the whole session so far, not the latest words, so a
-   * result replaces the buffer rather than adding to it. The exception is a
-   * result that is suddenly much shorter than the buffer: a transcript does not
-   * shrink by half as it grows, so that is a new session starting, and the old
-   * one is kept before it is overwritten. Comparing lengths rather than opening
-   * words matters, because the recogniser revises its first few words as it
-   * hears more, and treating a revision as a new session duplicated them.
-   */
-  const absorb = (text: string) => {
-    const m = memo.current;
-    const said = text.trim();
-    if (!m || !said) return;
-    if (m.buffer && said.length < m.buffer.length * 0.5) m.committed.push(m.buffer);
-    m.buffer = said;
-    if (mounted.current) setHeard(noteText().slice(-220));
-  };
-
-  /**
-   * A note ends after two minutes of nobody saying anything.
-   *
-   * Long enough for thinking, pausing, reading something off a page. Short
-   * enough that a note left running by accident does not record the rest of
-   * the afternoon.
-   */
-  const armNoteQuiet = () => {
-    const m = memo.current;
-    if (!m) return;
-    if (m.quietTimer) clearTimeout(m.quietTimer);
-    m.quietTimer = setTimeout(() => void finishNote(), 120_000);
-  };
-
-  /**
-   * "That's it" ends a note — once it has stayed the last thing said.
-   *
-   * Checked on partial results, because on iOS a continuous session only
-   * delivers a final one when it stops. The short wait is what keeps "that's
-   * it, the whole plan hinges on Friday" from ending the note at the comma.
-   */
-  const watchForEnd = () => {
-    const m = memo.current;
-    if (!m) return;
-    if (m.endTimer) clearTimeout(m.endTimer);
-    if (!notesStore.endsNote(noteText()).ended) return;
-    m.endTimer = setTimeout(() => {
-      if (memo.current && notesStore.endsNote(noteText()).ended) void finishNote();
-    }, 2500);
-  };
-
-  const listenForNote = async () => {
-    const m = memo.current;
-    if (!m || m.finishing) return;
-
-    // The same preparation beginListening does out of the foreground: pocketed,
-    // the audio session has lapsed and must be taken back before recording.
-    if (AppState.currentState !== 'active') {
-      try {
-        await trigger.reactivate();
-        await trigger.setKeepAlive(false);
-      } catch {
-        // Recording may still start; if it does not, the note ends below.
-      }
-    }
-    trigger.suppressVolumeTriggers();
-
-    const started = startListening(
-      {
-        onPartial: (text) => {
-          absorb(text);
-          armNoteQuiet();
-          watchForEnd();
-        },
-        onFinal: (text) => {
-          absorb(text);
-          watchForEnd();
-        },
-        onLevel: (value) => {
-          if (mounted.current) setLevel(value);
-        },
-        onError: (message) => {
-          console.log('[grove:note] recogniser error', message);
-        },
-        onEnd: () => {
-          const current = memo.current;
-          if (!current || current.finishing) return;
-          // iOS ended the session, not the person. Keep what it heard and start
-          // another, so a long note is several sessions rather than a lost one.
-          if (current.buffer) current.committed.push(current.buffer);
-          current.buffer = '';
-          setTimeout(() => void listenForNote(), 250);
-        },
-      },
-      { continuous: true, preferOnDevice: live.current.persona.preferOnDevice, hints: hints.current }
-    );
-
-    if (!started) void finishNote();
-  };
-
-  const startNote = (meetingWith: string[] | null = null) => {
-    stopSpeaking();
-    // A buzz, not a sentence. Anything spoken now plays into the glasses while
-    // the microphone opens, and gets written into the note as its first line.
-    buzz();
-    memo.current = {
-      committed: [],
-      buffer: '',
-      startedAt: Date.now(),
-      finishing: false,
-      endTimer: null,
-      quietTimer: null,
-      ...(meetingWith ? { meeting: true, people: meetingWith } : { people: [] }),
-    };
-    setHeard('');
-    setCaption(
-      meetingWith
-        ? `Logging the meeting${meetingWith.length > 0 ? ` with ${meetingWith.join(' and ')}` : ''}. Press when you are done.`
-        : 'Taking notes. Press when you are done.'
-    );
-    setState('noting');
-    armNoteQuiet();
-    void listenForNote();
-  };
-
-  const finishNote = async () => {
-    const m = memo.current;
-    if (!m || m.finishing) return;
-    m.finishing = true;
-    if (m.endTimer) clearTimeout(m.endTimer);
-    if (m.quietTimer) clearTimeout(m.quietTimer);
-
-    // Ask for the final transcript and give it a moment to arrive: the last
-    // few words are exactly the ones still being recognised when the press
-    // lands, and they are often the conclusion.
-    stopListening();
-    await new Promise((done) => setTimeout(done, 700));
-
-    const said = notesStore.endsNote(noteText()).kept;
-    const seconds = Math.max(1, Math.round((Date.now() - m.startedAt) / 1000));
-    memo.current = null;
-    void trigger.setKeepAlive(true).catch(() => undefined);
-    buzz();
-    if (!mounted.current) return;
-    setLevel(0);
-    setHeard('');
-
-    if (said.split(/\s+/).filter(Boolean).length < 3) {
-      utter("I didn't catch anything, so there's no note.");
-      return;
-    }
-
-    setState('thinking');
-    setCaption('Writing up your note…');
-
-    const shape = await lightNotes(said);
-    // Saved whether or not the write-up worked. The recording is the thing that
-    // cannot be got back; a summary can be made again.
-    const note = shape ?? {
-      title: said.split(/\s+/).slice(0, 6).join(' '),
-      summary: '',
-      points: [],
-      actions: [],
-    };
-    const { notes: next, saved } = await notesStore.saveNote(live.current.uid, {
-      ...note,
-      transcript: said,
-      createdAt: new Date().toISOString(),
-      seconds,
-      ...(m.meeting ? { kind: 'meeting' as const, people: m.people } : {}),
-    });
-    if (!mounted.current) return;
-    setNoteList(next);
-
-    // Read into the long memory behind the reply: who was there, what was
-    // decided, what anyone promised. One model call, and nobody waits on it.
-    const account = live.current.uid;
-    void rememberNote(account, saved, saved.id).then(async () => {
-      const fresh = await life.loadLife(account);
-      if (mounted.current) setLifeMemory(fresh);
-    });
-
-    if (!shape) {
-      utter("Saved the recording, but I couldn't write it up just now. It's all in your notes.");
-      return;
-    }
-
-    const todo = note.actions.length;
-    const batch = abilityById('reminders.batch');
-    if (todo === 0 || !batch) {
-      utter(`Saved: ${note.title}.`);
-      return;
-    }
-
-    // The things to do are offered, not created. Four reminders appearing in
-    // your list because a meeting mentioned four things is the kind of
-    // helpfulness you spend a morning undoing.
-    awaitingYes.current = { ability: batch, args: { items: note.actions.join('\n') }, at: Date.now() };
-    utter(
-      `Saved: ${note.title}. ${todo === 1 ? 'One thing' : `${todo} things`} to do in there. Press once to put ${todo === 1 ? 'it' : 'them'} in your reminders, twice to leave ${todo === 1 ? 'it' : 'them'}.`
-    );
-  };
-
-  const tickOff = useCallback(async (id: string) => {
-    setCaptures(await inbox.complete(live.current.uid, id));
-  }, []);
-
-  const dropCapture = useCallback(async (id: string) => {
-    setCaptures(await inbox.remove(live.current.uid, id));
-  }, []);
-
-  const endFocus = useCallback(async () => {
-    await inbox.setFocus(live.current.uid, null);
-    if (mounted.current) setFocus(null);
-  }, []);
-
-  const forgetEntity = useCallback(async (id: string) => {
-    setLifeMemory(await life.updateLife(live.current.uid, (now) => life.forgetEntity(now, id)));
-  }, []);
-
-  const forgetEpisode = useCallback(async (id: string) => {
-    setLifeMemory(await life.updateLife(live.current.uid, (now) => life.forgetEpisode(now, id)));
-  }, []);
-
   const gotStruggle = useCallback(async (id: string) => {
     setStuck(await struggles.gotIt(live.current.uid, id));
   }, []);
@@ -1545,8 +1085,12 @@ function shortFailure(text: string): string {
     setStuck(await struggles.forget(live.current.uid, id));
   }, []);
 
-  const forgetNote = useCallback(async (id: string) => {
-    setNoteList(await notesStore.deleteNote(live.current.uid, id));
+  const forgetEntity = useCallback(async (id: string) => {
+    setLifeMemory(await life.updateLife(live.current.uid, (now) => life.forgetEntity(now, id)));
+  }, []);
+
+  const forgetEpisode = useCallback(async (id: string) => {
+    setLifeMemory(await life.updateLife(live.current.uid, (now) => life.forgetEpisode(now, id)));
   }, []);
 
   const clearSilence = useCallback(() => {
@@ -1724,13 +1268,6 @@ function shortFailure(text: string): string {
   }, []);
 
   const press = useCallback(() => {
-    // While a note is being taken, the press is how it ends. Nothing else a
-    // press could mean is more likely than "I'm done".
-    if (memo.current) {
-      void finishNote();
-      return;
-    }
-
     // A confirmation owns the next press, and only the next one.
     const waiting = awaitingYes.current;
     if (waiting) {
@@ -1807,11 +1344,8 @@ function shortFailure(text: string): string {
 
     void beginListening(false);
     // confirmNow and utter are both useCallback with no deps, so they are
-    // stable and listing them changes nothing but the lint. finishNote is left
-    // out on purpose: it is rebuilt each render but reads only refs and stable
-    // setters, so any render's copy behaves identically, and listing it would
-    // rebuild `press` — and resubscribe the ring — on every keystroke.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // stable and listing them changes nothing but the lint.
+     
   }, [beginListening, confirmNow, utter]);
 
   const say = useCallback(
@@ -1877,16 +1411,11 @@ function shortFailure(text: string): string {
           press();
           break;
         case 'hold-start':
-          if (memo.current) {
-            void finishNote();
-            break;
-          }
           // A held button means "I am still talking" — keep the recogniser
           // open rather than letting it endpoint at the first pause.
           if (stateNow.current !== 'listening') void beginListening(true);
           break;
         case 'hold-end':
-          if (memo.current) break;
           if (stateNow.current === 'listening') stopListening();
           break;
       }
@@ -1902,8 +1431,7 @@ function shortFailure(text: string): string {
     const onAppState = (next: AppStateStatus) => {
       if (next === 'active') {
         void arm();
-        void catchUp();
-      }
+        }
     };
     const appSub = AppState.addEventListener('change', onAppState);
 
@@ -1945,8 +1473,8 @@ function shortFailure(text: string): string {
       appSub.remove();
     };
     // finishNote reads only refs and stable setters; see the note on `press`.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, press, beginListening, catchUp, considerSpeaking, setState]);
+     
+  }, [status, press, beginListening, considerSpeaking, setState]);
 
   /**
    * The volume-down fallback follows the preference, but only once the session
@@ -1999,25 +1527,13 @@ function shortFailure(text: string): string {
       editFact,
       forgetFact,
       forgetEverything,
-      sparks: sparkList,
-      setSparkEnabled,
-      editSpark,
-      deleteSpark,
-      notes: noteList,
-      captures,
-      tickOff,
-      dropCapture,
-      focus,
-      endFocus,
       next,
-      dayOne,
       struggles: stuck,
       gotStruggle,
       forgetStruggle,
       life: lifeMemory,
       forgetEntity,
       forgetEpisode,
-      forgetNote,
       press,
       say,
     }),
@@ -2039,19 +1555,7 @@ function shortFailure(text: string): string {
       editFact,
       forgetFact,
       forgetEverything,
-      sparkList,
-      setSparkEnabled,
-      editSpark,
-      deleteSpark,
-      noteList,
-      forgetNote,
-      captures,
-      tickOff,
-      dropCapture,
-      focus,
-      endFocus,
       next,
-      dayOne,
       stuck,
       gotStruggle,
       forgetStruggle,

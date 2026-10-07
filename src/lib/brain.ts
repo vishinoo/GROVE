@@ -34,11 +34,10 @@ import { asPromptBlock, factFrom } from './memory';
 import { lately, loadLife, whoIsWho } from './life';
 import { rhythmLines, rhythms } from './rhythms';
 import { frictionBlock, loadStruggles } from './struggles';
-import { loadFocus, loadInbox, open as openCaptures, remaining } from './inbox';
+import { rapport, rapportDirective } from './rapport';
 import { calculate } from './calc';
-import { abilitiesFor, modeById } from './modes';
 import { ABILITIES } from './abilities';
-import { activePreset, depthRule, fallback, friendDirective, mannerDirective } from './persona';
+import { activePreset, fallback, mannerDirective } from './persona';
 import { abilityIdFor, argsFromCall, declarationsFor } from './tools';
 
 /**
@@ -108,9 +107,7 @@ const TOOL_RULES = `How to use your tools:
 - To send or share a document you wrote, look it up with the documents-written tool first and put its link in the email. Never guess a link.
 - Anything about their own life — what they should be doing, what they promised, who someone is, what was decided, an idea they had — comes from the memory tools, not from this conversation. You only see the last few turns; the tools see months.
 - "What should I be doing", "I have an hour, what now", "catch me up": call the where-things-stand tool, then name ONE thing — the path of least resistance. The smallest thing that actually moves something forward and can be started right now, not the biggest or the most important. Something overdue or due today wins; otherwise whatever takes least to begin. One line, no list of alternatives.
-- Anything they say they have to do, need to do, should do, or must not forget goes somewhere — never just a remark. With a time on it ("tomorrow", "at three", "Friday") it is a reminder. Without one ("I have to do the dishes", "I need to email the PE guy", "I should book the dentist") it is a capture. Either way: log it, say so in a few words, and move on. A joke about it instead of logging it means it is lost.
-- Capture, don't switch. A thought that is not what they are doing right now — someone to email, something to look up, a thing they promised, an idea — goes straight into their inbox with the capture tool, in their own words. Do not plan it, do not ask about it, do not offer to do it now: capture it and stop. They will deal with it later.
-- If they ask you to actually do that thing now ("email him now"), do it instead of capturing it. Capture is for the thought they are setting aside.
+- Anything they say they have to do, need to do, or must not forget becomes a reminder — never just a remark. "I have to do the dishes", "I need to email the PE guy": set one, say so in a few words, and move on. A joke about it instead of setting one means it is lost.
 - When they say they finished something that was outstanding ("I sent Jason the build", "emailed the PE guy"), mark it done.
 - "Brief me on someone" or "who is X": use the person tool. Never assemble a person from memory of this conversation.
 - "Anything important" about mail: use the tool that filters it. Name who and what they want, not how many are unread.
@@ -124,7 +121,6 @@ const TOOL_RULES = `How to use your tools:
 - A reminder about something you looked up says what it is about, not where it came from: "Demo with Jason, 10250 102 Ave, Friday 2pm — bring pricing slides", never "Jason's email".
 - If an email, note or event you just read has a clear deadline or to-do, you may offer once to set a reminder. Never set one they did not ask for.
 
-- Nudging: when the talk is casual — small talk, catching up, a quiet moment — and something waiting on their list fits what is being said, mention ONE of them, lightly, the way a friend would. Not a summary, never a list. Rarely: if you raised something in the last few exchanges, let it lie. Never while they are mid-task, in a focus session on something else, or in the middle of getting something done.
 
 How to answer once tools return:
 - Answer from what came back and nothing else. If it came back empty, say so plainly.
@@ -139,7 +135,6 @@ How to answer once tools return:
 
 function systemFor(context: GroveContext, available: Ability[]): string {
   const { persona, facts } = context;
-  const mode = modeById(persona.mode ?? 'normal');
 
   const now = new Date();
   const today = now.toLocaleDateString('en-GB', {
@@ -154,24 +149,11 @@ function systemFor(context: GroveContext, available: Ability[]): string {
   // A tool the mode has switched off is invisible to the model, so without this
   // it improvises a reason it cannot help — "I can't read your emails yet" —
   // when the truth is a setting the person turned on five minutes ago.
-  const off = ABILITIES.filter((a) => a.wired && !available.some((x) => x.id === a.id));
-  const modeNote =
-    off.length > 0
-      ? `They are in ${mode.label.toLowerCase()} mode, which switches off: ${off
-          .map((a) => a.name)
-          .join(', ')}. If they ask for one of those, say it is off in ${mode.label.toLowerCase()} mode and that "back to normal" turns it on.`
-      : '';
-
   return [
     `You are ${persona.name || 'Grove'}, the one assistant this person talks to, usually through glasses while they are doing something else.`,
     `It is ${clock} on ${today}, timezone ${zone}. That is the real current date and time.`,
     asPromptBlock(facts),
-    friendDirective(persona),
-    [mannerDirective(persona), mode.manner].filter(Boolean).join('\n\n'),
-    // Length is theirs to choose, and it is a rule about the relationship
-    // rather than the glasses: see depthRule.
-    depthRule(persona),
-    modeNote,
+    mannerDirective(persona),
     TOOL_RULES,
   ]
     .filter((part) => part && part.trim())
@@ -422,9 +404,8 @@ export async function phraseAction(
   const { persona } = context;
   const voice = [
     `You are ${persona.name || 'Grove'}, their assistant.`,
-    friendDirective(persona, { greet: false }),
     mannerDirective(persona),
-    depthRule(persona),
+    context.rapport ?? '',
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -458,22 +439,15 @@ export async function askWithTools(
   userText: string,
   context: GroveContext
 ): Promise<GroveReply> {
-  const mode = modeById(context.persona.mode ?? 'normal');
-  const available = abilitiesFor(mode, ABILITIES);
+  const available = ABILITIES.filter((a) => a.wired);
   const declarations = [...declarationsFor(available), ASK_BACK];
   // A line of names, not the archive: enough that "my cofounder" and "Jason"
   // are the same person without a lookup, and cheap enough to ride on every
   // turn. Everything else about them is a tool call away.
-  const [roster, session, waiting, usual, friction] = await Promise.all([
+  const [roster, usual, friction, talks] = await Promise.all([
     loadLife(currentAccount())
       .then((l) => [whoIsWho(l), lately(l)].filter(Boolean).join('\n'))
       .catch(() => ''),
-    loadFocus(currentAccount()).catch(() => null),
-    // The few things on their list, so a casual turn can mention one without
-    // spending a tool call to find out there was nothing to mention.
-    loadInbox(currentAccount())
-      .then((items) => openCaptures(items).slice(0, 4).map((i) => i.text))
-      .catch(() => [] as string[]),
     // What a normal week looks like, and whether today is one. Free: a median
     // and a group-by over what is already on the phone.
     rhythms(currentAccount())
@@ -485,19 +459,13 @@ export async function askWithTools(
     loadStruggles(currentAccount())
       .then((list) => frictionBlock(list))
       .catch(() => ''),
+    // How they talk, counted locally from their own turns. Free, and the one
+    // thing here that shapes every sentence rather than any single answer.
+    rapport(currentAccount())
+      .then((r) => rapportDirective(r))
+      .catch(() => ''),
   ]);
-  const list =
-    waiting.length > 0
-      ? `Waiting on their list: ${waiting.join('; ')}. Background — bring one up only when the moment genuinely fits, and only one.`
-      : '';
-  // A focus session changes what a good answer is: the same thought that
-  // deserves a plan on a quiet evening deserves to be caught and set aside
-  // mid-session. This is the difference between an assistant that helps and
-  // one that keeps you on the thing you sat down to do.
-  const focusing = session
-    ? `They are in a focus session on ${session.what}${remaining(session) ? ` — ${remaining(session)}` : ''}. Anything that is not that: capture it and point them back in one short line, and do not expand on it. Answer anything that IS about ${session.what} properly. If they ask what they should be doing, the answer is ${session.what}.`
-    : '';
-  const system = [systemFor(context, available), roster, usual, friction, list, focusing]
+  const system = [systemFor(context, available), talks, roster, usual, friction]
     .filter(Boolean)
     .join('\n\n');
   const fact = factFrom(userText) ?? undefined;

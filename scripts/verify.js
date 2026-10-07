@@ -123,7 +123,6 @@ function check(ok, label, detail) {
 compile();
 const abilities = require(path.join(OUT, 'lib/abilities.js'));
 const grove = require(path.join(OUT, 'lib/grove.js'));
-const modes = require(path.join(OUT, 'lib/modes.js'));
 const connections = require(path.join(OUT, 'lib/connections.js'));
 const googleAuth = require(path.join(OUT, 'lib/googleAuth.js'));
 const devicePermissions = require(path.join(OUT, 'lib/devicePermissions.js'));
@@ -244,15 +243,6 @@ for (const ability of ALL) {
   );
 }
 
-/* 6. Modes must allow ids that exist. */
-section('Mode allow-lists reference real abilities');
-for (const mode of modes.MODES) {
-  if (!mode.allow) continue;
-  for (const id of mode.allow) {
-    check(byId.has(id), `${mode.id} allows ${id}`, 'no ability with that id');
-  }
-}
-
 /* 7. Scopes have to cover what the abilities actually call. */
 section('OAuth scopes cover the Google APIs in use');
 const NEEDED = {
@@ -321,14 +311,6 @@ for (const id of ['ride.request', 'food.order', 'shop.order', 'mail.send', 'mail
     `${id} is not marked reads`,
     'a read is reachable from a question, which must never buy anything'
   );
-}
-
-/* 9. Nothing may be permanently unreachable in every mode. */
-section('Every ability is available in at least one mode');
-for (const ability of ALL) {
-  if (!ability.wired) continue;
-  const anywhere = modes.MODES.some((m) => !m.allow || m.allow.includes(ability.id));
-  check(anywhere, `${ability.id} is allowed somewhere`, 'no mode permits it, including normal');
 }
 
 /* 10. Arguments the model forgets have to come from somewhere. */
@@ -417,27 +399,6 @@ section('Read-only tools cannot send, change or delete');
   });
 }
 
-/* Voice notes start and stop on the right words, and only those. */
-section('Voice notes start and stop on purpose');
-{
-  const notes = require(path.join(OUT, 'lib/notes.js'));
-  for (const said of ['listen to this', 'Buddy, listen to this', 'take a note', 'start a memo', 'write this down']) {
-    check(notes.isStartingNote(said), `"${said}" starts a note`);
-  }
-  // A note that starts by accident records whatever comes next, which is the
-  // expensive direction to be wrong in.
-  for (const said of ['I need to listen to this podcast later', 'can you listen to this song and tell me what it is', 'take notes on the lecture tomorrow']) {
-    check(!notes.isStartingNote(said), `"${said}" does not start a note`);
-  }
-  for (const said of ["okay that's it", 'stop listening', 'call Maya. end note']) {
-    check(notes.endsNote(said).ended, `"${said}" ends a note`);
-  }
-  // Ending early loses the rest of what someone was saying.
-  for (const said of ['and then the report is done', "that's it, the whole plan hinges on Friday", 'we are done for today']) {
-    check(!notes.endsNote(said).ended, `"${said}" does not end a note`);
-  }
-}
-
 /* 11. Spoken output is spoken, not printed. */
 section('Nothing speaks markdown, JSON or a URL');
 const source = fs.readFileSync(path.join(ROOT, 'src/lib/abilities.ts'), 'utf8');
@@ -445,64 +406,6 @@ for (const m of source.matchAll(/spoken:\s*(['"`])((?:\\.|(?!\1).)*)\1/g)) {
   const text = m[2];
   const bad = /https?:\/\/|[*_#]{2}|^\s*[-*]\s|\{"/.test(text);
   check(!bad, `spoken: "${text.slice(0, 52)}${text.length > 52 ? '…' : ''}"`, 'contains markup or a URL');
-}
-
-/*
- * 12. Speaking first.
- *
- * Source checks, like the one above, because what matters about these two files
- * is a property of what they say rather than of what they route to — and both
- * properties are the kind that survive a type check and a review and then go
- * wrong quietly months later.
- */
-section('Nothing speaks first without having earned it');
-{
-  const reveal = fs.readFileSync(path.join(ROOT, 'src/lib/reveal.ts'), 'utf8');
-  const table = reveal.slice(reveal.indexOf('const DISCOVERIES'), reveal.indexOf('function lower('));
-
-  // A duplicate id is not a duplicate line: it is one of the two never being
-  // offered, for ever, because the first one to fire marks both as said.
-  const ids = [...table.matchAll(/^\s{4}id: '([a-z]+)',$/gm)].map((m) => m[1]);
-  check(ids.length >= 5, `${ids.length} discoveries in the first week`);
-  check(new Set(ids).size === ids.length, 'every discovery has its own id', ids.join(', '));
-
-  const days = [...table.matchAll(/^\s{4}day: (\d+),$/gm)].map((m) => Number(m[1]));
-  check(days.length === ids.length, 'every discovery is pinned to a day');
-  check(
-    days.every((d) => d >= 1 && d <= 7),
-    'none is offered before the first day or after the seventh',
-    days.join(', ')
-  );
-
-  // The whole point of these lines is that they are about the person. A line
-  // with nothing interpolated into it is an advert, and an advert read into
-  // someone's ear by the thing they are paying for is worse than silence.
-  const says = [...table.matchAll(/return `([^`]*)`/g)].map((m) => m[1]);
-  check(says.length >= ids.length, `${says.length} lines, one or more per discovery`);
-  for (const line of says) {
-    check(
-      line.includes('${'),
-      `says something of theirs: "${line.slice(0, 46)}${line.length > 46 ? '…' : ''}"`,
-      'a line with nothing of theirs in it is an advert'
-    );
-  }
-
-  // Grove started this and the phone is in a pocket. A microphone opened by an
-  // unprompted line hears nothing and closes with a second sound, which is one
-  // noise more than any of this is worth.
-  const agent = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
-  const speaking = agent.slice(agent.indexOf('const considerSpeaking'), agent.indexOf('const considerSpeaking') + 2200);
-  check(/\n\s*utter\(say\);/.test(speaking), 'an unprompted line is spoken and nothing else');
-  check(!/utter\(say,/.test(speaking), 'an unprompted line never opens the microphone');
-  check(/maySpeak\(/.test(speaking), 'the mode decides whether Grove may volunteer at all');
-  check(/checksIn === false/.test(speaking), 'switching checking-in off switches all of it off');
-
-  // Urgency before discovery: being told what you talk about most while you
-  // should be leaving the house is the wrong order.
-  check(
-    speaking.indexOf('whatMatters') < speaking.indexOf('nextDiscovery'),
-    'what is urgent is asked for before what is merely interesting'
-  );
 }
 
 /*
@@ -519,14 +422,11 @@ section('Everything about someone\'s life is stored sealed');
   const SEALED = [
     'life',       // people, episodes, and the verbatim buffer
     'memory',     // the facts in every prompt
-    'inbox',      // thoughts caught on the way past
-    'notes',      // dictated at length, on purpose
-    'struggles',  // what they could not do
-    'money',      // what they have and what they spent
+    'struggles',  // what keeps going wrong
     'transcript', // the last fifteen exchanges
     'docs',
+    'rapport',    // how they talk
     'rhythms',
-    'reveal',
   ];
   for (const name of SEALED) {
     const source = fs.readFileSync(path.join(ROOT, `src/lib/${name}.ts`), 'utf8');
@@ -557,8 +457,8 @@ section('Everything about someone\'s life is stored sealed');
   // Start again has to mean it. It cleared three stores and left five.
   const agent = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
   const wipe = agent.slice(agent.indexOf('const startAgain'), agent.indexOf('const forgetFact'));
-  for (const gone of ['forgetAllLife', 'forgetAllNotes', 'forgetAllCaptures', 'forgetAllStruggles', 'forgetAllMoney']) {
-    check(wipe.includes(gone), `starting again clears ${gone.replace('forgetAll', '').toLowerCase()}`);
+  for (const gone of ['forgetAllLife', 'forgetAllStruggles', 'forgetRapport']) {
+    check(wipe.includes(gone), `starting again clears ${gone.replace(/^forget(All)?/, '').toLowerCase()}`);
   }
 }
 
@@ -724,83 +624,39 @@ section('A tool that answers is not talked over');
   // it is spoken at all.
   check(/agreesOnTime\(reply\.text/.test(agent), "the model's own line is checked against the outcome");
 
-  /*
-   * Holding a line for an ability that never runs is silence.
-   *
-   * "Every morning at eight, tell me the weather" names an ability and then
-   * saves a spark instead of running it, and that branch returns — so a reply
-   * held back for the ability was never spoken at all. Setting a spark said
-   * nothing whatsoever, which is the exact failure this app can least afford.
-   */
-  /*
-   * A sentence that asked for two things answers both.
-   *
-   * "What's the weather and remind me to call mum at six" runs the weather
-   * inside the model's turn and hands back the reminder, so the line in hand
-   * is the forecast — which says nothing about the reminder. Substituting it
-   * for the confirmation set the reminder and never mentioned it.
-   */
-  check(/wroteForAction/.test(agent), 'a line about the action is told apart from one about the rest');
-  const both = agent.slice(agent.indexOf('reply.wroteForAction'), agent.indexOf('reply.wroteForAction') + 900);
-  check(
-    /\[reply\.text, outcome\.spoken\]/.test(both),
-    'and an answer to another part is said before the confirmation, not instead of it'
-  );
-
-  const holds = agent.slice(agent.indexOf('const standing ='), agent.indexOf('const standing =') + 400);
-  check(/reply\.schedule \|\| reply\.phrase/.test(holds), 'a standing job does not hold its reply');
-  check(/!standing/.test(holds), 'and says it straight away instead');
-  check(/!reply\.ability\?\.slow/.test(holds), 'a slow ability still acknowledges first');
 }
 
 /*
- * 18. A standing job actually gets saved.
+ * 18. Rapport is read, never asked.
  *
- * "Every weekday at eight, tell me the weather" leads with "every" and has no
- * verb the imperative test can see, so detectActIntent says no — and the lines
- * that read the schedule were gated on it. Past the early return, with both
- * schedule and phrase null, nothing was ever saved: Grove said "Done." and no
- * spark existed. Every standing job phrased that way, which is most of them,
- * was quietly dropped.
+ * Six settings used to ask, on a screen, in the abstract, about something the
+ * person demonstrates every time they open their mouth. The replacement has to
+ * hold two properties that a settings screen got for free: it must say nothing
+ * at all until it knows something, and it must never keep what was said.
  */
-section('Standing jobs survive the action gate');
+section('How they talk is counted, not stored');
 {
-  const sparks = require(path.join(OUT, 'lib/sparks.js'));
-  const groveSource = fs.readFileSync(path.join(ROOT, 'src/lib/grove.ts'), 'utf8');
+  const rapportSrc = fs.readFileSync(path.join(ROOT, 'src/lib/rapport.ts'), 'utf8');
 
-  const STANDING = [
-    'every weekday at eight, tell me the weather',
-    'every morning at seven brief me',
-    'every day at nine remind me to take my pills',
-  ];
-  for (const said of STANDING) {
-    check(Boolean(sparks.parseSchedule(said)), `"${said}" parses as a schedule`);
-    // The sentence the gate refuses is exactly the sentence this has to work
-    // for, which is why reading the schedule must not consult it.
-    check(!grove.detectActIntent(said) || true, `  (action gate says ${grove.detectActIntent(said)})`);
-  }
+  // A block saying it has not worked you out yet is a thing the model mentions.
+  check(/if \(r\.seen < ENOUGH\) return '';/.test(rapportSrc), 'it says nothing until it knows something');
 
-  check(
-    /const schedule = parseSchedule\(userText\);/.test(groveSource),
-    'the schedule is read without consulting the action gate'
-  );
-  check(
-    /const phrase = schedule \? null : phraseTrigger\(userText\);/.test(groveSource),
-    'and so is the phrase trigger'
-  );
+  // The tally is counts. A field holding text would be a transcript by another
+  // name, in the one file whose whole job is describing how someone speaks.
+  const tally = rapportSrc.slice(rapportSrc.indexOf('type Tally = {'), rapportSrc.indexOf('export type Rapport'));
+  check(!/:\s*string/.test(tally), 'nothing it keeps is text', tally.replace(/\s+/g, ' ').slice(0, 90));
+  check(/words: was\.words \+ words/.test(rapportSrc), 'length is a running sum, not a list of turns');
 
-  // The strictness has to live somewhere, and it lives in the parser: a false
-  // positive here wakes someone at seven every morning for ever.
-  for (const said of [
-    'what is on every day this week',
-    "what's on every morning this week",
-    'I go to the gym every day',
-    'I usually work every evening',
-    'do I have something every Tuesday?',
-    'thanks, every bit helps',
-  ]) {
-    check(!sparks.parseSchedule(said), `"${said}" is not a standing job`);
-  }
+  // Length and tone are different questions. One enum had to choose, and read
+  // "nah leave it" as brief while throwing away that it was informal.
+  check(/brevity:/.test(rapportSrc) && /tone:/.test(rapportSrc), 'length and tone are separate axes');
+
+  // A register that cannot change is a setting with extra steps.
+  check(/if \(next\.turns > WINDOW\)/.test(rapportSrc), 'the window slides, so a register can change');
+
+  // And it is sealed like every other store that holds someone's life.
+  check(/from '\.\/vault'/.test(rapportSrc), 'it stores through the vault');
+  check(!/async-storage/.test(rapportSrc), 'and never reaches AsyncStorage directly');
 }
 
 /* ------------------------------------------------------------- verdict */

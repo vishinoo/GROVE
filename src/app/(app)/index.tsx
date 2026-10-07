@@ -32,18 +32,15 @@ import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
-import { remaining } from '@/lib/inbox';
-import { modeById } from '@/lib/modes';
 import { when } from '@/lib/transcript';
 
 import type { NextUp } from '@/lib/attention';
-import type { Focus } from '@/lib/inbox';
 
 export default function Talk() {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   const { notice, dismissNotice } = useSession();
-  const { state, caption, heard, level, armed, ringSeen, route, problem, activity, next, focus, dayOne, press, say, persona, updatePersona } =
+  const { state, caption, heard, level, armed, ringSeen, route, problem, activity, next, press, say, persona } =
     useAgent();
 
   const [draft, setDraft] = useState('');
@@ -105,7 +102,7 @@ export default function Talk() {
             // rather than a mode.
             // Your own colours win over the mode's. Choosing them is choosing
             // to see your assistant rather than your current situation.
-            palette={persona.palette ?? modeById(persona.mode ?? 'normal').palette}
+            palette={persona.palette}
           />
         </View>
 
@@ -129,80 +126,7 @@ export default function Talk() {
           </Text>
         )}
 
-        <Now focus={focus} next={next} />
-
-        {/*
-          The one question Grove asks about itself, on the seventh day, once.
-          Asked on screen with two buttons rather than out loud, because a
-          spoken question needs an open microphone and "yeah" has to be
-          unmistakably an answer — on a decision about whether something may
-          talk to you unprompted, a misheard yes is the worst possible outcome.
-        */}
-        {dayOne >= 7 && persona.friend?.proactive === undefined ? (
-          <View
-            style={{
-              marginTop: 18,
-              alignSelf: 'center',
-              maxWidth: 420,
-              width: '100%',
-              paddingVertical: 14,
-              paddingHorizontal: 16,
-              borderRadius: Radius.well,
-              backgroundColor: palette.sunken,
-              borderWidth: 1,
-              borderColor: palette.lineStrong,
-            }}
-          >
-            <Text style={[Type.body, { color: palette.ink }]}>
-              A week in. I know your week well enough now to speak up before you ask — when a
-              fixture is missing from your diary, or something you meant to do has gone past.
-            </Text>
-            <Text style={[Type.bodySm, { color: palette.muted, marginTop: 8 }]}>
-              Either way I&rsquo;ll still tell you when you need to leave for something.
-            </Text>
-            <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() =>
-                  void updatePersona({
-                    ...persona,
-                    friend: { ...(persona.friend ?? {}), proactive: true },
-                  })
-                }
-                style={({ pressed }) => ({
-                  flex: 1,
-                  paddingVertical: 11,
-                  borderRadius: Radius.card,
-                  backgroundColor: palette.ink,
-                  alignItems: 'center',
-                  opacity: pressed ? 0.6 : 1,
-                })}
-              >
-                <Text style={[Type.cardTitle, { color: palette.paper }]}>Go ahead</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() =>
-                  void updatePersona({
-                    ...persona,
-                    friend: { ...(persona.friend ?? {}), proactive: false },
-                  })
-                }
-                style={({ pressed }) => ({
-                  flex: 1,
-                  paddingVertical: 11,
-                  borderRadius: Radius.card,
-                  borderWidth: 1,
-                  borderColor: palette.lineStrong,
-                  alignItems: 'center',
-                  opacity: pressed ? 0.6 : 1,
-                })}
-              >
-                <Text style={[Type.cardTitle, { color: palette.ink }]}>Only if it&rsquo;s urgent</Text>
-              </Pressable>
-            </View>
-          </View>
-        ) : null}
+        <Now next={next} />
 
         {activity.length > 0 ? (
           <View style={{ marginTop: 32 }}>
@@ -294,10 +218,9 @@ export default function Talk() {
  * not there at all — an empty "Nothing standing yet" panel was on the Sparks
  * screen once and was the ugliest thing in the app.
  */
-function Now({ focus, next }: { focus: Focus | null; next: NextUp }) {
+function Now({ next }: { next: NextUp }) {
   const palette = usePalette();
-  if (!focus && !next) return null;
-  const left = focus ? remaining(focus) : '';
+  if (!next) return null;
 
   return (
     <View
@@ -314,38 +237,18 @@ function Now({ focus, next }: { focus: Focus | null; next: NextUp }) {
         borderColor: palette.line,
       }}
     >
-      {focus ? (
-        <>
-          <Mono>On</Mono>
-          <Text style={[Type.body, { color: palette.ink, marginTop: 3 }]}>
-            {focus.what}
-            {left ? <Text style={{ color: palette.muted }}>{`  ${left}`}</Text> : null}
-          </Text>
-        </>
-      ) : null}
-
-      {next ? (
-        <View
-          style={
-            focus
-              ? { marginTop: 11, paddingTop: 11, borderTopWidth: 1, borderTopColor: palette.line }
-              : undefined
-          }
-        >
-          <Mono>Next</Mono>
-          <Text style={[Type.body, { color: palette.ink, marginTop: 3 }]}>
-            {next.title}
-            <Text style={{ color: palette.muted }}>{`  ${clock(next.at)}`}</Text>
-          </Text>
-          {next.leaveBy ? (
-            <Text style={[Type.bodySm, { color: palette.ink, marginTop: 4 }]}>
-              Leave by {clock(next.leaveBy)}
-              {next.where ? ` — ${next.where}` : ''}
-            </Text>
-          ) : next.where ? (
-            <Text style={[Type.bodySm, { color: palette.muted, marginTop: 4 }]}>{next.where}</Text>
-          ) : null}
-        </View>
+      <Mono>Next</Mono>
+      <Text style={[Type.body, { color: palette.ink, marginTop: 3 }]}>
+        {next.title}
+        <Text style={{ color: palette.muted }}>{`  ${clock(next.at)}`}</Text>
+      </Text>
+      {next.leaveBy ? (
+        <Text style={[Type.bodySm, { color: palette.ink, marginTop: 4 }]}>
+          Leave by {clock(next.leaveBy)}
+          {next.where ? ` — ${next.where}` : ''}
+        </Text>
+      ) : next.where ? (
+        <Text style={[Type.bodySm, { color: palette.muted, marginTop: 4 }]}>{next.where}</Text>
       ) : null}
     </View>
   );
