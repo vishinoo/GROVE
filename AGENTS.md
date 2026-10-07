@@ -363,7 +363,7 @@ what a leave-by scores.
 `src/lib/constraints.ts`. Money was never about money: the useful abstraction
 is **a fact about someone's situation that makes some answers wrong which would
 otherwise be right**. The forty minutes before a lecture, the £180 left, the
-thing promised on Tuesday, the concept never followed — collected in one place
+thing promised on Tuesday, the thing that keeps going wrong — collected in one place
 so a new constraint reaches every answer at once rather than being threaded
 through each ability by hand. Nothing is stored; every line is assembled from
 whichever module owns it.
@@ -381,16 +381,6 @@ sentence is an assertion about someone's life made by a machine, and the
 difference between impressive and presumptuous is whether they can see where it
 came from. The Sparks screen shows what Grove thinks is normal, with the count
 beside each line, and what the interruptions have cost today.
-
-## Friction, not just knowledge
-
-`struggles.ts` holds two kinds. A **knowledge** gap can be tested and feeds the
-quiz. A **habit** cannot: "you keep forgetting your charger" is the same
-primitive — a thing that goes wrong more than once — but you cannot ask someone
-a question about it, and trying is the kind of hectoring that gets an app
-deleted. Habits feed the prompt instead, so they are in mind at the moment the
-thing is about to happen again, capped at three: ten is a list of someone's
-failings read back to them.
 
 ## The first run teaches it about you
 
@@ -753,26 +743,22 @@ containment, so "Basketball (moved)" counts — an exact match would nag someone
 about an event they are looking at. Being up early is never remarked on, and
 under four days there is no prompt block at all.
 
-## Things you did not understand
+## What keeps going wrong
 
-`src/lib/struggles.ts` records a gap rather than a fact, which makes it the one
-memory that is useful precisely because it is about something you cannot do.
-Anything can explain integration by parts; what nothing else can do is remember
-that *you* did not follow it, asked again two weeks later, and have still never
-got it right unprompted.
+`src/lib/struggles.ts` records friction — a thing that goes wrong more than
+once — which is the only memory here that earns its place by being about
+something the person cannot reliably do. "You always forget your charger."
 
-**Two correct answers close it, not one.** One right answer about a thing you
-just revised is a memory test; the second, days later, is understanding. A wrong
-answer reopens it and resets the count.
+It was a tutor once: it recorded concepts someone did not understand so a quiz
+could test them later. **That was a different product wearing this one's
+clothes**, and it is gone — three abilities, a model prompt, a cross-turn
+session with an answer key, and a directive that outranked everything else in
+the system prompt. Grove is a thing you talk to that answers and acts.
 
-The quiz needed a new primitive: `listenAfter` on `AbilityResult`, an ability
-whose answer is itself a question. Declared, never inferred — the
-missing-argument case works by accident of shape (a failed run whose line
-contains a "?") and that cannot work here, where the run succeeded and the
-question is the point. A running quiz goes **last** in the system prompt, where
-it has the most say, with the answer key: marking is the one job a model is
-genuinely good at here and it cannot tell a right answer from a confident wrong
-one without knowing what right was.
+**Twice is the bar.** Everyone forgets something once; a list that records the
+first time is a list of someone's bad days. The count is the whole signal and
+is shown beside each line. Capped at three in the prompt: ten is a list of
+someone's failings read back to them.
 
 ## Money
 
