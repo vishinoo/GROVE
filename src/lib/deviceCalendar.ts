@@ -117,6 +117,23 @@ export function readWhen(text: string, from = new Date()): Date | null {
   const hm = /\b(\d{1,2}):(\d{2})\s*(am|pm)?/.exec(t);
   const half = new RegExp(`\\bhalf (?:past )?${hourPart}\\b`).exec(t);
   const at = new RegExp(`\\bat ${hourPart}\\s*(am|pm)?`).exec(t);
+  /*
+   * The three shapes that needed no "at" and were being refused anyway.
+   *
+   * "Move it to 5pm" is the commonest way anyone says this and it parsed as
+   * nothing, so Grove asked when — of someone who had just said when. Reading
+   * an hour only after the word "at" caught "at five" and missed "5pm", "five
+   * o'clock" and a bare "five" answering a question Grove itself had asked.
+   *
+   * Safe to be this liberal because every caller passes an argument that is
+   * already meant to be a time: the `when` of a reminder, the `to` of a move.
+   * The bare-hour case is anchored to the whole string for the same reason it
+   * has to be — a loose number inside a sentence is not a time, and that is
+   * the mistake the maths parser made.
+   */
+  const meridiem = new RegExp(`\\b${hourPart}\\s*(am|pm)\\b`).exec(t);
+  const oclock = new RegExp(`\\b${hourPart}\\s*o'?\\s?clock\\b`).exec(t);
+  const alone = new RegExp(`^(?:at\\s+)?${hourPart}$`).exec(t.replace(/[.!?]+$/, '').trim());
 
   if (hm) {
     hh = settle(Number(hm[1]), hm[3]);
@@ -126,6 +143,12 @@ export function readWhen(text: string, from = new Date()): Date | null {
     mm = 30;
   } else if (at) {
     hh = settle(toHour(at[1]), at[2]);
+  } else if (meridiem) {
+    hh = settle(toHour(meridiem[1]), meridiem[2]);
+  } else if (oclock) {
+    hh = settle(toHour(oclock[1]));
+  } else if (alone) {
+    hh = settle(toHour(alone[1]));
   } else if (/\bnoon\b/.test(t)) hh = 12;
   else if (/\bmidnight\b/.test(t)) hh = 0;
 

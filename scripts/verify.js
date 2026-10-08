@@ -659,6 +659,38 @@ section('How they talk is counted, not stored');
   check(!/async-storage/.test(rapportSrc), 'and never reaches AsyncStorage directly');
 }
 
+/*
+ * 19. A time said out loud is a time.
+ *
+ * The clock parser read an hour only after the word "at", a colon, or "half" —
+ * so "move it to 5pm", which is how most people say it, parsed as nothing and
+ * Grove asked when, of someone who had just said when. A bare "five" answering
+ * Grove's own question failed the same way.
+ */
+section('Times people actually say');
+{
+  const cal = require(path.join(OUT, 'lib/deviceCalendar.js'));
+  const noon = new Date('2026-10-07T12:00:00');
+  const hourOf = (text) => {
+    const d = cal.readWhen(text, noon);
+    return d ? d.getHours() : null;
+  };
+
+  for (const [said, hour] of [
+    ['at five', 17], ['5pm', 17], ["five o'clock", 17], ['five', 17], ['17:00', 17],
+    ['half five', 17], ['tomorrow at five', 17], ['9am', 9], ['at 9am', 9], ['noon', 12],
+  ]) {
+    check(hourOf(said) === hour, `"${said}" is ${hour}:00`, `read as ${hourOf(said)}`);
+  }
+
+  // And the things that are not times. A loose number inside a sentence is the
+  // mistake the maths parser made; the bare-hour case is anchored for that
+  // reason.
+  for (const said of ['the 5 things on my list', 'chapter five of the book', '']) {
+    check(cal.readWhen(said, noon) === null, `"${said}" is not a time`);
+  }
+}
+
 /* ------------------------------------------------------------- verdict */
 
 console.log(
