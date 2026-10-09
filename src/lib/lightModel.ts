@@ -253,6 +253,17 @@ export type ModelTrouble =
   | 'offline'
   /** Google's side failed — a 5xx. Worth one retry, unlike a refusal. */
   | 'server'
+  /**
+   * The key works and the account has run out of money. A 402.
+   *
+   * Its own case because it is the one failure here that looks exactly like
+   * every other one and has a completely different fix. Reported as a refusal,
+   * it produced "nothing came back, ask me again" on every single turn —
+   * indistinguishable from a bad patch or a flaky connection, and no amount of
+   * asking again was ever going to help. The whole app goes quiet at once, so
+   * the sentence has to name the reason.
+   */
+  | 'no-credit'
   | 'refused';
 
 let modelTrouble: ModelTrouble = 'none';
@@ -330,7 +341,9 @@ async function askDirect(
           ? 'no-model'
           : response.status === 429
             ? 'rate-limited'
-            : 'refused';
+            : response.status === 402
+              ? 'no-credit'
+              : 'refused';
       return null;
     }
     const data = (await response.json()) as {
@@ -875,7 +888,12 @@ async function toolTurnOnce(
       if ((response.status === 429 || response.status >= 500)) {
         modelTrouble = response.status === 429 ? 'rate-limited' : 'server';
       } else {
-        modelTrouble = response.status === 404 ? 'no-model' : 'refused';
+        modelTrouble =
+          response.status === 404
+            ? 'no-model'
+            : response.status === 402
+              ? 'no-credit'
+              : 'refused';
       }
       return { kind: 'nothing' };
     }

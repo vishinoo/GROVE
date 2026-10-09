@@ -691,6 +691,63 @@ section('Times people actually say');
   }
 }
 
+/*
+ * 20. Opening the app is not an invitation to be told things.
+ *
+ * Grove used to greet a launch by reading its own memory back — "I've got
+ * Grove, the energy stock document and probabilistic machine learning written
+ * down, ask me what I know about any of them" — and then open the microphone.
+ * That line is gone with the first-week sequence, but the shape of the bug is
+ * not: the first check runs the moment Grove comes forward, and anything soft
+ * reaching it lands as a lecture before the screen has settled.
+ */
+section('A launch is quiet unless you are about to be late');
+{
+  const agent = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
+
+  check(/considerSpeaking\(true\)/.test(agent), 'the launch check asks for time-critical only');
+  check(
+    /whatMatters\(attention\.current, account, !urgentOnly\)/.test(agent),
+    'and that is what reaches whatMatters'
+  );
+
+  // The soft half must still be gated inside attention.ts, or the flag above
+  // is decorative.
+  const attention = fs.readFileSync(path.join(ROOT, 'src/lib/attention.ts'), 'utf8');
+  check(/if \(!freely\) return out;/.test(attention), 'the soft rules sit behind that gate');
+  const urgent = attention.slice(0, attention.indexOf('if (!freely) return out;'));
+  check(/costOfMissing: 5/.test(urgent), 'and a leave-by sits in front of it');
+
+  // Nothing anywhere reads the memory back as a greeting.
+  const screen = fs.readFileSync(path.join(ROOT, 'src/app/(app)/index.tsx'), 'utf8');
+  const hello = screen.slice(screen.indexOf('function greeting('), screen.indexOf('function Now('));
+  check(!/life|entit|memor|fact/i.test(hello), 'the greeting names nothing it remembers');
+  check(!/persona|name/i.test(hello), 'and nobody by name');
+}
+
+/*
+ * 21. A failure that cannot be retried says so.
+ *
+ * A depleted account returns 402 on every call, which was filed as a refusal —
+ * so every turn said "nothing came back, ask me again", which is advice that
+ * could never work, and the whole app going quiet at once looked like a bad
+ * release rather than a bill.
+ */
+section('Running out of credit says it has run out of credit');
+{
+  const light = fs.readFileSync(path.join(ROOT, 'src/lib/lightModel.ts'), 'utf8');
+  const brainSrc = fs.readFileSync(path.join(ROOT, 'src/lib/brain.ts'), 'utf8');
+  const self = fs.readFileSync(path.join(ROOT, 'src/lib/selfCheck.ts'), 'utf8');
+
+  check(/\| 'no-credit'/.test(light), 'a 402 has its own kind of trouble');
+  // Both paths to the API, because the one that was missed is the one that
+  // matters: every ordinary turn goes through the tool call.
+  check((light.match(/status === 402/g) ?? []).length >= 2, 'both the plain and the tool call recognise it');
+  check(/case 'no-credit':/.test(brainSrc), 'and the spoken line names it');
+  check(/out of credit/i.test(brainSrc), 'in words someone can act on');
+  check(/no-credit/.test(self) && /ai\.studio/.test(self), 'the self-check says where to fix it');
+}
+
 /* ------------------------------------------------------------- verdict */
 
 console.log(

@@ -121,9 +121,24 @@ export default function Talk() {
             {shown}
           </Text>
         ) : (
-          <Text style={[Type.bodySm, { color: palette.muted, textAlign: 'center', marginTop: 18 }]}>
-            {armed ? 'Press your ring, or the orb above.' : 'Press the orb above to talk.'}
-          </Text>
+          <>
+            {/*
+              A greeting, on screen rather than read out.
+              
+              Grove used to open by reading its own memory back — "I've got
+              Grove, the energy stock document and probabilistic machine
+              learning written down" — which is a roster, not a hello, and a
+              miserable way to be greeted by your own assistant. It says
+              nothing at launch now unless you are about to be late. This is
+              the warmth, where it costs nobody anything.
+            */}
+            <Text style={[Type.caption, { color: palette.ink, textAlign: 'center', marginTop: 18 }]}>
+              {greeting()}
+            </Text>
+            <Text style={[Type.bodySm, { color: palette.muted, textAlign: 'center', marginTop: 8 }]}>
+              {armed ? 'Press your ring, or the orb above.' : 'Press the orb above to talk.'}
+            </Text>
+          </>
         )}
 
         <Now next={next} />
@@ -218,6 +233,22 @@ export default function Talk() {
  * not there at all — an empty "Nothing standing yet" panel was on the Sparks
  * screen once and was the ugliest thing in the app.
  */
+/**
+ * What the screen says when nothing is happening.
+ *
+ * The hour, and nothing else. No name, no count of anything, no reference to
+ * what it remembers — the point is that it reads as someone looking up when
+ * you walk in, rather than as a dashboard reporting its state.
+ */
+function greeting(now = new Date()): string {
+  const h = now.getHours();
+  if (h < 5) return 'Still up?';
+  if (h < 12) return 'Morning.';
+  if (h < 18) return 'Afternoon.';
+  if (h < 22) return 'Evening.';
+  return 'Late one.';
+}
+
 function Now({ next }: { next: NextUp }) {
   const palette = usePalette();
   if (!next) return null;

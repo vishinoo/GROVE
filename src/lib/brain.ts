@@ -285,6 +285,10 @@ function troubleLine(context: GroveContext): string {
       return "Google's end had a hiccup. Ask me again.";
     case 'no-model':
       return 'The model I am set to use has been retired. That needs changing in my settings.';
+    case 'no-credit':
+      // Named outright. Every turn fails the same way until it is paid, and
+      // "ask me again" is advice that cannot work.
+      return 'The Gemini account has run out of credit, so I cannot think until that is topped up.';
     case 'no-key':
       return fallback.unconfigured();
     default:

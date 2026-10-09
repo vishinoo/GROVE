@@ -22,7 +22,7 @@ import { openReminders } from './deviceCalendar';
 import { capabilities } from './capabilities';
 import * as google from './google';
 import { isGoogleConnected, missingScopes } from './googleAuth';
-import { lightBrief, toolTurn } from './lightModel';
+import { lastModelTrouble, lightBrief, toolTurn } from './lightModel';
 import { runAbility, abilityById } from './abilities';
 import * as trigger from './trigger';
 
@@ -53,9 +53,26 @@ const CHECKS: Check[] = [
         toolTurn('Reply with the single word: ready.', [{ role: 'user', parts: [{ text: 'ping' }] }], []),
         { kind: 'nothing' as const }
       );
-      return turn.kind === 'text'
-        ? { ok: true, detail: 'The model answered.' }
-        : { ok: false, detail: 'No answer from the model. Check the key in Settings, or your signal.' };
+      if (turn.kind === 'text') return { ok: true, detail: 'The model answered.' };
+      // The reason, where there is one. "No answer from the model" sent
+      // someone hunting a connection problem for a depleted account, which is
+      // the one failure here that no amount of retrying can fix.
+      switch (lastModelTrouble()) {
+        case 'no-credit':
+          return {
+            ok: false,
+            detail: 'The Gemini account is out of credit. Top it up in AI Studio — nothing that thinks will work until then.',
+            link: 'https://ai.studio/projects',
+          };
+        case 'no-key':
+          return { ok: false, detail: 'No model key. Add one in Settings.' };
+        case 'no-model':
+          return { ok: false, detail: 'The configured model has been retired. Change it in Settings.' };
+        case 'rate-limited':
+          return { ok: false, detail: 'Rate limited by Google. Try again in a few seconds.' };
+        default:
+          return { ok: false, detail: 'No answer from the model. Check your signal and try again.' };
+      }
     },
   },
   {

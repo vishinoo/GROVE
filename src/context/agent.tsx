@@ -934,7 +934,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    * it only if the mode allows interruptions at all, nothing else is happening,
    * and it has not already been said. Everything else waits to be asked.
    */
-  const considerSpeaking = useCallback(async () => {
+  const considerSpeaking = useCallback(async (urgentOnly = false) => {
     if (!mounted.current) return;
     const resting = stateNow.current === 'idle' || stateNow.current === 'asleep';
     if (!resting || running.current || isSpeaking() || awaitingYes.current) return;
@@ -942,7 +942,15 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     if (live.current.persona.speaksUp === false) return;
 
     const account = live.current.uid;
-    const moment = await whatMatters(attention.current, account, true);
+    // Opening the app is not an invitation to be told things.
+    //
+    // The first check runs the moment Grove comes forward, and anything soft
+    // reaching it lands as a lecture before the screen has even settled: "you
+    // still haven't done the dishes" is a miserable way to be greeted by your
+    // own assistant. A leave-by is different — that is the one thing worth
+    // interrupting a launch for, and waiting ninety seconds to say it defeats
+    // the whole point of saying it.
+    const moment = await whatMatters(attention.current, account, !urgentOnly);
     // It records what it offered before it is spoken, so the state is
     // re-checked here rather than after: a press that landed during the
     // calendar read means this turn is over.
@@ -1452,7 +1460,8 @@ function shortFailure(text: string): string {
     // a calendar read, and a route lookup only when something with an address
     // is close.
     const watch = setInterval(() => void considerSpeaking(), 90_000);
-    void considerSpeaking();
+    // Time-critical only on this first one: see the note in considerSpeaking.
+    void considerSpeaking(true);
 
     // What the Talk screen shows without being asked. A minute is finer than
     // anyone needs and still cheap.
