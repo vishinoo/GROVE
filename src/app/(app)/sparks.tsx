@@ -22,13 +22,21 @@ import { useEffect, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 
 import { Icon } from '@/components/icon';
-import { Card, Folding, Mono, Screen, Section } from '@/components/ui';
+import { Card, Mono, Peek, Screen, Section } from '@/components/ui';
 import { SwipeAway } from '@/components/swipe-away';
 import { Radius, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { usePalette } from '@/hooks/use-palette';
 import { VALUE_MAX } from '@/lib/memory';
-import type { Entity as LifeEntity, Episode as LifeEpisode } from '@/lib/life';
+import {
+  openCommitments,
+  type Entity as LifeEntity,
+  type Episode as LifeEpisode,
+  type Life as LifeMemory,
+} from '@/lib/life';
+import { loadDocs, type WrittenDoc } from '@/lib/docs';
+import { rapport, type Rapport } from '@/lib/rapport';
+import { useSession } from '@/context/session';
 import { shortDate } from '@/lib/when';
 import { when as transcriptWhen } from '@/lib/transcript';
 
@@ -44,8 +52,8 @@ export default function Sparks() {
 
   return (
     <Screen
-      title="Memory"
-      subtitle="Everything Grove keeps about you. Swipe any of it away."
+      title="What it knows"
+      subtitle="Everything Grove keeps about you, and nothing it does not. Swipe any of it away."
     >
 
       {goals.length > 0 ? (
@@ -112,7 +120,7 @@ export default function Sparks() {
         than one that remembers nothing.
       */}
       {life.entities.length > 0 ? (
-        <Folding label="People and projects" count={life.entities.length}>
+        <Peek label="People and projects">
           {[...life.entities]
             .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen))
             .slice(0, 40)
@@ -130,11 +138,11 @@ export default function Sparks() {
                 />
               </SwipeAway>
             ))}
-        </Folding>
+        </Peek>
       ) : null}
 
       {life.episodes.length > 0 ? (
-        <Folding label="What happened" count={life.episodes.length}>
+        <Peek label="What happened">
           {life.episodes.slice(0, 15).map((episode) => (
             <SwipeAway
               key={episode.id}
@@ -150,32 +158,163 @@ export default function Sparks() {
             />
             </SwipeAway>
           ))}
-        </Folding>
+        </Peek>
       ) : null}
 
-      <Folding label="Memory" count={plain.length}>
-        {plain.length === 0 ? (
+      <Promised life={life} />
+
+      {/*
+        The count on a Peek is its children, so an empty state cannot live
+        inside one — "Facts about you · 1" over the words "nothing yet" is a
+        lie told by a layout. Empty is its own section, and the trailing note
+        about correcting a line only exists once there is a line to correct.
+      */}
+      {plain.length === 0 ? (
+        <Section label="Facts about you">
           <Text style={[Type.bodySm, { color: palette.muted }]}>
             Nothing yet. Tell Grove something about yourself and it turns up here.
           </Text>
-        ) : (
-          plain.map((fact) => (
-            <SwipeAway key={fact.id} label={fact.value} onDelete={() => void forgetFact(fact.id)}>
-              <FactCard
-                fact={fact}
-                onSave={(value) => void editFact(fact.id, value)}
-                onForget={() => void forgetFact(fact.id)}
-              />
-            </SwipeAway>
-          ))
-        )}
-        {plain.length > 0 ? (
-          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 9 }]}>
+        </Section>
+      ) : (
+        <>
+          <Peek label="Facts about you" show={3}>
+            {plain.map((fact) => (
+              <SwipeAway key={fact.id} label={fact.value} onDelete={() => void forgetFact(fact.id)}>
+                <FactCard
+                  fact={fact}
+                  onSave={(value) => void editFact(fact.id, value)}
+                  onForget={() => void forgetFact(fact.id)}
+                />
+              </SwipeAway>
+            ))}
+          </Peek>
+          <Text style={[Type.bodySm, { color: palette.muted, marginTop: -14, marginBottom: 22 }]}>
             Open a line to correct it. Speech gets names wrong; this is where you fix that.
           </Text>
-        ) : null}
-      </Folding>
+        </>
+      )}
+
+      <Written />
+
+      <HowYouTalk />
     </Screen>
+  );
+}
+
+/**
+ * What they said they would do and have not.
+ *
+ * The one thing in the long memory that is about the future rather than the
+ * past, and the only part of it that is quietly getting worse while nobody
+ * looks. It was reachable by asking — "what have I promised" — and invisible
+ * otherwise, which is the wrong way round for a list whose whole value is
+ * being seen without being asked for.
+ *
+ * Not deletable from here. A promise is closed by saying it is done ("I sent
+ * Jason the build"), which is also how it gets marked kept in the memory;
+ * swiping it away would record nothing and quietly lose the thread.
+ */
+function Promised({ life }: { life: LifeMemory }) {
+  const palette = usePalette();
+  const owed = openCommitments(life);
+  if (owed.length === 0) return null;
+
+  return (
+    <Peek label="Promised, not done">
+      {owed.slice(0, 12).map((e) => (
+        <Card key={e.id} style={{ marginBottom: 6 }}>
+          <Text style={[Type.body, { color: palette.ink }]}>{e.title}</Text>
+          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
+            {shortDate(e.at)}
+            {e.summary ? ` · ${e.summary}` : ''}
+          </Text>
+        </Card>
+      ))}
+    </Peek>
+  );
+}
+
+/**
+ * Documents Grove wrote, with the links it would otherwise have to go and
+ * find again. Read on mount: writing happens a few times a week at most.
+ */
+function Written() {
+  const palette = usePalette();
+  const { uid } = useSession();
+  const [docs, setDocs] = useState<WrittenDoc[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    void loadDocs(uid).then((d) => alive && setDocs(d));
+    return () => {
+      alive = false;
+    };
+  }, [uid]);
+
+  if (docs.length === 0) return null;
+
+  return (
+    <Peek label="Written for you">
+      {docs.slice(0, 12).map((d) => (
+        <Card key={d.url} style={{ marginBottom: 6 }}>
+          <Text style={[Type.body, { color: palette.ink }]} numberOfLines={2}>
+            {d.title}
+          </Text>
+          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
+            {shortDate(d.at)} · in your Drive
+          </Text>
+        </Card>
+      ))}
+    </Peek>
+  );
+}
+
+/**
+ * Grove's read on how this person speaks.
+ *
+ * The replacement for six settings nobody should have had to fill in, and
+ * therefore the one part of the memory that most needs showing: it is an
+ * inference about someone's manner, made by counting, and an inference nobody
+ * can see is one nobody can correct. Shown with the number of exchanges behind
+ * it, the way every other observed claim on this screen is.
+ *
+ * Nothing to tap. The way to change it is to talk differently, which is the
+ * whole point of it not being a setting.
+ */
+function HowYouTalk() {
+  const palette = usePalette();
+  const { uid } = useSession();
+  const [read, setRead] = useState<Rapport | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void rapport(uid).then((r) => alive && setRead(r));
+    return () => {
+      alive = false;
+    };
+  }, [uid]);
+
+  if (!read || read.seen < 8) return null;
+
+  const tone =
+    read.tone === 'casual' ? 'Loose and informal' : read.tone === 'formal' ? 'Polite, full sentences' : 'Plain and direct';
+  const length =
+    read.brevity === 'clipped' ? 'in short bursts' : read.brevity === 'roomy' ? 'at length' : '';
+
+  return (
+    <Section label="How you talk">
+      <Card>
+        <Text style={[Type.body, { color: palette.ink }]}>
+          {tone}
+          {length ? `, ${length}` : ''}
+          {read.swears ? ', and you swear' : ''}.
+        </Text>
+        <Text style={[Type.bodySm, { color: palette.muted, marginTop: 6 }]}>
+          About {read.length} words a turn, counted over your last {read.seen} exchanges. Grove
+          matches this rather than asking you to set it — talk differently and it follows.
+        </Text>
+      </Card>
+    </Section>
   );
 }
 

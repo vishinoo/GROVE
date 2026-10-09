@@ -7,7 +7,7 @@
  * hairline-and-paper look consistent when a screen is added later.
  */
 
-import { useState, type ReactNode } from 'react';
+import { Children, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -96,56 +96,69 @@ export function Section({
 }
 
 /**
- * A section you have to open.
+ * A section that shows a couple and offers the rest.
  *
- * The archive sections — what happened, the people, the facts — are long, grow
- * for ever and are read on purpose rather than in passing. Left open they push
- * everything else off the screen, so this screen became a wall of someone's own
- * memory with the live parts buried under it.
+ * This replaced a fold that was closed by default, which solved the wrong
+ * problem. The archive sections are long and were burying the live parts of
+ * the screen, so they were shut — and a screen of shut drawers is worse than a
+ * long one: there is nothing to read, nothing to recognise, and no reason to
+ * believe any of it has anything in it.
  *
- * The count is on the header for the same reason the section exists: knowing
- * there are eleven of something is most of what a glance wants, and opening it
- * is for the time you actually came to correct one.
+ * Two is enough to prove the thing is alive and show the most recent, which is
+ * what a glance wants. The count on the button is the rest, so opening it is a
+ * decision rather than a surprise.
  */
-export function Folding({
+export function Peek({
   label,
-  count,
   children,
+  show = 2,
   style,
 }: {
   label: string;
-  count?: number;
   children: ReactNode;
+  /** How many to show before the button. */
+  show?: number;
   style?: StyleProp<ViewStyle>;
 }) {
   const palette = usePalette();
-  const [open, setOpen] = useState(false);
+  const [all, setAll] = useState(false);
+
+  const items = Children.toArray(children).filter(Boolean);
+  if (items.length === 0) return null;
+  const hidden = items.length - show;
 
   return (
     <View style={[{ marginBottom: Space.section }, style]}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        accessibilityLabel={`${label}${count === undefined ? '' : `, ${count}`}`}
-        onPress={() => setOpen((was) => !was)}
-        hitSlop={6}
-        style={({ pressed }) => ({
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 8,
-          paddingVertical: 6,
-          marginBottom: open ? 8 : 0,
-          opacity: pressed ? 0.6 : 1,
-        })}
-      >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
         <Text style={[monoLabel, { color: palette.muted }]}>{label}</Text>
-        {count === undefined ? null : (
-          <Text style={[monoLabel, { color: palette.lineStrong }]}>{count}</Text>
-        )}
-        <View style={{ flex: 1 }} />
-        <Icon name={open ? 'down' : 'chevron'} size={13} color={palette.muted} />
-      </Pressable>
-      {open ? children : null}
+        <Text style={[monoLabel, { color: palette.lineStrong }]}>{items.length}</Text>
+      </View>
+
+      {(all ? items : items.slice(0, show)).map((item, i) => (
+        <View key={i}>{item}</View>
+      ))}
+
+      {hidden > 0 ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: all }}
+          onPress={() => setAll((was) => !was)}
+          hitSlop={6}
+          style={({ pressed }) => ({
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            paddingVertical: 11,
+            opacity: pressed ? 0.6 : 1,
+          })}
+        >
+          <Text style={[Type.bodySm, { color: palette.inkSoft }]}>
+            {all ? 'Show less' : `Show ${hidden} more`}
+          </Text>
+          <Icon name={all ? 'chevron' : 'down'} size={12} color={palette.muted} />
+        </Pressable>
+      ) : null}
     </View>
   );
 }
