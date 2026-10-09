@@ -9,7 +9,7 @@ import { usePalette } from '@/hooks/use-palette';
 
 const TABS: { name: string; label: string; icon: IconName }[] = [
   { name: 'index', label: 'Talk', icon: 'talk' },
-  { name: 'sparks', label: 'Memory', icon: 'tools' },
+  { name: 'sparks', label: 'Sparks', icon: 'tools' },
   { name: 'connections', label: 'Connect', icon: 'plug' },
   { name: 'settings', label: 'Settings', icon: 'settings' },
 ];

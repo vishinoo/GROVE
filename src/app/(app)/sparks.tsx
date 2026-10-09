@@ -32,11 +32,7 @@ import {
   openCommitments,
   type Entity as LifeEntity,
   type Episode as LifeEpisode,
-  type Life as LifeMemory,
 } from '@/lib/life';
-import { loadDocs, type WrittenDoc } from '@/lib/docs';
-import { rapport, type Rapport } from '@/lib/rapport';
-import { useSession } from '@/context/session';
 import { shortDate } from '@/lib/when';
 import { when as transcriptWhen } from '@/lib/transcript';
 
@@ -49,15 +45,29 @@ export default function Sparks() {
   const goals = facts.filter((f) => f.kind === 'goal');
   const plain = facts.filter((f) => f.kind !== 'goal');
   const stuck = struggles.filter((x) => !x.gotItAt);
+  const owed = openCommitments(life);
 
   return (
     <Screen
-      title="What it knows"
-      subtitle="Everything Grove keeps about you, and nothing it does not. Swipe any of it away."
+      title="Sparks"
+      subtitle="What Grove has done, and everything it keeps about you. Swipe any of it away."
     >
 
-      {goals.length > 0 ? (
-        <Section label="Goals">
+      <Done />
+
+      {/*
+        Goals and promises in one place, because the distinction was a
+        filing decision rather than a real one. "Promised, not done" is a name
+        only a database would choose; what both of these are is a thing you
+        said you were going to do and have not. A goal is the long version and
+        a commitment is the one with someone else waiting on it.
+
+        A commitment cannot be swiped. It is closed by saying it is done — "I
+        sent Jason the build" — which also marks it kept in the long memory,
+        and swiping it would record nothing and quietly lose the thread.
+      */}
+      {goals.length > 0 || owed.length > 0 ? (
+        <Peek label="Still to do" show={5}>
           {goals.map((fact) => (
             <SwipeAway key={fact.id} label={fact.value} onDelete={() => void forgetFact(fact.id)}>
               <FactCard
@@ -67,7 +77,16 @@ export default function Sparks() {
               />
             </SwipeAway>
           ))}
-        </Section>
+          {owed.map((e) => (
+            <Card key={e.id} style={{ marginBottom: 8 }}>
+              <Text style={[Type.body, { color: palette.ink }]}>{e.title}</Text>
+              <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
+                Promised {shortDate(e.at)}
+                {e.summary ? ` · ${e.summary}` : ''}
+              </Text>
+            </Card>
+          ))}
+        </Peek>
       ) : null}
 
       {/*
@@ -161,8 +180,6 @@ export default function Sparks() {
         </Peek>
       ) : null}
 
-      <Promised life={life} />
-
       {/*
         The count on a Peek is its children, so an empty state cannot live
         inside one — "Facts about you · 1" over the words "nothing yet" is a
@@ -194,127 +211,64 @@ export default function Sparks() {
         </>
       )}
 
-      <Written />
-
-      <HowYouTalk />
     </Screen>
   );
 }
 
 /**
- * What they said they would do and have not.
+ * What Grove has actually done for you.
  *
- * The one thing in the long memory that is about the future rather than the
- * past, and the only part of it that is quietly getting worse while nobody
- * looks. It was reachable by asking — "what have I promised" — and invisible
- * otherwise, which is the wrong way round for a list whose whole value is
- * being seen without being asked for.
+ * Everything else on this screen is what it knows. This is what it did — the
+ * mail it sent, the events it moved, the documents it wrote, the reminders it
+ * set — and until now the only place you could see any of that was the Talk
+ * screen, where it scrolls away behind the next thing you say.
  *
- * Not deletable from here. A promise is closed by saying it is done ("I sent
- * Jason the build"), which is also how it gets marked kept in the memory;
- * swiping it away would record nothing and quietly lose the thread.
+ * It shows what is **still running** too, which is the half that matters while
+ * it is happening: a document takes most of a minute to write, and during that
+ * minute the only sign anything was going on was a screen that said "working".
+ *
+ * Only exchanges that actually did something. A conversation is not a log, and
+ * filling this with "hey" and "thanks" would bury the five lines worth reading.
  */
-function Promised({ life }: { life: LifeMemory }) {
+function Done() {
   const palette = usePalette();
-  const owed = openCommitments(life);
-  if (owed.length === 0) return null;
+  const { activity } = useAgent();
+  const ran = activity.filter((entry) => entry.tool);
+  if (ran.length === 0) return null;
 
   return (
-    <Peek label="Promised, not done">
-      {owed.slice(0, 12).map((e) => (
-        <Card key={e.id} style={{ marginBottom: 6 }}>
-          <Text style={[Type.body, { color: palette.ink }]}>{e.title}</Text>
-          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
-            {shortDate(e.at)}
-            {e.summary ? ` · ${e.summary}` : ''}
-          </Text>
-        </Card>
-      ))}
+    <Peek label="What it did" show={5}>
+      {ran.map((entry) => {
+        const tool = entry.tool!;
+        const failed = tool.state === 'failed' || tool.state === 'blocked';
+        const running = tool.state === 'running';
+        return (
+          <Card key={entry.id} style={{ marginBottom: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 9 }}>
+              <View
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: 4,
+                  marginTop: 6,
+                  backgroundColor: failed ? palette.alert : running ? palette.muted : palette.signal,
+                }}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={[Type.body, { color: palette.ink }]} numberOfLines={3}>
+                  {tool.detail || entry.replied || tool.name}
+                </Text>
+                <Text style={[Type.bodySm, { color: palette.muted, marginTop: 3 }]}>
+                  {tool.name}
+                  {running ? ' · still going' : failed ? ` · ${tool.state}` : ''} ·{' '}
+                  {transcriptWhen(entry.at)}
+                </Text>
+              </View>
+            </View>
+          </Card>
+        );
+      })}
     </Peek>
-  );
-}
-
-/**
- * Documents Grove wrote, with the links it would otherwise have to go and
- * find again. Read on mount: writing happens a few times a week at most.
- */
-function Written() {
-  const palette = usePalette();
-  const { uid } = useSession();
-  const [docs, setDocs] = useState<WrittenDoc[]>([]);
-
-  useEffect(() => {
-    let alive = true;
-    void loadDocs(uid).then((d) => alive && setDocs(d));
-    return () => {
-      alive = false;
-    };
-  }, [uid]);
-
-  if (docs.length === 0) return null;
-
-  return (
-    <Peek label="Written for you">
-      {docs.slice(0, 12).map((d) => (
-        <Card key={d.url} style={{ marginBottom: 6 }}>
-          <Text style={[Type.body, { color: palette.ink }]} numberOfLines={2}>
-            {d.title}
-          </Text>
-          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
-            {shortDate(d.at)} · in your Drive
-          </Text>
-        </Card>
-      ))}
-    </Peek>
-  );
-}
-
-/**
- * Grove's read on how this person speaks.
- *
- * The replacement for six settings nobody should have had to fill in, and
- * therefore the one part of the memory that most needs showing: it is an
- * inference about someone's manner, made by counting, and an inference nobody
- * can see is one nobody can correct. Shown with the number of exchanges behind
- * it, the way every other observed claim on this screen is.
- *
- * Nothing to tap. The way to change it is to talk differently, which is the
- * whole point of it not being a setting.
- */
-function HowYouTalk() {
-  const palette = usePalette();
-  const { uid } = useSession();
-  const [read, setRead] = useState<Rapport | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    void rapport(uid).then((r) => alive && setRead(r));
-    return () => {
-      alive = false;
-    };
-  }, [uid]);
-
-  if (!read || read.seen < 8) return null;
-
-  const tone =
-    read.tone === 'casual' ? 'Loose and informal' : read.tone === 'formal' ? 'Polite, full sentences' : 'Plain and direct';
-  const length =
-    read.brevity === 'clipped' ? 'in short bursts' : read.brevity === 'roomy' ? 'at length' : '';
-
-  return (
-    <Section label="How you talk">
-      <Card>
-        <Text style={[Type.body, { color: palette.ink }]}>
-          {tone}
-          {length ? `, ${length}` : ''}
-          {read.swears ? ', and you swear' : ''}.
-        </Text>
-        <Text style={[Type.bodySm, { color: palette.muted, marginTop: 6 }]}>
-          About {read.length} words a turn, counted over your last {read.seen} exchanges. Grove
-          matches this rather than asking you to set it — talk differently and it follows.
-        </Text>
-      </Card>
-    </Section>
   );
 }
 

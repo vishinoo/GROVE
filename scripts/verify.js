@@ -748,6 +748,45 @@ section('Running out of credit says it has run out of credit');
   check(/no-credit/.test(self) && /ai\.studio/.test(self), 'the self-check says where to fix it');
 }
 
+/*
+ * 22. The Sparks screen shows a couple, not a drawer.
+ *
+ * Folding the archive away left a screen of shut drawers: nothing to read,
+ * nothing to recognise, and no reason to believe any of it had anything in it.
+ * And a conversation is not a log — filling the action list with "hey" and
+ * "thanks" would bury the five lines worth reading.
+ */
+section('What it did, and what it still owes');
+{
+  const screen = fs.readFileSync(path.join(ROOT, 'src/app/(app)/sparks.tsx'), 'utf8');
+
+  check(!/<Folding/.test(screen), 'nothing on it is collapsed by default');
+  check(/<Peek label="What it did" show=\{5\}>/.test(screen), 'the action log shows five before the rest');
+  check(/entry\.tool\)/.test(screen), 'and only exchanges that actually did something');
+  check(/still going/.test(screen), 'something still running says so');
+
+  // Goals and commitments are one list: the split was a filing decision.
+  check(/label="Still to do"/.test(screen), 'goals and promises are one list');
+  // Labels only: the comment above it explains why that name was dropped, and
+  // a check that cannot tell prose from an interface fails on its own reason.
+  const labels = [...screen.matchAll(/label="([^"]+)"/g)].map((m) => m[1]);
+  check(
+    !labels.some((l) => /promised/i.test(l)),
+    'and no section is named after the filing',
+    labels.join(', ')
+  );
+
+  // A commitment is closed by saying it is done, which also marks it kept.
+  // Swiping would record nothing and lose the thread.
+  const owed = screen.slice(screen.indexOf('{owed.map('), screen.indexOf('{owed.map(') + 400);
+  check(!/SwipeAway/.test(owed), 'a promise cannot be swiped away');
+
+  // How you talk belongs beside the switches that used to control it.
+  const settings = fs.readFileSync(path.join(ROOT, 'src/app/(app)/settings.tsx'), 'utf8');
+  check(/function HowYouTalk\(/.test(settings), 'the read on how they talk is in Settings');
+  check(!/function HowYouTalk\(/.test(screen), 'and not on the memory screen');
+}
+
 /* ------------------------------------------------------------- verdict */
 
 console.log(
