@@ -22,9 +22,9 @@ import { useEffect, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 
 import { Icon } from '@/components/icon';
-import { Card, Mono, Peek, Screen, Section } from '@/components/ui';
+import { Card, Peek, Screen, Section } from '@/components/ui';
 import { SwipeAway } from '@/components/swipe-away';
-import { Radius, Type } from '@/constants/theme';
+import { Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { usePalette } from '@/hooks/use-palette';
 import { VALUE_MAX } from '@/lib/memory';
@@ -70,11 +70,7 @@ export default function Sparks() {
         <Peek label="Still to do" show={5}>
           {goals.map((fact) => (
             <SwipeAway key={fact.id} label={fact.value} onDelete={() => void forgetFact(fact.id)}>
-              <FactCard
-                fact={fact}
-                onSave={(value) => void editFact(fact.id, value)}
-                onForget={() => void forgetFact(fact.id)}
-              />
+              <FactCard fact={fact} onSave={(value) => void editFact(fact.id, value)} />
             </SwipeAway>
           ))}
           {owed.map((e) => (
@@ -149,12 +145,7 @@ export default function Sparks() {
                 label={entity.name}
                 onDelete={() => void forgetEntity(entity.id)}
               >
-                <EntityCard
-                  entity={entity}
-                  episodes={life.episodes.filter((e) => e.about.includes(entity.id))}
-                  onForget={() => void forgetEntity(entity.id)}
-                  onForgetEpisode={(id) => void forgetEpisode(id)}
-                />
+                <EntityCard entity={entity} />
               </SwipeAway>
             ))}
         </Peek>
@@ -173,7 +164,6 @@ export default function Sparks() {
               names={episode.about
                 .map((id) => life.entities.find((e) => e.id === id)?.name)
                 .filter((n): n is string => !!n)}
-              onForget={() => void forgetEpisode(episode.id)}
             />
             </SwipeAway>
           ))}
@@ -197,11 +187,7 @@ export default function Sparks() {
           <Peek label="Facts about you" show={3}>
             {plain.map((fact) => (
               <SwipeAway key={fact.id} label={fact.value} onDelete={() => void forgetFact(fact.id)}>
-                <FactCard
-                  fact={fact}
-                  onSave={(value) => void editFact(fact.id, value)}
-                  onForget={() => void forgetFact(fact.id)}
-                />
+                <FactCard fact={fact} onSave={(value) => void editFact(fact.id, value)} />
               </SwipeAway>
             ))}
           </Peek>
@@ -273,36 +259,38 @@ function Done() {
 }
 
 /**
- * One thing Grove knows about you.
+ * One remembered line, correctable in place.
  *
- * Same card as a spark, deliberately. A fact is stored, acted on, and yours to
- * delete, exactly as a standing instruction is — and showing them in two
- * different shapes would suggest a difference that is not there.
+ * It used to be a disclosure: tap, and get the editor plus where the fact came
+ * from, when it was first known, and a Forget link. All of that was one tap
+ * away from a row whose whole content was already on screen — a panel of
+ * metadata about a sentence you can already read.
+ *
+ * What is left is the one thing the panel was actually for. Speech gets names
+ * wrong, so a fact has to be correctable; tapping the line turns it into a
+ * field and blurring it saves. Deleting is a swipe, like everything else here.
  */
-
 function FactCard({
   fact,
   onSave,
-  onForget,
 }: {
   fact: ReturnType<typeof useAgent>['facts'][number];
   onSave: (value: string) => void;
-  onForget: () => void;
 }) {
   const palette = usePalette();
-  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [text, setText] = useState(fact.value);
 
-  // Follows the stored value: a later turn can rewrite a fact while this screen
-  // is open, and the box should not sit there showing the old one.
+  // Follows the stored value: a later turn can rewrite a fact while this
+  // screen is open, and the box should not sit there showing the old one.
   useEffect(() => setText(fact.value), [fact.value]);
 
   const commit = () => {
+    setEditing(false);
     const next = text.trim();
     if (!next) {
-      // Clearing the box is not a delete. "Forget this" is, and it is right
-      // below — a blank line is far more often a mistyped edit than an
-      // intention to erase something.
+      // Clearing the box is not a delete — that is the swipe. A blank line is
+      // far more often a mistyped edit than an intention to erase something.
       setText(fact.value);
       return;
     }
@@ -310,177 +298,93 @@ function FactCard({
   };
 
   return (
-    <Card style={{ marginBottom: 8, paddingHorizontal: 0, paddingVertical: 0 }}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        accessibilityLabel={`${fact.value}. Tap for detail.`}
-        onPress={() => setOpen((was) => !was)}
-        style={({ pressed }) => ({ padding: 13, opacity: pressed ? 0.7 : 1 })}
-      >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <Text style={[Type.body, { color: palette.ink, flex: 1 }]} numberOfLines={open ? undefined : 2}>
-            {fact.value}
-          </Text>
-          <Icon name={open ? 'down' : 'chevron'} size={13} color={palette.muted} />
-        </View>
-      </Pressable>
-
-      {open ? (
-        <View
+    <Card style={{ marginBottom: 8 }}>
+      {editing ? (
+        <TextInput
+          value={text}
+          onChangeText={(next) => setText(next.slice(0, VALUE_MAX))}
+          onBlur={commit}
+          onSubmitEditing={commit}
+          autoFocus
+          returnKeyType="done"
+          multiline
+          accessibilityLabel={`Correct: ${fact.value}`}
           style={{
-            paddingHorizontal: 13,
-            paddingBottom: 13,
-            borderTopWidth: 1,
-            borderTopColor: palette.line,
+            fontFamily: Type.body.fontFamily,
+            fontSize: 15,
+            lineHeight: 22,
+            color: palette.ink,
+            paddingVertical: 0,
           }}
+        />
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${fact.value}. Tap to correct.`}
+          onPress={() => setEditing(true)}
+          hitSlop={4}
+          style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
         >
-          <Text style={[Type.bodySm, { color: palette.muted, marginTop: 11, marginBottom: 2 }]}>
-            {fact.kind === 'goal' ? 'The goal' : 'What Grove wrote down'}
-          </Text>
-          <TextInput
-            value={text}
-            onChangeText={(next) => setText(next.slice(0, VALUE_MAX))}
-            onBlur={commit}
-            onSubmitEditing={commit}
-            returnKeyType="done"
-            multiline
-            accessibilityLabel={`${fact.value}. Edit to correct it.`}
-            style={{
-              fontFamily: Type.body.fontFamily,
-              fontSize: 14.5,
-              lineHeight: 21,
-              color: palette.ink,
-              paddingVertical: 8,
-              paddingHorizontal: 10,
-              borderWidth: 1,
-              borderColor: palette.line,
-              borderRadius: Radius.well,
-              marginBottom: 4,
-            }}
-          />
-          <Detail label="How Grove knows">
-            {fact.source === 'told' ? 'You told it.' : 'It worked it out from something you said.'}
-          </Detail>
-          <Detail label="Since">{new Date(fact.at).toLocaleDateString()}</Detail>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Forget: ${fact.value}`}
-            onPress={onForget}
-            hitSlop={6}
-            style={({ pressed }) => ({ paddingVertical: 12, opacity: pressed ? 0.5 : 1 })}
-          >
-            <Text style={[Type.bodySm, { color: palette.alert }]}>Forget this</Text>
-          </Pressable>
-        </View>
-      ) : null}
+          <Text style={[Type.body, { color: palette.ink }]}>{fact.value}</Text>
+        </Pressable>
+      )}
     </Card>
   );
 }
 
-function EntityCard({
-  entity,
-  episodes,
-  onForget,
-  onForgetEpisode,
-}: {
-  entity: LifeEntity;
-  episodes: LifeEpisode[];
-  onForget: () => void;
-  onForgetEpisode: (id: string) => void;
-}) {
+/**
+ * A person, a project, a place — and what Grove has worked out about them.
+ *
+ * Everything it knows is on the card. It used to be a disclosure, with the
+ * facts a tap away behind a summary line, which meant the most interesting
+ * part of the long memory was the part you could not see: an assistant that
+ * quietly believes something wrong about someone you see every week is worse
+ * than one that remembers nothing, and it can only be corrected if it is
+ * legible first.
+ *
+ * Stale facts are shown struck through rather than hidden. "Lives in Toronto"
+ * superseded by "moved to Berlin" is the history of a person, and dropping it
+ * is how you lose the reason the current answer is the current answer.
+ */
+function EntityCard({ entity }: { entity: LifeEntity }) {
   const palette = usePalette();
-  const [open, setOpen] = useState(false);
   const known = entity.facts.filter((f) => !f.stale);
   const stale = entity.facts.filter((f) => f.stale);
 
   return (
-    <Card style={{ marginBottom: 8, paddingHorizontal: 0, paddingVertical: 0 }}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        accessibilityLabel={`${entity.name}. Tap to ${open ? 'close' : 'open'}.`}
-        onPress={() => setOpen((was) => !was)}
-        style={({ pressed }) => ({ padding: 13, opacity: pressed ? 0.7 : 1 })}
-      >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <View style={{ flex: 1 }}>
-            <Text style={[Type.cardTitle, { color: palette.ink }]} numberOfLines={open ? undefined : 1}>
-              {entity.name}
-              {entity.relation ? ` · ${entity.relation}` : ''}
-            </Text>
-            <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]} numberOfLines={open ? undefined : 1}>
-              {entity.summary || `${entity.kind} · seen ${transcriptWhen(entity.lastSeen)}`}
-            </Text>
-          </View>
-          <Icon name={open ? 'down' : 'chevron'} size={13} color={palette.muted} />
-        </View>
-      </Pressable>
+    <Card style={{ marginBottom: 8 }}>
+      <Text style={[Type.cardTitle, { color: palette.ink }]}>
+        {entity.name}
+        {entity.relation ? ` · ${entity.relation}` : ''}
+      </Text>
+      <Text style={[Type.bodySm, { color: palette.muted, marginTop: 2 }]}>
+        {entity.summary || `${entity.kind} · seen ${transcriptWhen(entity.lastSeen)}`}
+      </Text>
 
-      {open ? (
-        <View style={{ paddingHorizontal: 13, paddingBottom: 13, gap: 10, borderTopWidth: 1, borderTopColor: palette.line }}>
-          {known.length > 0 ? (
-            <View style={{ gap: 4, marginTop: 10 }}>
-              <Text style={[Type.bodySm, { color: palette.muted }]}>What Grove knows</Text>
-              {known.map((fact, i) => (
-                <Text key={i} style={[Type.body, { color: palette.ink }]}>{`\u2022 ${fact.text}`}</Text>
-              ))}
-            </View>
-          ) : null}
-
-          {episodes.length > 0 ? (
-            <View style={{ gap: 4 }}>
-              <Text style={[Type.bodySm, { color: palette.muted }]}>History</Text>
-              {episodes.slice(0, 10).map((episode) => (
-                <Pressable
-                  key={episode.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Delete ${episode.title}`}
-                  onLongPress={() => onForgetEpisode(episode.id)}
-                  style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
-                >
-                  <Text style={[Type.bodySm, { color: palette.inkSoft }]}>
-                    {`${shortDate(episode.at)} · ${episode.title}${episode.open ? ' (outstanding)' : ''}`}
-                  </Text>
-                </Pressable>
-              ))}
-              <Text style={[Type.bodySm, { color: palette.muted }]}>Hold a line to delete it.</Text>
-            </View>
-          ) : null}
-
-          {stale.length > 0 ? (
-            <View style={{ gap: 4 }}>
-              <Text style={[Type.bodySm, { color: palette.muted }]}>No longer true</Text>
-              {stale.map((fact, i) => (
-                <Text key={i} style={[Type.bodySm, { color: palette.muted }]}>{`\u2022 ${fact.text}`}</Text>
-              ))}
-            </View>
-          ) : null}
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Forget ${entity.name}`}
-            onPress={onForget}
-            hitSlop={6}
-            style={({ pressed }) => ({ paddingVertical: 6, opacity: pressed ? 0.5 : 1 })}
-          >
-            <Text style={[Type.bodySm, { color: palette.alert }]}>Forget {entity.name}</Text>
-          </Pressable>
-        </View>
-      ) : null}
+      {known.slice(0, 6).map((f, i) => (
+        <Text
+          key={`${f.text}-${i}`}
+          style={[Type.bodySm, { color: palette.inkSoft, marginTop: i === 0 ? 8 : 3 }]}
+        >
+          {f.text}
+        </Text>
+      ))}
+      {stale.slice(0, 2).map((f, i) => (
+        <Text
+          key={`stale-${f.text}-${i}`}
+          style={[
+            Type.bodySm,
+            { color: palette.muted, marginTop: 3, textDecorationLine: 'line-through' },
+          ]}
+        >
+          {f.text}
+        </Text>
+      ))}
     </Card>
   );
 }
 
-function EpisodeRow({
-  episode,
-  names,
-  onForget,
-}: {
-  episode: LifeEpisode;
-  names: string[];
-  onForget: () => void;
-}) {
+function EpisodeRow({ episode, names }: { episode: LifeEpisode; names: string[] }) {
   const palette = usePalette();
   return (
     <Card style={{ marginBottom: 6 }}>
@@ -498,26 +402,8 @@ function EpisodeRow({
             <Text style={[Type.bodySm, { color: palette.inkSoft, marginTop: 4 }]}>{episode.summary}</Text>
           ) : null}
         </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Delete ${episode.title}`}
-          onPress={onForget}
-          hitSlop={8}
-          style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1, paddingTop: 2 })}
-        >
-          <Text style={[Type.bodySm, { color: palette.alert }]}>Delete</Text>
-        </Pressable>
       </View>
     </Card>
   );
 }
 
-function Detail({ label, children }: { label: string; children: string }) {
-  const palette = usePalette();
-  return (
-    <View style={{ marginTop: 14 }}>
-      <Mono style={{ marginBottom: 3 }}>{label}</Mono>
-      <Text style={[Type.bodySm, { color: palette.ink, lineHeight: 19 }]}>{children}</Text>
-    </View>
-  );
-}

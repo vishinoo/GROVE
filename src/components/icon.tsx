@@ -37,7 +37,13 @@ const STROKE: Partial<Record<IconName, { d: string; w?: number }>> = {
   // listening, and a mic glyph reads as "you are being recorded".
   talk: { d: 'M3 10.5v3M7.5 6v12M12 3v18M16.5 7.5v9M21 10.5v3', w: 2 },
   tools: { d: 'M14.5 3.5l6 6-3 3-6-6 3-3zM10 9l5 5-7.5 7.5-5-5L10 9z', w: 1.8 },
-  plug: { d: 'M9 3v6M15 3v6M6 9h12v3a6 6 0 0 1-12 0V9zM12 18v3', w: 1.8 },
+  // Two links, not a plug. A plug is a thing you push into a wall once; what
+  // this screen is about is two things joined and staying joined, which is
+  // what a chain link has always meant.
+  plug: {
+    d: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
+    w: 1.8,
+  },
   settings: { d: 'M4 7h16M4 12h16M4 17h16M9 4.5v5M16 9.5v5M7 14.5v5', w: 1.8 },
   check: { d: 'M4 12.5l5.5 5.5L20 6.5', w: 2.2 },
   plus: { d: 'M12 5v14M5 12h14', w: 2.2 },

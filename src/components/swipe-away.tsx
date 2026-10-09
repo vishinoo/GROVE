@@ -9,12 +9,11 @@
  *
  * THREE DECISIONS WORTH WRITING DOWN
  *
- * **It pulls right, not left.** iOS convention is leftward for destructive, and
- * this is deliberately the other way: leftward swipes on a scrolling list are
- * already spoken for by the system back gesture at the screen edge, and a
- * memory row is not a mail row — getting rid of one is ordinary rather than
- * dangerous, because anything deleted here Grove simply learns again if it
- * matters.
+ * **It pulls left, the way every list on this phone does.** It used to pull
+ * right, to stay clear of the system back gesture — but that gesture starts at
+ * the left edge and travels right, so a leftward drag never meets it, and the
+ * only thing the inversion achieved was making the gesture everyone already
+ * has do nothing.
  *
  * **It commits on release past a threshold, not on a second tap.** A
  * confirmation dialog for deleting "wake up around 07:30" is more ceremony than
@@ -71,19 +70,19 @@ export function SwipeAway({
   }, [label, onDelete]);
 
   const pan = Gesture.Pan()
-    .activeOffsetX([-9999, START_AT])
+    .activeOffsetX([-START_AT, 9999])
     .failOffsetY([-10, 10])
     .onChange((event) => {
-      // Rightward only. A leftward drag belongs to the list and to the system
-      // back gesture, and fighting either one makes the screen feel broken.
-      x.value = Math.max(0, x.value + event.changeX);
+      // Leftward only. A rightward drag belongs to the list and, at the screen
+      // edge, to the system back gesture.
+      x.value = Math.min(0, x.value + event.changeX);
     })
     .onEnd(() => {
-      if (x.value < commitAt) {
+      if (-x.value < commitAt) {
         x.value = withTiming(0, { duration: 180, easing: Easing.out(Easing.cubic) });
         return;
       }
-      x.value = withTiming(width, { duration: 160, easing: Easing.in(Easing.cubic) });
+      x.value = withTiming(-width, { duration: 160, easing: Easing.in(Easing.cubic) });
       gone.value = withTiming(1, { duration: 200 }, (done) => {
         if (done) runOnJS(finish)();
       });
@@ -110,7 +109,7 @@ export function SwipeAway({
   }));
 
   const behind = useAnimatedStyle(() => ({
-    opacity: Math.min(1, x.value / Math.max(commitAt, 1)),
+    opacity: Math.min(1, -x.value / Math.max(commitAt, 1)),
   }));
 
   return (
@@ -139,8 +138,9 @@ export function SwipeAway({
               borderColor: palette.line,
               flexDirection: 'row',
               alignItems: 'center',
+              justifyContent: 'flex-end',
               gap: 8,
-              paddingLeft: 16,
+              paddingRight: 16,
             },
           ]}
         >
@@ -153,7 +153,7 @@ export function SwipeAway({
             style={row}
             accessible
             accessibilityLabel={label}
-            accessibilityHint="Swipe right to forget this"
+            accessibilityHint="Swipe left to forget this"
             accessibilityActions={[{ name: 'magicTap', label: 'Forget' }]}
             onAccessibilityAction={(event) => {
               if (event.nativeEvent.actionName === 'magicTap') finish();

@@ -761,6 +761,21 @@ section('What it did, and what it still owes');
   const screen = fs.readFileSync(path.join(ROOT, 'src/app/(app)/sparks.tsx'), 'utf8');
 
   check(!/<Folding/.test(screen), 'nothing on it is collapsed by default');
+
+  /*
+   * Deleting a memory is a swipe, and nothing else.
+   *
+   * Each row also had a disclosure — tap for where the fact came from, when it
+   * was first known, and a Forget link — which was a panel of metadata about a
+   * sentence already on screen. The gesture everyone has does the deleting;
+   * the tap does the one thing the panel was for, which is correcting a
+   * misheard name.
+   */
+  check(!/Forget this/.test(screen), 'no row carries its own forget link');
+  check(!/>Delete</.test(screen), 'nor a delete link');
+  const swipe = fs.readFileSync(path.join(ROOT, 'src/components/swipe-away.tsx'), 'utf8');
+  check(/Math\.min\(0, x\.value \+ event\.changeX\)/.test(swipe), 'rows pull left, the way every list does');
+  check(/Swipe left to forget/.test(swipe), 'and say so to a screen reader');
   check(/<Peek label="What it did" show=\{5\}>/.test(screen), 'the action log shows five before the rest');
   check(/entry\.tool\)/.test(screen), 'and only exchanges that actually did something');
   check(/still going/.test(screen), 'something still running says so');
