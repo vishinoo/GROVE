@@ -13,6 +13,7 @@ import Svg, { Circle, Path, Rect } from 'react-native-svg';
 export type IconName =
   | 'talk'
   | 'tools'
+  | 'map'
   | 'plug'
   | 'settings'
   | 'glasses'
@@ -116,6 +117,26 @@ export function Icon({
           strokeWidth={1.7}
           fill="none"
         />
+      </Svg>
+    );
+  }
+
+  // Three nodes and the edges between them: the Sparks tab opens on a map
+  // of what Grove is holding, and a sparkle said "magic happens here",
+  // which is the opposite of what that screen is for.
+  if (name === 'map') {
+    return (
+      <Svg width={size} height={size} viewBox="0 0 24 24">
+        <Path
+          d="M8 6.8 17 9.2M8 6.8 10.4 17.4M17 9.2 10.4 17.4"
+          stroke={color}
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          fill="none"
+        />
+        <Circle cx="8" cy="6.8" r="2.3" fill={color} />
+        <Circle cx="17" cy="9.2" r="1.8" fill={color} />
+        <Circle cx="10.4" cy="17.4" r="1.8" fill={color} />
       </Svg>
     );
   }

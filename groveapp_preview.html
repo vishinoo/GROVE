@@ -3,1265 +3,1627 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Grove — preview</title>
+<title>Grove — interface</title>
+<meta name="description" content="A design sandbox for Grove: a sunset that listens.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@200;300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-/* ---------------------------------------------------------------------
-   Grove preview — white, soft, icon-led.
-   One typeface. Colour appears in exactly two places: the voice blob,
-   and the gradient fills on brand marks. Everything else is ink on white.
-   --------------------------------------------------------------------- */
+/* =====================================================================
+   GROVE — interface sandbox
+
+   ONE SURFACE, AND IT IS THE PRODUCT
+
+   Grove is heard, not watched. The screen is a double-checker: you open
+   it, see what it did, and close it. So it has one moving element and
+   everything else holds still.
+
+   That element is a sky. The top of the screen is a field of colour —
+   dusk over water, cool at altitude and burning at the horizon — and its
+   lower edge is not a line but a wave of grains, dissolving into the
+   paper underneath. The horizon rises when Grove is listening and sinks
+   when it is not. Nothing else in the app animates.
+
+   WHY A HORIZON AND NOT A SPHERE OR A BAR
+
+   A sphere is a thing you look AT, and an audio bar is a readout. A
+   horizon is read in one glance from across a room, which is the
+   relationship this app wants: you are wearing it, you are walking, and
+   you want to know whether it heard you without reading anything.
+
+   TEXT IS THE LAST RESORT
+
+   Every row that could be an icon is an icon. The connection rows use
+   the real home-screen tiles, because nobody needs telling what the
+   green speech bubble is. Nothing explains a gesture the rest of the
+   phone already taught.
+   ===================================================================== */
+
 :root{
-  --page:#F4F5F7;      /* the ground the cards sit on */
-  --card:#FFFFFF;
-  --ink:#16181D;
-  --ink-soft:#5B6069;
-  --muted:#9096A0;
-  --line:#E8EAEE;
-  --line-soft:#F0F1F4;
-  --field:#F6F7F9;
+  /* Night water, for the page the phones sit on. */
+  --deep:#06070B;
 
-  /* the blob, and the icon gradients drawn from it */
-  --g1:#5EEAD4; --g2:#7DD3FC; --g3:#A5B4FC;
-  --g4:#C4B5FD; --g5:#F9A8D4; --g6:#86EFAC;
+  /* Dusk. Cool at altitude, burning at the horizon — the gradient every
+     sky on this page is cut from. */
+  --pale:#D9DEEC;
+  --dusk:#A9B2D4;
+  --haze:#8A8FB8;
+  --plum:#6E6490;
+  --amber:#F3A063;
+  --ember:#DC5F38;
 
-  --r-sm:10px; --r-md:14px; --r-lg:20px; --r-xl:28px;
+  /* Dawn, for daylight: cold light before the sun is up. The sunset
+     belongs to night, where it earns its keep; teal read as a holiday
+     brochure and was the loudest thing on a screen whose job is quiet. */
+  --ice:#E8EDF7;
+  --peri:#BEC8E8;
+  --iris:#929CD2;
+  --slate:#686EB0;
+  --abyss:#4A4C8C;
 
-  /* 4/8 rhythm */
-  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; --s8:64px;
+  /* One accent, for a press that commits and nothing else. */
+  --go-a:#7DD3FC;
+  --go-b:#A5B4FC;
+  --on-go:#0C1030;
 
-  --font:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  /* Data colours. These never appear in a sky — a palette that doubles
+     as the status stops telling you anything. */
+  --mint:#5EEAD4;
+  --sky:#7DD3FC;
+  --indigo:#A5B4FC;
+  --violet:#C4B5FD;
+  --green:#86EFAC;
+  --coral:#F0836A;
+
+  --on-deep:#EDF0F5;
+  --on-deep-2:rgba(237,240,245,.62);
+  --on-deep-3:rgba(237,240,245,.44);
+
+  --body:"Inter Tight",system-ui,-apple-system,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+
+  --s1:4px;  --s2:8px;  --s3:12px; --s4:16px;
+  --s5:24px; --s6:32px; --s7:48px; --s8:72px;
 }
 
 *{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
 body{
-  margin:0;background:var(--page);color:var(--ink);
-  font-family:var(--font);font-size:16px;line-height:1.55;
-  letter-spacing:-0.011em;
-  -webkit-font-smoothing:antialiased;
+  margin:0;background:var(--deep);color:var(--on-deep);
+  font-family:var(--body);font-size:16px;line-height:1.5;
+  letter-spacing:-.012em;-webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
 }
 .sprite{position:absolute;width:0;height:0;overflow:hidden}
-.wrap{max-width:1140px;margin:0 auto;padding:0 var(--s5)}
-.measure{max-width:60ch}
+.wrap{max-width:1180px;margin:0 auto;padding:0 var(--s5)}
 
-/* ------------------------------------------------------------ masthead */
+/* ------------------------------------------------------------- water */
+
+.water{
+  position:fixed;inset:-24vmax;z-index:0;pointer-events:none;
+  filter:blur(100px) saturate(1.2);
+  transform:translate3d(calc((var(--mx,.5) - .5) * -34px),calc((var(--my,.4) - .5) * -24px),0);
+  transition:transform 1.1s cubic-bezier(.2,.7,.2,1);
+}
+.water i{position:absolute;border-radius:50%;mix-blend-mode:screen}
+.water .w1{width:64vmax;height:64vmax;left:-6%;top:-14%;background:radial-gradient(circle,var(--plum),transparent 66%);opacity:.5;animation:sw1 31s ease-in-out infinite}
+.water .w2{width:58vmax;height:58vmax;left:40%;top:-8%;background:radial-gradient(circle,var(--haze),transparent 66%);opacity:.4;animation:sw2 41s ease-in-out infinite}
+.water .w3{width:50vmax;height:50vmax;left:22%;top:46%;background:radial-gradient(circle,var(--ember),transparent 66%);opacity:.2;animation:sw3 47s ease-in-out infinite}
+@keyframes sw1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(9vmax,7vmax) scale(1.12)}}
+@keyframes sw2{0%,100%{transform:translate(0,0) scale(1.08)}50%{transform:translate(-8vmax,8vmax) scale(.94)}}
+@keyframes sw3{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(8vmax,-7vmax) scale(1.1)}}
+
+.shade{
+  position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:
+    radial-gradient(120% 70% at 50% 0%,transparent 0%,rgba(6,7,11,.34) 56%,rgba(6,7,11,.82) 100%),
+    linear-gradient(180deg,transparent 0%,rgba(6,7,11,.22) 40%,rgba(6,7,11,.7) 100%);
+}
+.above{position:relative;z-index:2}
+
+/* -------------------------------------------------------------- type */
+
+/* One family at four weights. A second display face would be a third
+   voice in a design working hard to have one. */
+h1,h2{font-weight:200;margin:0;letter-spacing:-.045em;line-height:1.02}
+h1{font-size:clamp(46px,8.4vw,108px)}
+h2{font-size:clamp(27px,3.8vw,44px)}
+p{margin:0}
+a{color:inherit}
+.mono{font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:var(--on-deep-3)}
+:focus-visible{outline:2px solid var(--amber);outline-offset:3px;border-radius:6px}
+.screen :focus-visible{outline-color:#101418}
+
+/* ---------------------------------------------------------- masthead */
 
 .masthead{display:flex;align-items:center;justify-content:space-between;padding:var(--s5) 0 0}
-.wordmark{display:flex;align-items:center;gap:var(--s2);font-weight:600;font-size:17px}
-.masthead .where{font-size:13px;color:var(--muted)}
+.wordmark{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:500;letter-spacing:-.02em}
+.wordmark svg{width:17px;height:17px;color:var(--amber)}
 
-/* ---------------------------------------------------------------- hero */
+/* -------------------------------------------------------------- hero */
 
-.hero{padding:var(--s8) 0 var(--s6);text-align:center}
-h1{
-  font-size:clamp(34px,5.4vw,56px);font-weight:700;
-  line-height:1.06;letter-spacing:-0.035em;
-  margin:0 auto var(--s4);max-width:17ch;
+.hero{padding:var(--s7) 0 var(--s6);text-align:center}
+.hero h1{max-width:12ch;margin:0 auto}
+
+/* The sky. Dusk above, grains below, and the horizon is the state.
+   Full width, and faded at both ends — a sky that stops at a vertical
+   edge is a rectangle with a gradient in it. */
+.sea{
+  position:relative;width:100vw;left:50%;margin-left:-50vw;
+  height:272px;margin-top:var(--s5);
+  cursor:grab;touch-action:none;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 14%,#000 86%,transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 14%,#000 86%,transparent);
 }
-.standfirst{
-  font-size:clamp(16px,1.8vw,18.5px);line-height:1.6;color:var(--ink-soft);
-  margin:0 auto;max-width:54ch;
+.sea canvas{display:block;width:100%;height:100%}
+
+.state{display:flex;align-items:center;justify-content:center;gap:11px;min-height:24px}
+.state b{font-weight:500;font-size:15px;letter-spacing:-.015em}
+
+/* ------------------------------------------------------------- bands */
+
+.band{padding:var(--s8) 0 0}
+.band h2{max-width:20ch}
+
+/* -------------------------------------------------------------- rail */
+
+.rail{
+  display:flex;gap:var(--s6);
+  margin:var(--s7) calc(var(--s5) * -1) 0;
+  padding:0 var(--s5) var(--s6);
+  overflow-x:auto;scroll-snap-type:x proximity;scrollbar-width:none;
 }
+.rail::-webkit-scrollbar{display:none}
+.bay{flex:0 0 auto;scroll-snap-align:center;width:302px;display:grid;gap:var(--s3);margin:0}
+.bay figcaption{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.bay figcaption b{font-weight:500;font-size:16px;letter-spacing:-.02em}
 
-/* -------------------------------------------------------------- the orb */
-
-.orb-card{
-  background:var(--card);border-radius:var(--r-xl);
-  padding:var(--s7) var(--s5) var(--s5);
-  max-width:380px;margin:var(--s7) auto 0;
-  box-shadow:0 1px 2px rgba(22,24,29,.04),0 8px 30px rgba(22,24,29,.06);
-  text-align:center;
-}
-
-.orb{
-  position:relative;width:230px;height:230px;margin:0 auto;
-  display:grid;place-items:center;
-}
-/* Four blurred lobes drifting independently — reads as one soft mass that
-   keeps changing colour, rather than a wheel being spun. */
-.lobe{
-  position:absolute;border-radius:50%;
-  filter:blur(30px);opacity:.85;
-  will-change:transform;
-}
-.l1{width:150px;height:150px;background:var(--g1);animation:d1 11s ease-in-out infinite}
-.l2{width:140px;height:140px;background:var(--g3);animation:d2 13s ease-in-out infinite}
-.l3{width:130px;height:130px;background:var(--g5);animation:d3 17s ease-in-out infinite}
-.l4{width:145px;height:145px;background:var(--g6);animation:d4 15s ease-in-out infinite}
-
-@keyframes d1{0%,100%{transform:translate(-26px,-20px) scale(1)}33%{transform:translate(24px,14px) scale(1.14)}66%{transform:translate(-8px,26px) scale(.92)}}
-@keyframes d2{0%,100%{transform:translate(24px,-16px) scale(1.06)}33%{transform:translate(-20px,20px) scale(.9)}66%{transform:translate(14px,24px) scale(1.12)}}
-@keyframes d3{0%,100%{transform:translate(10px,24px) scale(.94)}33%{transform:translate(-24px,-14px) scale(1.12)}66%{transform:translate(20px,-20px) scale(1)}}
-@keyframes d4{0%,100%{transform:translate(-18px,16px) scale(1.1)}33%{transform:translate(18px,-22px) scale(.94)}66%{transform:translate(-22px,-6px) scale(1.06)}}
-
-.orb-caption{
-  color:var(--ink-soft);font-size:15px;line-height:1.55;
-  margin:var(--s5) auto 0;max-width:34ch;
-}
-.orb-controls{display:flex;justify-content:space-between;margin-top:var(--s6)}
-.round{
-  width:52px;height:52px;border-radius:50%;border:0;
-  background:var(--field);color:var(--ink);
-  display:grid;place-items:center;cursor:pointer;
-  transition:background-color .18s ease,opacity .18s ease;
-}
-.round:hover{background:#EDEFF2}
-.round:active{opacity:.7}
-.round:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
-.round.primary{background:var(--ink);color:#fff}
-.round.primary:hover{background:#2A2D34}
-
-.state-line{
-  font-size:13px;color:var(--muted);margin-top:var(--s4);
-  font-variant-numeric:tabular-nums;
-}
-
-/* ------------------------------------------------------------ sections */
-
-section{padding:var(--s8) 0;border-top:1px solid var(--line)}
-.section-head{margin-bottom:var(--s7);max-width:62ch}
-.section-head h2{
-  font-size:clamp(24px,3vw,32px);font-weight:700;
-  letter-spacing:-0.03em;line-height:1.15;margin:0 0 var(--s3);
-}
-.section-head p{margin:0;color:var(--ink-soft);font-size:16.5px;line-height:1.6}
-
-/* -------------------------------------------------------- phone frames */
-
-.screens{
-  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
-  gap:var(--s8) var(--s7);
-}
-@media (max-width:760px){.screens{grid-template-columns:1fr}}
+/* ------------------------------------------------------------- phone */
 
 .phone{
-  width:100%;max-width:308px;aspect-ratio:308/598;
-  background:var(--card);border-radius:34px;padding:8px;
-  box-shadow:0 1px 2px rgba(22,24,29,.04),0 10px 34px rgba(22,24,29,.07);
+  position:relative;width:302px;height:636px;border-radius:46px;padding:9px;
+  background:linear-gradient(170deg,rgba(255,255,255,.18),rgba(255,255,255,.03) 48%,rgba(255,255,255,.08));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.3),
+    inset 0 -1px 0 rgba(0,0,0,.45),
+    0 30px 70px -22px rgba(0,0,0,.8);
+  transform-style:preserve-3d;
+  transition:transform .5s cubic-bezier(.2,.8,.2,1);
 }
-.viewport{
-  height:100%;border-radius:27px;background:var(--card);
-  padding:16px 15px 11px;display:flex;flex-direction:column;
-  font-size:11px;line-height:1.45;overflow:hidden;
+.phone::before{
+  content:"";position:absolute;left:50%;top:9px;transform:translateX(-50%);
+  width:70px;height:5px;border-radius:999px;background:rgba(0,0,0,.5);z-index:6;
 }
-.screen-note{max-width:360px}
-.screen-note h3{font-size:18px;font-weight:600;letter-spacing:-.02em;margin:var(--s5) 0 var(--s2)}
-.screen-note p{margin:0;color:var(--ink-soft);font-size:14.5px;line-height:1.55}
 
-/* ------------------------------------------------- in-phone primitives */
-
-.s-title{font-size:19px;font-weight:700;letter-spacing:-.03em;margin:0 0 3px}
-.s-sub{font-size:10.5px;color:var(--muted);line-height:1.5;margin:0 0 14px}
-.s-label{font-size:9.5px;font-weight:600;color:var(--muted);margin:0 0 7px;letter-spacing:.01em}
-
-/* the Noctus card: hairline, white, icon-led, no chip behind the icon */
-.ncard{
-  display:flex;align-items:center;gap:10px;
-  padding:10px 11px;border-radius:var(--r-md);
-  border:1px solid var(--line);background:var(--card);
+/* Light is the default. Night is the variant, not the other way round. */
+.screen{
+  position:relative;width:100%;height:100%;
+  border-radius:38px;overflow:hidden;
+  display:flex;flex-direction:column;
+  background:var(--paper);color:var(--ink);
+  --paper:#F7F8FA;--raised:#FFFFFF;--sunken:#F0F2F5;
+  --ink:#101418;--ink-soft:#555C66;
+  /* The app ships #9096A0, which is 3.0:1 on white and fails at the size
+     it is used at. This is 4.7:1 and otherwise identical in feel. */
+  --muted:#6E7480;
+  --line:#E7E9ED;--signal:#22C55E;--alert:#E0913C;
 }
-.ncard + .ncard{margin-top:6px}
-.ncard .body{flex:1;min-width:0}
-.ncard .t{font-size:11px;font-weight:600;line-height:1.3}
-.ncard .d{font-size:9.5px;color:var(--muted);line-height:1.4;margin-top:1px}
+.screen.night{
+  background:#07090D;color:#F2F4F7;
+  --paper:#07090D;--raised:#13171D;--sunken:#0E1116;
+  --ink:#F2F4F7;--ink-soft:#A8AFB9;--muted:#8A909C;--line:#1F242B;
+  --signal:#4ADE80;--alert:#FBBF24;
+}
 
-.gicon{width:22px;height:22px;flex:none;display:block}
-.gicon.sm{width:19px;height:19px}
+/* The sky sits behind the scrolling content and never scrolls with it,
+   so the horizon stays where your eye expects it. */
+.sky{position:absolute;left:0;right:0;top:0;height:250px;z-index:0;pointer-events:none}
+.sky canvas{display:block;width:100%;height:100%}
 
-/* App icons: the real thing — a colourful tile with a white glyph on top,
-   the way the icon looks on your home screen. */
-.appicon{
-  width:30px;height:30px;border-radius:9px;flex:none;
-  display:grid;place-items:center;
-  box-shadow:inset 0 0 0 .5px rgba(0,0,0,.06);
-}
-.appicon svg{width:18px;height:18px;display:block;fill:#fff}
-.appicon.sm{width:22px;height:22px;border-radius:6.5px}
-.appicon.sm svg{width:13px;height:13px}
+/* Screens with no sky get the same light, blurred, so the four still
+   read as one family. */
+.tide{position:absolute;left:-30%;right:-30%;top:-36%;height:58%;z-index:0;pointer-events:none;filter:blur(48px);opacity:.52}
+.t2{background:radial-gradient(58% 58% at 26% 62%,var(--peri),transparent 70%),radial-gradient(58% 58% at 76% 56%,var(--iris),transparent 72%)}
+.t3{background:radial-gradient(58% 58% at 34% 60%,var(--iris),transparent 70%),radial-gradient(58% 58% at 72% 60%,var(--ice),transparent 70%)}
+.t4{background:radial-gradient(58% 58% at 28% 58%,var(--peri),transparent 70%),radial-gradient(58% 58% at 74% 58%,var(--slate),transparent 70%)}
 
-.ai-music     {background:linear-gradient(160deg,#FC5C7D,#F62E52)}
-.ai-messages  {background:linear-gradient(160deg,#6FE87B,#1FC24A)}
-.ai-maps      {background:linear-gradient(160deg,#5BC8FA,#2A8CF0)}
-.ai-photos    {background:linear-gradient(160deg,#FDD35C,#F76B8A 55%,#8A63F5)}
-.ai-reminders {background:linear-gradient(160deg,#FF9E62,#FB4E3D)}
-.ai-home      {background:linear-gradient(160deg,#FFC64D,#FF8A28)}
-.ai-notes     {background:linear-gradient(160deg,#FFDE73,#FFB92E)}
-.ai-podcasts  {background:linear-gradient(160deg,#C08BFA,#7B3FE4)}
-.ai-googlecalendar{background:linear-gradient(160deg,#5B9BFF,#2F6BE0)}
-.ai-whatsapp  {background:linear-gradient(160deg,#5DF07D,#1EBE55)}
-.ai-gmail     {background:linear-gradient(160deg,#FF7B6B,#E8342A)}
+.pane{
+  position:relative;z-index:1;flex:1;min-height:0;
+  overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none;
+  padding:44px 16px 88px;
+  display:flex;flex-direction:column;gap:13px;
+}
+.pane::-webkit-scrollbar{display:none}
+/* Children of an overflowing column shrink by default, which silently
+   crushes anything with no in-flow content — a canvas, for one. */
+.pane > *{flex:0 0 auto}
+.pane.under-sky{padding-top:168px}
 
-.act{
-  height:26px;padding:0 11px;border-radius:8px;border:0;
-  font-family:inherit;font-size:10px;font-weight:600;
-  background:var(--ink);color:#fff;cursor:pointer;flex:none;
-}
-.act.ghost{background:transparent;color:var(--ink-soft);border:1px solid var(--line)}
-.iconbtn{
-  width:26px;height:26px;border-radius:8px;flex:none;
-  display:grid;place-items:center;border:1px solid var(--line);
-  background:var(--card);color:var(--ink-soft);cursor:pointer;
-}
-.iconbtn.solid{background:var(--ink);border-color:var(--ink);color:#fff}
+/* ---------------------------------------------- the status dot & bar */
 
-/* A spark is a standing job, not an app — so the card carries a schedule
-   line and the connections it draws on, and every card is the same height. */
-.spark{
-  border:1px solid var(--line);border-radius:var(--r-md);
-  padding:11px;background:var(--card);
+/* One dot, not two badges. Everything being fine is the usual case and
+   deserves the least ink on the screen; the detail is one tap away. */
+.hw{position:absolute;left:0;right:0;top:11px;z-index:5;display:grid;justify-items:center;gap:7px}
+.hw .pip{
+  width:30px;height:30px;border-radius:50%;border:0;padding:0;cursor:pointer;
+  background:none;display:grid;place-items:center;
 }
-.spark + .spark{margin-top:7px}
-.spark .top{display:flex;align-items:flex-start;gap:9px}
-.spark .t{font-size:11.5px;font-weight:600;line-height:1.3;flex:1}
-.spark .o{font-size:9.5px;color:var(--muted);line-height:1.45;margin-top:2px}
-.spark .foot{
-  display:flex;align-items:center;gap:6px;margin-top:9px;
-  padding-top:9px;border-top:1px solid var(--line-soft);
+.hw .pip i{
+  width:7px;height:7px;border-radius:50%;background:#fff;
+  box-shadow:0 0 0 4px rgba(255,255,255,.24),0 1px 3px rgba(0,0,0,.35);
+  transition:transform .25s cubic-bezier(.3,1.4,.5,1);
 }
-.spark .when{
-  font-size:9px;color:var(--ink-soft);font-weight:500;
-  display:flex;align-items:center;gap:4px;flex:1;
+.hw .pip[aria-expanded="true"] i{transform:scale(.55)}
+.hw .bar{
+  display:flex;align-items:center;gap:9px;
+  height:0;opacity:0;overflow:hidden;padding:0 13px;border-radius:999px;
+  background:rgba(255,255,255,.64);
+  border:1px solid rgba(255,255,255,.78);
+  box-shadow:0 6px 20px -10px rgba(16,20,24,.5);
+  backdrop-filter:blur(22px) saturate(1.8);
+  -webkit-backdrop-filter:blur(22px) saturate(1.8);
+  transition:height .28s cubic-bezier(.3,1.1,.4,1),opacity .2s;
 }
-.spark .needs{display:flex;gap:3px}
+.hw.open .bar{height:34px;opacity:1}
+.hw .bar svg{width:17px;height:17px;color:#101418}
+.hw .bar span{font-size:11.5px;color:#101418;white-space:nowrap}
+.hw .bar em{font-style:normal;color:#6E7480}
+.screen.night .hw .bar{background:rgba(18,22,28,.6);border-color:rgba(255,255,255,.14)}
+.screen.night .hw .bar svg,.screen.night .hw .bar span{color:#F2F4F7}
+.screen.night .hw .bar em{color:#8A909C}
 
-/* First run. Each step is one decision or one thing to go and do, and the
-   ring step proves the hardware works before you are asked to trust it. */
-.ob{display:flex;flex-direction:column;height:100%}
-.ob .skip{text-align:right;font-size:10px;color:var(--muted)}
-.ob .mid{flex:1;display:flex;flex-direction:column;justify-content:center;padding:6px 0}
-.ob h4{font-size:19px;font-weight:700;letter-spacing:-.03em;line-height:1.2;margin:14px 0 7px}
-.ob p{margin:0;font-size:10.5px;line-height:1.6;color:var(--ink-soft)}
-.ob .todo{
-  margin-top:12px;padding:10px 11px;border-radius:var(--r-md);
-  background:var(--field);border:1px solid var(--line);
-  font-size:10px;line-height:1.55;color:var(--ink);
-}
-.ob .dots{display:flex;gap:5px;justify-content:center;margin-bottom:11px}
-.ob .dots i{width:5px;height:5px;border-radius:3px;background:var(--line);display:block}
-.ob .dots i.on{width:17px;background:var(--ink)}
-.btn-wide{
-  width:100%;height:36px;border-radius:var(--r-md);border:0;
-  background:var(--ink);color:#fff;font-family:inherit;
-  font-size:12px;font-weight:600;cursor:pointer;
-}
-.sig{
-  display:flex;align-items:center;gap:7px;padding:6px 0;
-  border-top:1px solid var(--line-soft);font-size:9.5px;
-}
-.sig:first-child{border-top:0}
-.sig .cmd{flex:1;color:var(--ink);font-weight:500}
-.sig .tag{color:var(--muted);font-size:8.5px}
+/* ----------------------------------------------------- screen pieces */
 
-.pipe{height:1px;background:var(--line-soft);margin:12px 0}
-.grow{flex:1;min-height:0}
+.title{font-size:27px;font-weight:200;letter-spacing:-.04em;line-height:1;color:var(--ink)}
+.lbl{font-family:var(--mono);font-size:9.5px;font-weight:500;letter-spacing:.14em;color:var(--muted);margin:8px 0 -2px}
 
-/* the dock — real vector icons, never glyph characters */
+/* The panel, from the second reference: one box, hairline rows, no
+   shadow stack. A card per item made every list look like a pile. */
+.panel{background:var(--raised);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.panel > .r{display:flex;align-items:center;gap:11px;padding:12px 14px}
+.panel > .r + .r{border-top:1px solid var(--line)}
+.panel.quiet{background:transparent}
+
+.card{background:var(--raised);border:1px solid var(--line);border-radius:16px;padding:12px 13px}
+.card.glass{
+  border:0;
+  background:linear-gradient(150deg,rgba(255,255,255,.95),rgba(255,255,255,.78));
+  box-shadow:0 1px 2px rgba(16,20,24,.05),0 12px 28px -14px rgba(16,20,24,.26);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+}
+.screen.night .card.glass{
+  background:linear-gradient(150deg,rgba(255,255,255,.1),rgba(255,255,255,.03));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 14px 30px -16px rgba(0,0,0,.8);
+}
+
+/* A gradient header, the way the second reference opens a panel: the
+   image carries the mood and the rows underneath stay plain. */
+.hdr{height:96px;position:relative;background:linear-gradient(162deg,var(--peri),var(--iris) 42%,var(--slate) 82%,var(--abyss))}
+/* White on mid-teal is about 2.5:1. The scrim is what makes a label
+   legible on a gradient chosen for its colour, not its luminance. */
+.hdr::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 42%,rgba(20,10,8,.42))}
+.hdr .on-top{z-index:1}
+.hdr .on-top{position:absolute;left:14px;right:14px;bottom:11px;color:#fff}
+.hdr .on-top .n{font-size:28px;font-weight:200;letter-spacing:-.035em}
+/* Tap it and type. A name you cannot change is a label, not a name. */
+.nm{outline:none;border-bottom:1px dashed rgba(255,255,255,.5);padding-bottom:1px}
+.nm:focus{border-bottom-style:solid;border-bottom-color:#fff}
+
+.row{display:flex;align-items:center;gap:11px}
+.row .grow{flex:1;min-width:0}
+.hr{height:1px;background:var(--line);margin:10px -13px}
+.t{font-size:14px;font-weight:450;letter-spacing:-.012em;color:var(--ink);line-height:1.35}
+.d{font-size:11.5px;line-height:1.4;color:var(--muted);margin-top:2px}
+.d.ans{color:var(--ink-soft)}
+.v{font-size:13px;color:var(--ink-soft);font-variant-numeric:tabular-nums;white-space:nowrap}
+.big{font-size:21px;font-weight:200;letter-spacing:-.04em;color:var(--ink);font-variant-numeric:tabular-nums}
+.stack{display:flex;flex-direction:column;gap:7px}
+.dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:var(--muted);opacity:.45}
+.dot.on{background:var(--signal);opacity:1}
+.chev{width:13px;height:13px;color:var(--muted);flex:0 0 auto}
+
+/* The home-screen tile, which is what people actually recognise. A
+   monochrome outline of an app is a worse icon than the app's own. */
+.tile{
+  width:30px;height:30px;border-radius:9px;flex:0 0 auto;display:grid;place-items:center;
+  box-shadow:inset 0 0 0 .5px rgba(0,0,0,.08),0 1px 2px rgba(16,20,24,.14);
+}
+.tile svg{width:18px;height:18px;display:block;fill:#fff}
+.tile.sm{width:21px;height:21px;border-radius:6.5px}
+.tile.sm svg{width:13px;height:13px}
+.ic-google{background:#FFFFFF}
+.ic-google svg{width:17px;height:17px}
+.ic-music{background:linear-gradient(160deg,#FC5C7D,#F62E52)}
+.ic-messages{background:linear-gradient(160deg,#6FE87B,#1FC24A)}
+.ic-maps{background:linear-gradient(160deg,#5BC8FA,#2A8CF0)}
+.ic-reminders{background:linear-gradient(160deg,#FF9E62,#FB4E3D)}
+.glyph{width:17px;height:17px;flex:0 0 auto;color:var(--ink-soft)}
+
+/* One gradient control, kept for the press that commits something. */
+.pill{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  height:32px;padding:0 14px;border-radius:999px;
+  font-family:var(--body);font-size:13px;font-weight:500;
+  border:1px solid var(--line);background:var(--raised);color:var(--ink);cursor:pointer;
+}
+.pill.go{
+  border:0;color:var(--on-go);
+  background:linear-gradient(104deg,var(--go-a),var(--go-b));
+  box-shadow:0 6px 18px -8px rgba(125,163,252,.55);
+}
+.pill.wide{width:100%;height:42px;font-size:13.5px}
+.pill svg{width:13px;height:13px}
+.more{align-self:flex-start;font-family:var(--body);font-size:11.5px;color:var(--muted);background:none;border:0;padding:2px 0;cursor:pointer}
+.more:disabled{opacity:.5;cursor:default}
+.tag{font-family:var(--mono);font-size:9px;letter-spacing:.03em;padding:2px 6px;border-radius:999px;background:var(--sunken);color:var(--ink-soft)}
+
+.sw{width:40px;height:24px;border-radius:999px;background:var(--sunken);position:relative;flex:0 0 auto;border:1px solid var(--line)}
+.sw::after{content:"";position:absolute;left:3px;top:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.22)}
+.sw.on{background:linear-gradient(100deg,var(--go-a),var(--go-b));border-color:transparent}
+.sw.on::after{left:auto;right:3px}
+
+.said{text-align:center;font-size:15px;font-weight:500;color:var(--ink)}
+.heard{text-align:center;font-size:11.5px;color:var(--muted);margin-top:3px}
+.screen.night .said{color:#fff}
+
+/* --------------------------------------------------------- the dock */
+
+/* Glass, and the current tab is a bubble that travels to whatever you
+   tap next — the thing that makes a tab bar feel like one object rather
+   than four buttons. */
 .dock{
-  margin-top:auto;display:flex;gap:2px;
-  border-top:1px solid var(--line-soft);padding-top:9px;
+  position:absolute;left:18px;right:18px;bottom:13px;z-index:4;
+  height:52px;border-radius:999px;
+  display:flex;align-items:center;justify-content:space-around;
+  background:rgba(255,255,255,.58);
+  border:1px solid rgba(255,255,255,.72);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 8px 24px -10px rgba(16,20,24,.34);
+  backdrop-filter:blur(28px) saturate(1.9);
+  -webkit-backdrop-filter:blur(28px) saturate(1.9);
+}
+.screen.night .dock{
+  background:rgba(14,18,23,.5);border-color:rgba(255,255,255,.12);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 10px 30px -12px rgba(0,0,0,.7);
+}
+.dock .bubble{
+  position:absolute;top:50%;left:0;width:38px;height:38px;border-radius:50%;margin-top:-19px;
+  background:rgba(255,255,255,.92);
+  box-shadow:0 2px 7px rgba(16,20,24,.16);
+  transition:transform .42s cubic-bezier(.34,1.25,.5,1);
+  pointer-events:none;
 }
 .dock a{
-  flex:1;text-align:center;font-size:8px;color:var(--muted);
-  text-decoration:none;display:block;
+  position:relative;z-index:1;display:grid;place-items:center;
+  width:42px;height:42px;border-radius:50%;color:var(--muted);text-decoration:none;
 }
-.dock a.on{color:var(--ink);font-weight:600}
-.dock svg{width:17px;height:17px;display:block;margin:0 auto 3px}
+.dock a svg{width:20px;height:20px}
+.dock a.on{color:var(--ink)}
+.screen.night .dock .bubble{background:rgba(255,255,255,.16);box-shadow:none}
+.screen.night .dock a.on{color:#fff}
 
-/* ------------------------------------------------ settings primitives */
+/* ---------------------------------------------------------- swipe row */
 
-.field{
-  background:var(--field);border:1px solid var(--line);
-  border-radius:var(--r-md);padding:10px 11px;
-  font-size:10.5px;line-height:1.5;
+.swipe{position:relative;border-radius:16px;touch-action:pan-y}
+.swipe .behind{
+  position:absolute;inset:0;border-radius:16px;background:var(--sunken);
+  display:flex;align-items:center;justify-content:flex-end;
+  padding-right:16px;color:#D9534F;opacity:0;
 }
-.field .ph{color:var(--muted)}
-.frow{display:flex;align-items:center;gap:10px;padding:11px 0}
-.frow + .frow{border-top:1px solid var(--line-soft)}
-.frow .k{flex:1;font-size:11px;font-weight:500}
-.frow .v{font-size:10.5px;color:var(--muted)}
-.switch{
-  width:34px;height:20px;border-radius:999px;background:var(--ink);
-  position:relative;flex:none;
+.swipe .behind svg{width:15px;height:15px}
+.swipe .front{position:relative;cursor:grab}
+.swipe.dragging .front{cursor:grabbing;transition:none}
+.swipe:not(.dragging) .front{transition:transform .22s cubic-bezier(.2,.8,.2,1)}
+
+/* -------------------------------------------------------- the brain */
+
+/* Sparks opens on everything Grove is holding, drawn as one disc rather
+   than listed. The title and the map stay put while the list runs under
+   them, because a map that scrolls away is a picture, not a control. */
+.pane.sparks{padding-top:0}
+.stop{
+  position:sticky;top:0;z-index:4;
+  margin:0 -16px;padding:34px 16px 8px;
+  background:var(--paper);
 }
-.switch::after{
-  content:"";position:absolute;top:2px;right:2px;
-  width:16px;height:16px;border-radius:50%;background:#fff;
+.stop::after,.lens::after{
+  content:"";position:absolute;left:0;right:0;top:100%;height:14px;
+  background:linear-gradient(180deg,var(--paper),transparent);pointer-events:none;
 }
-.stepper{display:flex;align-items:center;gap:6px}
-
-.dotm{width:6px;height:6px;border-radius:50%;flex:none;background:var(--muted)}
-.dotm.on{background:#22C55E}
-.dotm.warn{background:#F59E0B}
-
-/* ------------------------------------------------------------- limits */
-
-.limits{border-top:1px solid var(--line)}
-.limit{
-  display:grid;grid-template-columns:minmax(0,19ch) minmax(0,1fr);
-  gap:var(--s7);padding:var(--s5) 0;border-bottom:1px solid var(--line);
+.stop .title{margin-bottom:10px}
+.brain{
+  position:relative;height:152px;
+  touch-action:none;cursor:crosshair;
+  border-radius:18px;overflow:hidden;
+  background:
+    radial-gradient(90% 70% at 70% 12%,rgba(110,116,176,.45),transparent 70%),
+    linear-gradient(168deg,#161B2C,#0B0F1A 58%,#161528);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08);
 }
-.limit h3{font-size:17px;font-weight:600;letter-spacing:-.02em;margin:0;line-height:1.3}
-.limit p{margin:0;color:var(--ink-soft);max-width:58ch;font-size:15.5px;line-height:1.6}
-.limit p + p{margin-top:var(--s3)}
-.limit .flag{
-  display:block;margin-top:var(--s3);padding-left:var(--s3);
-  border-left:2px solid #F59E0B;color:var(--ink-soft);
-  font-size:14px;line-height:1.55;
+.brain canvas{display:block;width:100%;height:100%}
+
+/* Sticky inside its own section, which is what makes one heading leave
+   as the next arrives rather than the two stacking up. */
+.lens{
+  position:sticky;top:var(--lens-top,236px);z-index:3;
+  display:flex;align-items:baseline;gap:8px;
+  margin:0 -16px 9px;padding:7px 16px 8px;
+  background:var(--paper);
 }
+.lens b{font-size:17px;font-weight:400;letter-spacing:-.025em;color:var(--ink)}
+.lens span{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;color:var(--muted)}
 
-/* -------------------------------------------------------------- tiers */
-
-.tier{
-  display:grid;grid-template-columns:minmax(0,14ch) minmax(0,1fr) minmax(0,12ch);
-  gap:var(--s5);padding:var(--s4) 0;border-bottom:1px solid var(--line);
-  align-items:baseline;
+/* The scrollbar, with the sections marked on it in their own colours —
+   the heading names where you are, this says how far along. */
+.srail{
+  position:absolute;right:7px;top:252px;bottom:70px;width:3px;z-index:3;
+  display:flex;flex-direction:column;gap:5px;
 }
-.tiers{border-top:1px solid var(--line)}
-.tier .who{font-weight:600;font-size:15.5px}
-.tier .what{color:var(--ink-soft);font-size:15px}
-.tier .cost{font-size:13px;color:var(--muted);text-align:right}
+.srail i{flex:1;border-radius:999px;background:rgba(16,20,24,.13);transition:background .35s}
+.srail i.on{background:var(--c)}
+.screen.night .srail i{background:rgba(255,255,255,.14)}
 
+[data-sec]{position:relative;display:flex;flex-direction:column;gap:7px}
+[data-sec] + [data-sec]{margin-top:4px}
+[data-sec]:last-child{padding-bottom:40px}
 
-/* ------------------------------------------------------- configurator */
+/* ------------------------------------------------------------ ladder */
 
-/* The one place on the page where colour is the subject rather than the
-   decoration: the drawing takes its fill from whatever swatch is chosen, so
-   picking is the demonstration. */
-.kit{
-  background:var(--card);border-radius:var(--r-xl);
-  box-shadow:0 1px 2px rgba(22,24,29,.04),0 8px 30px rgba(22,24,29,.06);
-  display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);
-  overflow:hidden;
+.ladder{
+  margin-top:var(--s6);border-radius:22px;overflow:hidden;
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
 }
-.kit .stage{
-  background:var(--field);padding:var(--s8) var(--s6);
-  display:grid;place-items:center;gap:var(--s5);
-  --frame:#EFEEEA;--frame-edge:#D9D8D2;--ring:#1E2024;
-}
-.kit .stage svg{width:min(100%,360px);height:auto;display:block}
-.kit .stage .lens{fill:#16181D;opacity:.10}
-.kit .stage .frame{fill:var(--frame);stroke:var(--frame-edge);stroke-width:2}
-.kit .stage .band{fill:var(--ring)}
-.kit .choose{padding:var(--s6);display:flex;flex-direction:column;gap:var(--s5)}
-.kit h3{margin:0;font-size:20px;font-weight:600;letter-spacing:-.022em}
-.kit .note{margin:0;color:var(--ink-soft);font-size:15px;line-height:1.55;max-width:44ch}
+.ladder .r{display:flex;align-items:center;gap:var(--s4);padding:var(--s3) var(--s5)}
+.ladder .r + .r{border-top:1px solid rgba(255,255,255,.07)}
+.ladder .thumb{width:132px;height:46px;flex:0 0 auto}
+.ladder .thumb canvas{display:block;width:100%;height:100%}
+.ladder b{flex:1;font-weight:300;font-size:18px;letter-spacing:-.025em}
 
-.option{display:flex;flex-direction:column;gap:var(--s3)}
-.option .label{font-size:13px;color:var(--muted)}
-.swatches{display:flex;gap:var(--s4);flex-wrap:wrap;margin:0;padding:0;border:0}
-.swatch{
-  background:none;border:0;padding:0;cursor:pointer;
-  display:flex;flex-direction:column;align-items:center;gap:6px;
-  font:inherit;font-size:13px;color:var(--ink-soft);
-}
-.swatch .chip{
-  width:34px;height:34px;border-radius:50%;
-  box-shadow:inset 0 0 0 1px rgba(22,24,29,.14);
-  transition:box-shadow .16s ease,transform .16s ease;
-}
-.swatch:hover .chip{transform:translateY(-1px)}
-.swatch[aria-checked="true"] .chip{box-shadow:inset 0 0 0 1px rgba(22,24,29,.14),0 0 0 2px var(--card),0 0 0 4px var(--ink)}
-.swatch[aria-checked="true"]{color:var(--ink);font-weight:600}
-.swatch:focus-visible{outline:2px solid var(--ink);outline-offset:4px;border-radius:var(--r-sm)}
+/* ---------------------------------------------------------- hardware */
 
-.kit .price{
-  border-top:1px solid var(--line);padding-top:var(--s5);margin-top:auto;
-  display:flex;align-items:baseline;justify-content:space-between;gap:var(--s4);flex-wrap:wrap;
+.kit{display:flex;gap:var(--s3);margin-top:var(--s6);flex-wrap:wrap}
+.kit > div{
+  flex:1 1 220px;display:flex;align-items:center;gap:var(--s3);
+  border-radius:20px;padding:var(--s4) var(--s5);
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
 }
-.kit .price .amount{font-size:28px;font-weight:700;letter-spacing:-.03em}
-.kit .price .chosen{font-size:14px;color:var(--ink-soft)}
-.buy{
-  border:0;border-radius:var(--r-md);background:var(--ink);color:#fff;
-  font:inherit;font-weight:600;font-size:15px;padding:13px var(--s5);cursor:pointer;
-  transition:background-color .18s ease;
-}
-.buy:hover{background:#2A2D34}
-.buy:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+.kit svg{width:28px;height:28px;flex:0 0 auto}
+.kit b{display:block;font-weight:300;font-size:18px;letter-spacing:-.025em}
 
-/* ---------------------------------------------------------------- plans */
+/* ------------------------------------------------------------ footer */
 
-.plans{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s4)}
-.plan{
-  background:var(--card);border-radius:var(--r-lg);padding:var(--s5);
-  display:flex;flex-direction:column;gap:var(--s3);
-  box-shadow:0 1px 2px rgba(22,24,29,.04);
-}
-.plan.picked{box-shadow:0 0 0 1.5px var(--ink),0 8px 30px rgba(22,24,29,.07)}
-.plan .name{font-weight:600;font-size:16px}
-.plan .cost{font-size:26px;font-weight:700;letter-spacing:-.03em;line-height:1.1}
-.plan .cost span{font-size:14px;font-weight:500;color:var(--muted);letter-spacing:0}
-.plan ul{margin:var(--s2) 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:var(--s2)}
-.plan li{font-size:14.5px;color:var(--ink-soft);display:flex;gap:var(--s2);align-items:flex-start}
-.plan li .tickmark{width:14px;height:14px;flex:none;margin-top:3px;color:var(--ink)}
-.plan li.off{color:var(--muted)}
+.foot{padding:var(--s8) 0 var(--s6);display:flex;align-items:center;justify-content:space-between;gap:var(--s4);flex-wrap:wrap}
+.swatches{display:flex;gap:6px}
+.swatches i{width:30px;height:6px;border-radius:999px}
 
-@media (max-width:860px){
-  .kit{grid-template-columns:1fr}
-  .kit .stage{padding:var(--s6) var(--s5)}
-  .plans{grid-template-columns:1fr}
-}
+/* ------------------------------------------------------------- small */
 
-/* ------------------------------------------------------------- footer */
-
-footer{
-  padding:var(--s7) 0 var(--s8);border-top:1px solid var(--line);
-  display:flex;flex-wrap:wrap;gap:var(--s4);
-  justify-content:space-between;align-items:flex-end;
-}
-footer p{margin:0;color:var(--muted);font-size:14px;max-width:50ch}
-footer .built{font-size:12.5px;color:var(--muted)}
-
-@media (max-width:860px){
-  .limit,.tier{grid-template-columns:1fr;gap:var(--s2)}
-  .tier .cost{text-align:left}
-}
-@media (max-width:520px){
+@media (max-width:620px){
   .wrap{padding:0 var(--s4)}
-  .orb{width:190px;height:190px}
+  .rail{margin:var(--s6) calc(var(--s4) * -1) 0;padding:0 var(--s4) var(--s5);gap:var(--s5)}
+  .hero{padding:var(--s6) 0 var(--s5)}
+  .band{padding-top:var(--s7)}
+  .sea{height:210px}
+  .ladder .thumb{width:92px;height:38px}
+  .ladder .r{padding:var(--s3) var(--s4);gap:var(--s3)}
 }
 
 @media (prefers-reduced-motion:reduce){
-  .lobe{animation:none !important}
-  *{transition-duration:.001ms !important}
+  *,*::before,*::after{animation:none !important;transition:none !important}
+  .water{transform:none}
+  html{scroll-behavior:auto}
 }
 </style>
 </head>
 <body>
 
-<!-- Icon sprite. Brand marks are the real Simple Icons paths from the Noctus
-     icon set; UI glyphs are a single 1.75px-stroke family. Nothing here is an
-     emoji, and no icon sits on a coloured chip. -->
+<!-- ===================================================== icon sprite -->
 <svg class="sprite" aria-hidden="true" focusable="false">
-  <defs>
-    <linearGradient id="gA" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#5EEAD4"/><stop offset="100%" stop-color="#7DD3FC"/>
-    </linearGradient>
-    <linearGradient id="gB" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#7DD3FC"/><stop offset="100%" stop-color="#A5B4FC"/>
-    </linearGradient>
-    <linearGradient id="gC" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#A5B4FC"/><stop offset="100%" stop-color="#C4B5FD"/>
-    </linearGradient>
-    <linearGradient id="gD" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#C4B5FD"/><stop offset="100%" stop-color="#F9A8D4"/>
-    </linearGradient>
-    <linearGradient id="gE" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#86EFAC"/><stop offset="100%" stop-color="#5EEAD4"/>
-    </linearGradient>
-    <linearGradient id="gF" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#F9A8D4"/><stop offset="100%" stop-color="#FDBA74"/>
-    </linearGradient>
-  </defs>
+  <!-- Home-screen marks: the app's own colours, white glyph on the tile. -->
+  <symbol id="a-google" viewBox="0 0 24 24"><path fill="#4285F4" d="M21.6 12.23c0-.6-.05-1.18-.15-1.73H12v3.27h5.38a4.6 4.6 0 0 1-2 3.02v2.5h3.23c1.89-1.74 2.99-4.3 2.99-7.06Z"/><path fill="#34A853" d="M12 22c2.7 0 4.96-.9 6.61-2.43l-3.23-2.5c-.9.6-2.04.95-3.38.95-2.6 0-4.8-1.75-5.59-4.1H3.07v2.58A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.41 13.92a6 6 0 0 1 0-3.84V7.5H3.07a10 10 0 0 0 0 9l3.34-2.58Z"/><path fill="#EA4335" d="M12 5.98c1.47 0 2.79.5 3.83 1.5l2.86-2.86A9.6 9.6 0 0 0 12 2a10 10 0 0 0-8.93 5.5l3.34 2.58C7.2 7.73 9.4 5.98 12 5.98Z"/></symbol>
+  <symbol id="a-music" viewBox="0 0 24 24"><path d="M20.5 3.4v12.3a3.2 3.2 0 1 1-2-2.95V7.4l-8.6 1.66v9a3.2 3.2 0 1 1-2-2.95V6.1L20.5 3.4Z"/></symbol>
+  <symbol id="a-messages" viewBox="0 0 24 24"><path d="M12 2.6C6.4 2.6 2 6.3 2 10.9c0 2.6 1.4 4.9 3.7 6.4v4l3.5-2c.9.2 1.8.3 2.8.3 5.6 0 10-3.7 10-8.4S17.6 2.6 12 2.6Z"/></symbol>
+  <symbol id="a-maps" viewBox="0 0 24 24"><path d="M12 2.3a6.8 6.8 0 0 0-6.8 6.8c0 4.9 6 11.9 6.3 12.2a.7.7 0 0 0 1 0c.3-.3 6.3-7.3 6.3-12.2A6.8 6.8 0 0 0 12 2.3Zm0 9.3A2.5 2.5 0 1 1 14.5 9 2.5 2.5 0 0 1 12 11.6Z"/></symbol>
+  <symbol id="a-reminders" viewBox="0 0 24 24"><path d="M12 2.3a7 7 0 0 0-7 7v4l-1.6 3a1 1 0 0 0 .9 1.5h15.4a1 1 0 0 0 .9-1.5l-1.6-3v-4a7 7 0 0 0-7-7Zm0 19.4a3 3 0 0 0 2.8-2H9.2a3 3 0 0 0 2.8 2Z"/></symbol>
 
-    <symbol id="b-gmail" viewBox="0 0 24 24"><path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z"/></symbol>
-    <symbol id="b-googlecalendar" viewBox="0 0 24 24"><path d="M18.316 5.684H24v12.632h-5.684V5.684zM5.684 24h12.632v-5.684H5.684V24zM18.316 5.684V0H1.895A1.894 1.894 0 0 0 0 1.895v16.421h5.684V5.684h12.632zm-7.207 6.25v-.065c.272-.144.5-.349.687-.617s.279-.595.279-.982c0-.379-.099-.72-.3-1.025a2.05 2.05 0 0 0-.832-.714 2.703 2.703 0 0 0-1.197-.257c-.6 0-1.094.156-1.481.467-.386.311-.65.671-.793 1.078l1.085.452c.086-.249.224-.461.413-.633.189-.172.445-.257.767-.257.33 0 .602.088.816.264a.86.86 0 0 1 .322.703c0 .33-.12.589-.36.778-.24.19-.535.284-.886.284h-.567v1.085h.633c.407 0 .748.109 1.02.327.272.218.407.499.407.843 0 .336-.129.614-.387.832s-.565.327-.924.327c-.351 0-.651-.103-.897-.311-.248-.208-.422-.502-.521-.881l-1.096.452c.178.616.505 1.082.977 1.401.472.319.984.478 1.538.477a2.84 2.84 0 0 0 1.293-.291c.382-.193.684-.458.902-.794.218-.336.327-.72.327-1.149 0-.429-.115-.797-.344-1.105a2.067 2.067 0 0 0-.881-.689zm2.093-1.931l.602.913L15 10.045v5.744h1.187V8.446h-.827l-2.158 1.557zM22.105 0h-3.289v5.184H24V1.895A1.894 1.894 0 0 0 22.105 0zm-3.289 23.5l4.684-4.684h-4.684V23.5zM0 22.105C0 23.152.848 24 1.895 24h3.289v-5.184H0v3.289z"/></symbol>
-    <symbol id="b-whatsapp" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></symbol>
-
-  <!-- phone-native marks, drawn to sit with the brand set: solid, 24-grid -->
-  <symbol id="b-music" viewBox="0 0 24 24"><path d="M21 3.5v12.2a3.3 3.3 0 1 1-2-3.03V7.3L10 9.02v9.18a3.3 3.3 0 1 1-2-3.03V6.2L21 3.5Z"/></symbol>
-  <symbol id="b-messages" viewBox="0 0 24 24"><path d="M12 2C6.2 2 1.6 5.9 1.6 10.7c0 2.7 1.5 5.1 3.8 6.7v4.1l3.7-2.1c.9.2 1.9.3 2.9.3 5.8 0 10.4-3.9 10.4-8.7S17.8 2 12 2Z"/></symbol>
-  <symbol id="b-photos" viewBox="0 0 24 24"><path d="M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm3.5 3A2.5 2.5 0 1 0 10 8.5 2.5 2.5 0 0 0 7.5 6ZM4 19h16v-3l-4.6-4.6-4.4 4.4-2.4-2.3L4 17.6V19Z"/></symbol>
-  <symbol id="b-reminders" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7v4.2l-1.7 3A1 1 0 0 0 4.2 18h15.6a1 1 0 0 0 .9-1.5l-1.7-3.3V9a7 7 0 0 0-7-7Zm0 20a3 3 0 0 0 2.8-2H9.2A3 3 0 0 0 12 22Z"/></symbol>
-  <symbol id="b-maps" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.1 6.2 12.3 6.5 12.6a.7.7 0 0 0 1 0C12.8 21.3 19 14.1 19 9a7 7 0 0 0-7-7Zm0 9.6A2.6 2.6 0 1 1 14.6 9 2.6 2.6 0 0 1 12 11.6Z"/></symbol>
-  <symbol id="b-home" viewBox="0 0 24 24"><path d="M12 2.6 1.8 11.1a1 1 0 0 0 .64 1.77H4.5V21a1 1 0 0 0 1 1h4v-6h5v6h4a1 1 0 0 0 1-1v-8.13h2.06a1 1 0 0 0 .64-1.77L12 2.6Z"/></symbol>
-  <symbol id="b-podcasts" viewBox="0 0 24 24"><path d="M12 2a5 5 0 0 0-5 5v5a5 5 0 0 0 10 0V7a5 5 0 0 0-5-5Zm-8 9.6a1 1 0 0 1 2 0 6 6 0 0 0 12 0 1 1 0 0 1 2 0 8 8 0 0 1-7 7.93V22h-2v-2.47A8 8 0 0 1 4 11.6Z"/></symbol>
-  <symbol id="b-notes" viewBox="0 0 24 24"><path d="M5 2h9.2L21 8.6V22a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Zm8.5 1.9V9H19l-5.5-5.1ZM7.5 12h9v1.8h-9V12Zm0 4h6.5v1.8H7.5V16Z"/></symbol>
-
-  <!-- UI glyphs: stroke family, 1.75px, round caps -->
-  <symbol id="u-talk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></symbol>
-  <symbol id="u-tools" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></symbol>
-  <symbol id="u-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6"/><path d="M15 2v6"/><path d="M6 8h12v3a6 6 0 0 1-12 0V8Z"/><path d="M12 17v5"/></symbol>
-  <symbol id="u-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.6 1.6 0 0 0 15 19.4a1.6 1.6 0 0 0-1 1.47V21a2 2 0 1 1-4 0v-.09A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.77.32l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.6 1.6 0 0 0 4.6 15a1.6 1.6 0 0 0-1.47-1H3a2 2 0 1 1 0-4h.09A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.32-1.77l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.6 1.6 0 0 0 9 4.6a1.6 1.6 0 0 0 1-1.47V3a2 2 0 1 1 4 0v.09A1.6 1.6 0 0 0 15 4.6a1.6 1.6 0 0 0 1.77-.32l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.6 1.6 0 0 0 19.4 9v.09a1.6 1.6 0 0 0 1.47 1H21a2 2 0 1 1 0 4h-.09a1.6 1.6 0 0 0-1.47 1Z"/></symbol>
-  <symbol id="u-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></symbol>
-  <symbol id="u-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2.5" width="6" height="11.5" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3.5"/></symbol>
-  <symbol id="u-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
-  <symbol id="u-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></symbol>
-  <symbol id="u-glasses" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="14" r="3.5"/><circle cx="18.5" cy="14" r="3.5"/><path d="M9 14c0-1.5 1.3-2.5 3-2.5s3 1 3 2.5"/><path d="M2 11l2.5-4h4M22 11l-2.5-4h-4"/></symbol>
+  <!-- UI glyphs: one stroke family, 1.7, round caps. -->
+  <symbol id="u-talk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></symbol>
+  <symbol id="u-sparks" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6.8 17 9.2M8 6.8 10.4 17.4M17 9.2 10.4 17.4"/><circle cx="8" cy="6.8" r="2.3" fill="currentColor" stroke="none"/><circle cx="17" cy="9.2" r="1.8" fill="currentColor" stroke="none"/><circle cx="10.4" cy="17.4" r="1.8" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="u-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="u-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.6 1.6 0 0 0 15 19.4a1.6 1.6 0 0 0-1 1.47V21a2 2 0 1 1-4 0v-.09A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.77.32l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.6 1.6 0 0 0 4.6 15a1.6 1.6 0 0 0-1.47-1H3a2 2 0 1 1 0-4h.09A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.32-1.77l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.6 1.6 0 0 0 9 4.6a1.6 1.6 0 0 0 1-1.47V3a2 2 0 1 1 4 0v.09A1.6 1.6 0 0 0 15 4.6a1.6 1.6 0 0 0 1.77-.32l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.6 1.6 0 0 0 19.4 9v.09a1.6 1.6 0 0 0 1.47 1H21a2 2 0 1 1 0 4h-.09a1.6 1.6 0 0 0-1.47 1Z"/></symbol>
+  <symbol id="u-glasses" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.6" cy="14" r="3.6"/><circle cx="18.4" cy="14" r="3.6"/><path d="M9.2 14c0-1.5 1.25-2.5 2.8-2.5s2.8 1 2.8 2.5"/><path d="M2 11l2.4-3.9h4.1M22 11l-2.4-3.9h-4.1"/></symbol>
+  <symbol id="u-ring" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="13.2" r="6.8"/><path d="M8.7 5.6h6.6l-.7 2.1H9.4l-.7-2.1Z" stroke-linejoin="round"/></symbol>
   <symbol id="u-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5.5 5.5L20 6.5"/></symbol>
-  <symbol id="u-ring" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="7.5"/></symbol>
+  <symbol id="u-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="u-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6"/><path d="M6 11.5L12 5.5l6 6"/></symbol>
   <symbol id="u-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></symbol>
-  <symbol id="u-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 4v5h-5"/></symbol>
-  <symbol id="u-leaf" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V10"/><path d="M12 14C12 10.7 9.3 8 6 8c0 3.3 2.7 6 6 6Z" fill="currentColor" stroke="none"/><path d="M12 11.5C12 7.6 14.7 4.5 18 4.5c0 3.9-2.7 7-6 7Z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="u-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9.5 7V4.6h5V7"/><path d="M6 7l1 13h10l1-13"/></symbol>
+  <symbol id="u-leaf" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V10"/><path d="M12 14C12 10.7 9.3 8 6 8c0 3.3 2.7 6 6 6Z" fill="currentColor" stroke="none"/><path d="M12 11.5C12 7.6 14.7 4.5 18 4.5c0 3.9-2.7 7-6 7Z" fill="currentColor" stroke="none"/></symbol>
 </svg>
 
-<div class="wrap">
+<div class="water" aria-hidden="true"><i class="w1"></i><i class="w2"></i><i class="w3"></i></div>
+<div class="shade" aria-hidden="true"></div>
 
+<div class="above">
+
+<div class="wrap">
   <header class="masthead">
-    <div class="wordmark">
-      <svg width="22" height="22" aria-hidden="true"><use href="#u-leaf"/></svg>
-      Grove
-    </div>
-    <span class="where">interface preview</span>
+    <div class="wordmark"><svg aria-hidden="true"><use href="#u-leaf"/></svg>Grove</div>
+    <span class="mono">interface sandbox</span>
   </header>
-
-  <div class="hero">
-    <h1>An assistant you wear, not one you look at.</h1>
-    <p class="standfirst">
-      Cheap Bluetooth glasses, a cheap Bluetooth ring, and one agent you talk to
-      with your phone still in your pocket.
-    </p>
-
-    <!-- The one place colour lives. Four blurred lobes drift on their own
-         clocks, so the mass keeps shifting hue instead of pulsing on a beat. -->
-    <div class="orb-card">
-      <div class="orb" id="orb">
-        <span class="lobe l1"></span>
-        <span class="lobe l2"></span>
-        <span class="lobe l3"></span>
-        <span class="lobe l4"></span>
-      </div>
-
-      <p class="orb-caption" id="orb-caption">
-        Moved your two o'clock to Thursday and let Priya know.
-      </p>
-
-      <div class="orb-controls">
-        <button class="round" id="btn-close" aria-label="End voice mode">
-          <svg width="19" height="19" aria-hidden="true"><use href="#u-close"/></svg>
-        </button>
-        <button class="round primary" id="btn-mic" aria-label="Talk to Grove">
-          <svg width="19" height="19" aria-hidden="true"><use href="#u-mic"/></svg>
-        </button>
-      </div>
-
-      <p class="state-line" id="state-line">Ready — press to talk</p>
-    </div>
-  </div>
-
 </div>
 
-<section>
+<!-- ============================================================ hero -->
 <div class="wrap">
-  <div class="section-head">
-    <h2>Four screens, and almost no chrome.</h2>
-    <p>
-      White ground, hairline cards, and the app icons you already know. Sparks are
-      standing jobs; Connections are the apps those jobs reach into.
-    </p>
-  </div>
+  <section class="hero">
+    <h1>You will mostly hear it.</h1>
 
-  <div class="screens">
+    <!-- Drag along it. The horizon follows, then settles. -->
+    <div class="sea" id="sea" role="button" tabindex="0" aria-label="Press to cycle Grove's states">
+      <canvas data-sky="hero-dark"></canvas>
+    </div>
 
-    <!-- ------------------------------------------------------------ Talk -->
-    <article class="screen-note">
-      <div class="phone"><div class="viewport">
-        <div style="display:flex;gap:6px">
-          <div class="ncard" style="flex:1;padding:8px 9px;gap:7px">
-            <svg class="gicon sm" style="color:var(--ink-soft)" aria-hidden="true"><use href="#u-glasses"/></svg>
-            <div class="body"><div class="t" style="font-size:10px">Glasses</div></div>
-            <span class="dotm warn"></span>
-          </div>
-          <div class="ncard" style="flex:1;padding:8px 9px;gap:7px">
-            <svg class="gicon sm" style="color:var(--ink-soft)" aria-hidden="true"><use href="#u-ring"/></svg>
-            <div class="body"><div class="t" style="font-size:10px">Ring</div></div>
-            <span class="dotm on"></span>
-          </div>
-        </div>
+    <p class="state"><b id="st-word">Ready</b><span class="mono" id="st-hint">press to talk</span></p>
+  </section>
+</div>
 
-        <div class="orb" style="width:132px;height:132px;margin:22px auto 0">
-          <span class="lobe l1" style="width:86px;height:86px;filter:blur(18px)"></span>
-          <span class="lobe l2" style="width:80px;height:80px;filter:blur(18px)"></span>
-          <span class="lobe l3" style="width:74px;height:74px;filter:blur(18px)"></span>
-          <span class="lobe l4" style="width:82px;height:82px;filter:blur(18px)"></span>
-        </div>
+<!-- ========================================================= screens -->
+<div class="wrap">
+  <section class="band" id="screens">
+    <h2>Four tabs. Open it, check, close it.</h2>
 
-        <p style="text-align:center;font-size:13px;font-weight:600;margin:16px 0 4px;letter-spacing:-.02em">Listening</p>
-        <p style="text-align:center;font-size:10.5px;color:var(--muted);margin:0 0 18px">play something mellow</p>
+    <div class="rail">
 
-        <div class="s-label">Earlier</div>
-        <div class="ncard">
-          <span class="appicon ai-music" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-music"/></svg></span>
-          <div class="body">
-            <div class="t">Put on the Sunday playlist</div>
-            <div class="d">Playing on your glasses.</div>
-          </div>
-        </div>
-        <div class="ncard">
-          <span class="appicon ai-googlecalendar" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-googlecalendar"/></svg></span>
-          <div class="body">
-            <div class="t">Move my two o'clock</div>
-            <div class="d">Thursday 2pm, Priya invited.</div>
-          </div>
-        </div>
-        <div class="ncard">
-          <span class="appicon ai-messages" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-messages"/></svg></span>
-          <div class="body">
-            <div class="t">Tell Sam I'm ten minutes out</div>
-            <div class="d">Sent.</div>
-          </div>
-        </div>
+      <!-- ====================================================== Talk -->
+      <figure class="bay">
+        <div class="phone" data-tilt>
+          <div class="screen">
+            <div class="sky"><canvas data-sky="phone-light"></canvas></div>
 
-        <div class="grow"></div>
-
-        <div class="dock">
-          <a href="#" class="on"><svg aria-hidden="true"><use href="#u-talk"/></svg>Talk</a>
-          <a href="#"><svg aria-hidden="true"><use href="#u-tools"/></svg>Sparks</a>
-          <a href="#"><svg aria-hidden="true"><use href="#u-plug"/></svg>Connect</a>
-          <a href="#"><svg aria-hidden="true"><use href="#u-settings"/></svg>Settings</a>
-        </div>
-      </div></div>
-
-      <h3>Talk</h3>
-      <p>
-        Two hardware chips, the orb, and what it just did. The amber dot means
-        the glasses came up playback-only — Grove would talk into your ear while
-        the phone listens, so it says so rather than letting you find out.
-      </p>
-    </article>
-
-    <!-- ---------------------------------------------------------- Sparks -->
-    <article class="screen-note">
-      <div class="phone"><div class="viewport">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between">
-          <div>
-            <p class="s-title">Sparks</p>
-            <p class="s-sub">Standing jobs that run on their own.</p>
-          </div>
-          <button class="iconbtn" aria-label="Add a spark">
-            <svg width="14" height="14" aria-hidden="true"><use href="#u-plus"/></svg>
-          </button>
-        </div>
-
-        <div class="s-label">Running</div>
-
-        <div class="spark">
-          <div class="top">
-            <div style="flex:1">
-              <div class="t">Morning brief</div>
-              <div class="o">Your day, read out before you're up.</div>
+            <!-- One dot. Everything being fine is the usual case. -->
+            <div class="hw" data-hw>
+              <button class="pip" aria-expanded="false" aria-label="Show what is connected"><i></i></button>
+              <div class="bar">
+                <svg aria-hidden="true"><use href="#u-glasses"/></svg>
+                <span>Glasses <em>· mic and playback</em></span>
+              </div>
             </div>
-            <span class="dotm on" style="margin-top:4px"></span>
-          </div>
-          <div class="foot">
-            <span class="when">Every day, 7:00</span>
-            <span class="needs">
-              <span class="appicon sm ai-googlecalendar"><svg viewBox="0 0 24 24"><use href="#b-googlecalendar"/></svg></span>
-              <span class="appicon sm ai-gmail"><svg viewBox="0 0 24 24"><use href="#b-gmail"/></svg></span>
-            </span>
-          </div>
-        </div>
 
-        <div class="spark">
-          <div class="top">
-            <div style="flex:1">
-              <div class="t">Market check</div>
-              <div class="o">What actually moved on your watchlist.</div>
+            <div class="pane under-sky">
+              <div>
+                <p class="said">Listening</p>
+                <p class="heard">move my two o'clock to Thursday</p>
+              </div>
+
+              <div class="card glass">
+                <div class="row">
+                  <div class="grow">
+                    <p class="t">Lecture — MARK 312</p>
+                    <p class="d">Tory 1-108</p>
+                  </div>
+                  <p class="big">14:00</p>
+                </div>
+                <div class="hr"></div>
+                <div class="row">
+                  <svg class="glyph" style="color:var(--alert);width:14px;height:14px" aria-hidden="true"><use href="#u-up"/></svg>
+                  <p class="t grow" style="font-weight:400">Leave <b style="font-weight:600">13:22</b></p>
+                  <span class="v">38 min</span>
+                </div>
+              </div>
+
+              <p class="lbl">EARLIER</p>
+              <div class="stack">
+                <div class="card">
+                  <p class="t">Tell Sam I'm ten minutes out</p>
+                  <p class="d ans">Told him. He's already there.</p>
+                  <div class="row" style="margin-top:8px">
+                    <span class="tile sm ic-messages"><svg aria-hidden="true"><use href="#a-messages"/></svg></span>
+                    <span class="tag">message.compose</span>
+                  </div>
+                </div>
+                <div class="card">
+                  <p class="t">First thing tomorrow?</p>
+                  <p class="d ans">Standup at nine, then nothing until two.</p>
+                  <div class="row" style="margin-top:8px">
+                    <span class="tile sm ic-google"><svg aria-hidden="true"><use href="#a-google"/></svg></span>
+                    <span class="tag">calendar.read</span>
+                  </div>
+                </div>
+                <div class="card">
+                  <p class="t">Sunday playlist</p>
+                  <p class="d ans">Playing through your glasses.</p>
+                  <div class="row" style="margin-top:8px">
+                    <span class="tile sm ic-music"><svg aria-hidden="true"><use href="#a-music"/></svg></span>
+                    <span class="tag">music.play</span>
+                  </div>
+                </div>
+              </div>
             </div>
-            <span class="dotm on" style="margin-top:4px"></span>
-          </div>
-          <div class="foot">
-            <span class="when">Weekdays, 16:30</span>
-            <span class="needs">
-              <span class="appicon sm ai-notes"><svg viewBox="0 0 24 24"><use href="#b-notes"/></svg></span>
-            </span>
+
+            <nav class="dock" data-dock>
+              <span class="bubble"></span>
+              <a href="#screens" class="on" aria-label="Talk"><svg aria-hidden="true"><use href="#u-talk"/></svg></a>
+              <a href="#screens" aria-label="Sparks"><svg aria-hidden="true"><use href="#u-sparks"/></svg></a>
+              <a href="#screens" aria-label="Connect"><svg aria-hidden="true"><use href="#u-plug"/></svg></a>
+              <a href="#screens" aria-label="Settings"><svg aria-hidden="true"><use href="#u-settings"/></svg></a>
+            </nav>
           </div>
         </div>
+        <figcaption><b>Talk</b><span class="mono">the horizon is the state</span></figcaption>
+      </figure>
 
-        <div class="spark">
-          <div class="top">
-            <div style="flex:1">
-              <div class="t">Leave now</div>
-              <div class="o">When to walk out, using live traffic.</div>
+      <!-- ==================================================== Sparks -->
+      <figure class="bay">
+        <div class="phone" data-tilt>
+          <div class="screen">
+            <div class="tide t2"></div>
+            <div class="pane sparks">
+
+              <!-- Title and map travel together and stay put; the section
+                   heading sticks under them and is pushed out by the next
+                   one, so you always know which part of the map is lit. -->
+              <div class="stop">
+                <p class="title">Sparks</p>
+                <div class="brain" data-brain><canvas></canvas></div>
+              </div>
+
+              <!-- One plot, not five blobs.
+                   Every memory Grove holds is a dot in a single disc,
+                   packed outward from the middle, so the size of the
+                   thing is the size of what it knows: a quiet week is a
+                   small circle, a year is a wide one. Each kind takes a
+                   wedge of it, and scrolling lights its wedge and greys
+                   the rest — the map IS the scrollbar, which is why this
+                   screen has no tab strip and no five headings. -->
+
+              <section data-sec="did">
+                <p class="lens"><b>What it did</b><span>24</span></p>
+                <div class="panel">
+                  <div class="r">
+                    <span class="tile sm ic-google"><svg aria-hidden="true"><use href="#a-google"/></svg></span>
+                    <p class="t grow">Energy stocks, three companies</p><span class="v">11:04</span>
+                  </div>
+                  <div class="r">
+                    <span class="tile sm ic-google"><svg aria-hidden="true"><use href="#a-google"/></svg></span>
+                    <p class="t grow">Replied to Professor Chen</p><span class="v">09:51</span>
+                  </div>
+                  <div class="r">
+                    <span class="tile sm ic-reminders"><svg aria-hidden="true"><use href="#a-reminders"/></svg></span>
+                    <p class="t grow">Charger reminder</p><span class="v">08:30</span>
+                  </div>
+                  <div class="r">
+                    <span class="tile sm ic-music"><svg aria-hidden="true"><use href="#a-music"/></svg></span>
+                    <p class="t grow">Sunday playlist</p><span class="v">08:02</span>
+                  </div>
+                </div>
+                <button class="more" data-less>Show less</button>
+              </section>
+
+              <section data-sec="open">
+                <p class="lens"><b>Still to do</b><span>14</span></p>
+                <div class="swipe" data-swipe>
+                  <div class="behind"><svg aria-hidden="true"><use href="#u-trash"/></svg></div>
+                  <div class="front card"><p class="t">Send Jason the build</p><p class="d">Tuesday</p></div>
+                </div>
+                <div class="swipe" data-swipe>
+                  <div class="behind"><svg aria-hidden="true"><use href="#u-trash"/></svg></div>
+                  <div class="front card"><p class="t">Run a half marathon</p><p class="d">Goal</p></div>
+                </div>
+                <div class="swipe" data-swipe>
+                  <div class="behind"><svg aria-hidden="true"><use href="#u-trash"/></svg></div>
+                  <div class="front card"><p class="t">Book the Thursday room</p><p class="d">Friday</p></div>
+                </div>
+              </section>
+
+              <section data-sec="people">
+                <p class="lens"><b>People</b><span>26</span></p>
+                <div class="panel">
+                  <div class="r"><p class="t grow">Priya</p><span class="v">course partner</span><svg class="chev" aria-hidden="true"><use href="#u-chev"/></svg></div>
+                  <div class="r"><p class="t grow">Professor Chen</p><span class="v">MARK 312</span><svg class="chev" aria-hidden="true"><use href="#u-chev"/></svg></div>
+                  <div class="r"><p class="t grow">Jason</p><span class="v">the build</span><svg class="chev" aria-hidden="true"><use href="#u-chev"/></svg></div>
+                  <div class="r"><p class="t grow">Sam</p><span class="v">friend</span><svg class="chev" aria-hidden="true"><use href="#u-chev"/></svg></div>
+                </div>
+                <button class="more">22 more</button>
+              </section>
+
+              <section data-sec="repeats">
+                <p class="lens"><b>Keeps tripping</b><span>10</span></p>
+                <div class="panel">
+                  <div class="r"><p class="t grow">Forgets the charger</p><span class="tag">4×</span></div>
+                  <div class="r"><p class="t grow">Leaves for campus late</p><span class="tag">2×</span></div>
+                </div>
+              </section>
+
+              <section data-sec="about">
+                <p class="lens"><b>About you</b><span>22</span></p>
+                <div class="panel">
+                  <div class="r"><p class="t grow">Studying finance at UAlberta</p></div>
+                  <div class="r"><p class="t grow">Wants a summer internship</p></div>
+                  <div class="r"><p class="t grow">Up by eight most days</p><span class="tag">obs</span></div>
+                </div>
+                <button class="more">19 more</button>
+              </section>
+
             </div>
-            <span class="dotm on" style="margin-top:4px"></span>
-          </div>
-          <div class="foot">
-            <span class="when">Before every event</span>
-            <span class="needs">
-              <span class="appicon sm ai-maps"><svg viewBox="0 0 24 24"><use href="#b-maps"/></svg></span>
-              <span class="appicon sm ai-googlecalendar"><svg viewBox="0 0 24 24"><use href="#b-googlecalendar"/></svg></span>
-            </span>
-          </div>
-        </div>
-
-        <div class="grow"></div>
-        <div class="dock">
-          <a href="#"><svg aria-hidden="true"><use href="#u-talk"/></svg>Talk</a>
-          <a href="#" class="on"><svg aria-hidden="true"><use href="#u-tools"/></svg>Sparks</a>
-          <a href="#"><svg aria-hidden="true"><use href="#u-plug"/></svg>Connect</a>
-          <a href="#"><svg aria-hidden="true"><use href="#u-settings"/></svg>Settings</a>
-        </div>
-      </div></div>
-
-      <h3>Sparks</h3>
-      <p>
-        A spark is a standing job, not an app — "read my watchlist at half four
-        and tell me what moved". Three to begin with, because an assistant with
-        forty background jobs is not an assistant. Each card carries when it
-        runs and what it draws on.
-      </p>
-    </article>
-
-  </div>
-</div>
-</section>
-
-<!-- second pair, continuing the same grid without a rule between them -->
-<div class="wrap">
-  <div class="screens" style="margin-top:calc(var(--s8) * -1 + var(--s7))">
-
-    <!-- ----------------------------------------------------- Connections -->
-    <article class="screen-note">
-      <div class="phone"><div class="viewport">
-        <p class="s-title">Connections</p>
-        <p class="s-sub">What Grove may reach on your behalf.</p>
-
-        <div class="s-label">Connected</div>
-        <div class="ncard">
-          <span class="appicon ai-googlecalendar" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-googlecalendar"/></svg></span>
-          <div class="body"><div class="t">Calendar</div><div class="d">Your day, and what to move</div></div>
-          <span class="dotm on"></span>
-        </div>
-        <div class="ncard">
-          <span class="appicon ai-messages" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-messages"/></svg></span>
-          <div class="body"><div class="t">Messages</div><div class="d">Read out, and answered</div></div>
-          <span class="dotm on"></span>
-        </div>
-        <div class="ncard">
-          <span class="appicon ai-music" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-music"/></svg></span>
-          <div class="body"><div class="t">Music</div><div class="d">Play, queue, skip</div></div>
-          <span class="dotm on"></span>
-        </div>
-
-        <div class="s-label" style="margin-top:14px">Available</div>
-        <div class="ncard">
-          <span class="appicon ai-gmail" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-gmail"/></svg></span>
-          <div class="body"><div class="t">Mail</div><div class="d">The three that matter</div></div>
-          <button class="act">Connect</button>
-        </div>
-        <div class="ncard">
-          <span class="appicon ai-maps" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-maps"/></svg></span>
-          <div class="body"><div class="t">Maps</div><div class="d">When to leave</div></div>
-          <button class="act">Connect</button>
-        </div>
-        <div class="ncard">
-          <span class="appicon ai-reminders" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#b-reminders"/></svg></span>
-          <div class="body"><div class="t">Reminders</div><div class="d">Thoughts caught mid-walk</div></div>
-          <button class="act">Connect</button>
-        </div>
-
-        <div class="grow"></div>
-        <div class="dock">
-          <a href="#"><svg aria-hidden="true"><use href="#u-talk"/></svg>Talk</a>
-          <a href="#"><svg aria-hidden="true"><use href="#u-tools"/></svg>Sparks</a>
-          <a href="#" class="on"><svg aria-hidden="true"><use href="#u-plug"/></svg>Connect</a>
-          <a href="#"><svg aria-hidden="true"><use href="#u-settings"/></svg>Settings</a>
-        </div>
-      </div></div>
-
-      <h3>Connections</h3>
-      <p>
-        Six, not sixty. Calendar, messages, music, mail, maps, reminders — the
-        things a life actually runs on. Each row says what Grove does with it,
-        because that is the only reason to hand something access.
-      </p>
-    </article>
-
-    <!-- -------------------------------------------------------- Settings -->
-    <article class="screen-note">
-      <div class="phone"><div class="viewport">
-        <p class="s-title">Settings</p>
-        <p class="s-sub">&nbsp;</p>
-
-        <div class="s-label">Name</div>
-        <div class="field" style="display:flex;align-items:center;gap:8px">
-          <span style="font-weight:600">Buddy</span>
-          <span style="flex:1"></span>
-          <span style="color:var(--muted);font-size:9.5px">Hey Buddy…</span>
-        </div>
-
-        <div class="s-label" style="margin-top:16px">How it talks</div>
-        <div class="field">
-          Dry and deadpan. One aside at most, then back to the point.
-        </div>
-
-        <div class="s-label" style="margin-top:16px">Voice</div>
-        <div class="ncard" style="padding:4px 11px">
-          <div style="flex:1">
-            <div class="frow" style="padding:9px 0">
-              <span class="k">Speed</span>
-              <span class="v">1.0&times;</span>
-              <span class="stepper">
-                <button class="iconbtn" style="width:22px;height:22px" aria-label="Slower"><svg width="11" height="11" aria-hidden="true"><use href="#u-minus"/></svg></button>
-                <button class="iconbtn" style="width:22px;height:22px" aria-label="Faster"><svg width="11" height="11" aria-hidden="true"><use href="#u-plus"/></svg></button>
-              </span>
+            <div class="srail" data-rail aria-hidden="true">
+              <i data-seg="did" class="on" style="--c:#7DD3FC"></i>
+              <i data-seg="open" style="--c:#F3A063"></i>
+              <i data-seg="people" style="--c:#86EFAC"></i>
+              <i data-seg="repeats" style="--c:#F0836A"></i>
+              <i data-seg="about" style="--c:#C4B5FD"></i>
             </div>
-            <div class="frow" style="padding:9px 0">
-              <span class="k">Keep speech on device</span>
-              <span class="switch"></span>
+            <nav class="dock" data-dock>
+              <span class="bubble"></span>
+              <a href="#screens" aria-label="Talk"><svg aria-hidden="true"><use href="#u-talk"/></svg></a>
+              <a href="#screens" class="on" aria-label="Sparks"><svg aria-hidden="true"><use href="#u-sparks"/></svg></a>
+              <a href="#screens" aria-label="Connect"><svg aria-hidden="true"><use href="#u-plug"/></svg></a>
+              <a href="#screens" aria-label="Settings"><svg aria-hidden="true"><use href="#u-settings"/></svg></a>
+            </nav>
+          </div>
+        </div>
+        <figcaption><b>Sparks</b><span class="mono">scroll, and the map follows</span></figcaption>
+      </figure>
+
+      <!-- =================================================== Connect -->
+      <figure class="bay">
+        <div class="phone" data-tilt>
+          <div class="screen">
+            <div class="tide t3"></div>
+            <div class="pane">
+
+              <p class="title">Connections</p>
+
+              <p class="lbl">CONNECTED</p>
+              <div class="panel">
+                <div class="r">
+                  <span class="tile ic-google"><svg aria-hidden="true"><use href="#a-google"/></svg></span>
+                  <div class="grow"><p class="t">Google</p><p class="d">Mail, calendar, docs</p></div>
+                  <span class="dot on"></span>
+                </div>
+                <div class="r">
+                  <span class="tile ic-music"><svg aria-hidden="true"><use href="#a-music"/></svg></span>
+                  <div class="grow"><p class="t">Music</p><p class="d">Play, queue, skip</p></div>
+                  <span class="dot on"></span>
+                </div>
+                <div class="r">
+                  <span class="tile ic-reminders"><svg aria-hidden="true"><use href="#a-reminders"/></svg></span>
+                  <div class="grow"><p class="t">Reminders</p><p class="d">Caught mid-walk</p></div>
+                  <span class="dot on"></span>
+                </div>
+              </div>
+
+              <p class="lbl">AVAILABLE</p>
+              <div class="panel">
+                <div class="r">
+                  <span class="tile ic-maps"><svg aria-hidden="true"><use href="#a-maps"/></svg></span>
+                  <div class="grow"><p class="t">Maps</p><p class="d">When to leave</p></div>
+                  <button class="pill">Connect</button>
+                </div>
+                <div class="r">
+                  <span class="tile ic-messages"><svg aria-hidden="true"><use href="#a-messages"/></svg></span>
+                  <div class="grow"><p class="t">Messages</p><p class="d">Written, you send</p></div>
+                  <button class="pill">Connect</button>
+                </div>
+              </div>
+
             </div>
+            <nav class="dock" data-dock>
+              <span class="bubble"></span>
+              <a href="#screens" aria-label="Talk"><svg aria-hidden="true"><use href="#u-talk"/></svg></a>
+              <a href="#screens" aria-label="Sparks"><svg aria-hidden="true"><use href="#u-sparks"/></svg></a>
+              <a href="#screens" class="on" aria-label="Connect"><svg aria-hidden="true"><use href="#u-plug"/></svg></a>
+              <a href="#screens" aria-label="Settings"><svg aria-hidden="true"><use href="#u-settings"/></svg></a>
+            </nav>
           </div>
         </div>
+        <figcaption><b>Connect</b><span class="mono">the icon is the label</span></figcaption>
+      </figure>
 
-        <div class="s-label" style="margin-top:16px">Hardware</div>
-        <div class="ncard">
-          <svg class="gicon sm" style="color:var(--ink-soft)" aria-hidden="true"><use href="#u-ring"/></svg>
-          <div class="body"><div class="t">Ring</div><div class="d">Armed</div></div>
-          <span class="dotm on"></span>
+      <!-- ================================================== Settings -->
+      <figure class="bay">
+        <div class="phone" data-tilt>
+          <div class="screen">
+            <div class="tide t4"></div>
+            <div class="pane">
+
+              <p class="title">Settings</p>
+
+              <div class="panel">
+                <div class="hdr">
+                  <div class="on-top">
+                    <p class="n"><span class="nm" contenteditable="true" spellcheck="false" role="textbox" aria-label="What to call it">Grove</span></p>
+                  </div>
+                </div>
+                <div class="r"><p class="t grow">Voice</p><span class="v" style="color:var(--ink)">Daniel</span></div>
+                <div class="r"><p class="t grow">Speed</p>
+                  <svg width="92" height="14" aria-hidden="true"><rect x="2" y="5" width="88" height="3" rx="1.5" fill="var(--sunken)"/><rect x="2" y="5" width="42" height="3" rx="1.5" fill="url(#gl)"/><circle cx="44" cy="6.5" r="6" fill="#fff" stroke="var(--line)"/></svg>
+                </div>
+                <div class="r"><p class="t grow">Pitch</p>
+                  <svg width="92" height="14" aria-hidden="true"><rect x="2" y="5" width="88" height="3" rx="1.5" fill="var(--sunken)"/><rect x="2" y="5" width="30" height="3" rx="1.5" fill="url(#gl)"/><circle cx="32" cy="6.5" r="6" fill="#fff" stroke="var(--line)"/></svg>
+                </div>
+              </div>
+
+              <p class="lbl">MANNER</p>
+              <div class="row" style="flex-wrap:wrap;gap:6px">
+                <button class="pill go" style="height:31px">Jarvis</button>
+                <button class="pill" style="height:31px">Warm</button>
+                <button class="pill" style="height:31px">Blunt</button>
+              </div>
+
+              <div class="panel" style="margin-top:4px">
+                <div class="r"><p class="t grow">Speaks up unprompted</p><span class="sw on"></span></div>
+                <div class="r"><p class="t grow">Volume button</p><span class="sw on"></span></div>
+                <div class="r"><p class="t grow">Speech on device</p><span class="sw on"></span></div>
+              </div>
+
+              <p class="lbl">HARDWARE</p>
+              <div class="panel">
+                <div class="r">
+                  <svg class="glyph" aria-hidden="true"><use href="#u-glasses"/></svg>
+                  <p class="t grow">Glasses</p><span class="dot on"></span>
+                </div>
+                <div class="r">
+                  <svg class="glyph" aria-hidden="true"><use href="#u-ring"/></svg>
+                  <p class="t grow">Ring</p><span class="v">2 min ago</span><span class="dot on"></span>
+                </div>
+              </div>
+
+              <button class="pill wide" style="margin-top:4px">Check everything</button>
+
+              <p class="lbl">VERSION</p>
+              <div class="panel">
+                <div class="r"><p class="t grow" style="font-weight:400;color:var(--muted)">Update</p><span class="tag">01a131dd</span></div>
+                <div class="r"><p class="t grow" style="font-weight:400;color:var(--muted)">Channel</p><span class="tag">preview</span></div>
+              </div>
+
+            </div>
+            <nav class="dock" data-dock>
+              <span class="bubble"></span>
+              <a href="#screens" aria-label="Talk"><svg aria-hidden="true"><use href="#u-talk"/></svg></a>
+              <a href="#screens" aria-label="Sparks"><svg aria-hidden="true"><use href="#u-sparks"/></svg></a>
+              <a href="#screens" aria-label="Connect"><svg aria-hidden="true"><use href="#u-plug"/></svg></a>
+              <a href="#screens" class="on" aria-label="Settings"><svg aria-hidden="true"><use href="#u-settings"/></svg></a>
+            </nav>
+          </div>
         </div>
-        <div class="ncard">
-          <svg class="gicon sm" style="color:var(--ink-soft)" aria-hidden="true"><use href="#u-glasses"/></svg>
-          <div class="body"><div class="t">Glasses</div><div class="d">Playback only</div></div>
-          <span class="dotm warn"></span>
+        <figcaption><b>Settings</b><span class="mono">the name is the only free text</span></figcaption>
+      </figure>
+
+      <!-- ===================================================== night -->
+      <figure class="bay">
+        <div class="phone" data-tilt>
+          <div class="screen night">
+            <div class="sky"><canvas data-sky="phone-dark"></canvas></div>
+
+            <div class="hw" data-hw>
+              <button class="pip" aria-expanded="false" aria-label="Show what is connected"><i></i></button>
+              <div class="bar">
+                <svg aria-hidden="true"><use href="#u-glasses"/></svg>
+                <span>Glasses <em>· mic and playback</em></span>
+              </div>
+            </div>
+
+            <div class="pane under-sky">
+              <div>
+                <p class="said">Waiting on you</p>
+                <p class="heard">one press sends, two cancels</p>
+              </div>
+
+              <div class="card glass">
+                <div class="row">
+                  <span class="tile sm ic-google"><svg aria-hidden="true"><use href="#a-google"/></svg></span>
+                  <p class="t grow">Professor Chen</p>
+                </div>
+                <div class="hr"></div>
+                <p class="t" style="font-weight:400;line-height:1.5">
+                  Hi Professor Chen,<br><br>
+                  I won't be able to get the build to you before Friday. I'll
+                  send it as soon as it's ready.<br><br>
+                  Vishnu
+                </p>
+                <div class="row" style="margin-top:14px;gap:7px">
+                  <button class="pill go" style="flex:1;height:38px"><svg aria-hidden="true"><use href="#u-check"/></svg>Send</button>
+                  <button class="pill" style="flex:0 0 44px;height:38px;padding:0;background:transparent;color:var(--muted)"><svg aria-hidden="true"><use href="#u-x"/></svg></button>
+                </div>
+              </div>
+            </div>
+
+            <nav class="dock" data-dock>
+              <span class="bubble"></span>
+              <a href="#screens" class="on" aria-label="Talk"><svg aria-hidden="true"><use href="#u-talk"/></svg></a>
+              <a href="#screens" aria-label="Sparks"><svg aria-hidden="true"><use href="#u-sparks"/></svg></a>
+              <a href="#screens" aria-label="Connect"><svg aria-hidden="true"><use href="#u-plug"/></svg></a>
+              <a href="#screens" aria-label="Settings"><svg aria-hidden="true"><use href="#u-settings"/></svg></a>
+            </nav>
+          </div>
         </div>
+        <figcaption><b>Night</b><span class="mono">nothing sends without a press</span></figcaption>
+      </figure>
 
-        <div style="display:flex;align-items:center;gap:8px;padding:12px 2px 0;font-size:10.5px;color:var(--ink-soft)">
-          <span style="flex:1">What is my ring sending?</span>
-          <svg width="12" height="12" style="color:var(--muted)" aria-hidden="true"><use href="#u-chev"/></svg>
-        </div>
-
-        <div class="grow"></div>
-        <div class="dock">
-          <a href="#"><svg aria-hidden="true"><use href="#u-talk"/></svg>Talk</a>
-          <a href="#"><svg aria-hidden="true"><use href="#u-tools"/></svg>Sparks</a>
-          <a href="#"><svg aria-hidden="true"><use href="#u-plug"/></svg>Connect</a>
-          <a href="#" class="on"><svg aria-hidden="true"><use href="#u-settings"/></svg>Settings</a>
-        </div>
-      </div></div>
-
-      <h3>Settings</h3>
-      <p>
-        Give it a name and it answers to it. Below that, one box for how it
-        should talk — the paragraph of explanation and the row of preset
-        buttons both went, because the box already says what it is.
-      </p>
-    </article>
-
-  </div>
+    </div>
+  </section>
 </div>
 
-<section>
+<!-- ========================================================== ladder -->
 <div class="wrap">
-  <div class="section-head">
-    <h2>First run is a checklist, not a tour.</h2>
-    <p>
-      Two of the four steps happen in iOS Settings, where Grove cannot reach.
-      Someone who skips them has an app that looks fine and a pair of glasses
-      that does nothing — so the intro sends you to do them, then proves they
-      worked before it lets you past.
-    </p>
-  </div>
-
-  <div class="screens">
-
-    <!-- 1 ------------------------------------------------------------- -->
-    <article class="screen-note">
-      <div class="phone"><div class="viewport"><div class="ob">
-        <div class="skip">Skip</div>
-        <div class="mid">
-          <div class="orb" style="width:104px;height:104px;margin:0 0 4px">
-            <span class="lobe l1" style="width:68px;height:68px;filter:blur(15px)"></span>
-            <span class="lobe l2" style="width:64px;height:64px;filter:blur(15px)"></span>
-            <span class="lobe l3" style="width:58px;height:58px;filter:blur(15px)"></span>
-            <span class="lobe l4" style="width:66px;height:66px;filter:blur(15px)"></span>
-          </div>
-          <h4>What should I answer to?</h4>
-          <p>Pick anything. You will be saying it out loud in public, so pick something you do not mind saying.</p>
-          <div class="todo" style="display:flex;align-items:center;gap:8px">
-            <span style="font-weight:600;font-size:11.5px">Buddy</span>
-            <span style="flex:1"></span>
-            <span style="color:var(--muted);font-size:9.5px">Hey Buddy&hellip;</span>
-          </div>
-        </div>
-        <div class="dots"><i class="on"></i><i></i><i></i><i></i></div>
-        <button class="btn-wide">Continue</button>
-      </div></div></div>
-      <h3>Name it</h3>
-      <p>First, because everything after this refers to it by name.</p>
-    </article>
-
-    <!-- 2 ------------------------------------------------------------- -->
-    <article class="screen-note">
-      <div class="phone"><div class="viewport"><div class="ob">
-        <div class="skip">Skip</div>
-        <div class="mid">
-          <svg width="34" height="34" style="color:var(--ink)" aria-hidden="true"><use href="#u-glasses"/></svg>
-          <h4>Pair your glasses</h4>
-          <p>They are an ordinary Bluetooth headset. iOS does the routing, so there is nothing to set up in here.</p>
-          <div class="todo">
-            Settings &rsaquo; Bluetooth, and pair them. They must connect as a
-            <b>headset</b>, not playback only — otherwise Grove talks into your
-            ear while the phone listens.
-          </div>
-          <div class="ncard" style="margin-top:10px">
-            <svg class="gicon sm" style="color:var(--ink-soft)" aria-hidden="true"><use href="#u-glasses"/></svg>
-            <div class="body"><div class="t">Ray-Ban Display</div><div class="d">Headset &mdash; microphone works</div></div>
-            <span class="dotm on"></span>
-          </div>
-        </div>
-        <div class="dots"><i></i><i class="on"></i><i></i><i></i></div>
-        <button class="btn-wide">Continue</button>
-      </div></div></div>
-      <h3>Glasses</h3>
-      <p>
-        The card underneath is live. It turns green only once they are actually
-        connected with a microphone, so the step verifies itself instead of
-        asking you to take it on trust.
-      </p>
-    </article>
-
-    <!-- 3 ------------------------------------------------------------- -->
-    <article class="screen-note">
-      <div class="phone"><div class="viewport"><div class="ob">
-        <div class="skip">Skip</div>
-        <div class="mid">
-          <svg width="34" height="34" style="color:var(--ink)" aria-hidden="true"><use href="#u-ring"/></svg>
-          <h4>Press your ring</h4>
-          <p>The ring reaches Grove as a media remote — the same signal a headset&rsquo;s play button sends.</p>
-          <div class="todo">
-            Pair it in Settings, then press it a few times. Whatever it sends
-            shows up below.
-          </div>
-          <div class="ncard" style="margin-top:10px;display:block;padding:4px 11px 6px">
-            <div class="sig"><span class="dotm on"></span><span class="cmd">toggle</span><span class="tag">used</span></div>
-            <div class="sig"><span class="dotm"></span><span class="cmd">pause</span><span class="tag">merged</span></div>
-            <div class="sig"><span class="dotm on"></span><span class="cmd">toggle</span><span class="tag">used</span></div>
-          </div>
-        </div>
-        <div class="dots"><i></i><i></i><i class="on"></i><i></i></div>
-        <button class="btn-wide">This is my ring</button>
-      </div></div></div>
-      <h3>Ring</h3>
-      <p>
-        The single most useful screen in the app. Nobody ships a spec sheet with
-        a twelve-pound ring, so rather than explain what it ought to send, Grove
-        shows what yours actually sends — and "merged" is it telling you it saw
-        the double signal and treated it as one press.
-      </p>
-    </article>
-
-    <!-- 4 ------------------------------------------------------------- -->
-    <article class="screen-note">
-      <div class="phone"><div class="viewport"><div class="ob">
-        <div class="skip">&nbsp;</div>
-        <div class="mid">
-          <svg width="34" height="34" style="color:var(--ink)" aria-hidden="true"><use href="#u-plug"/></svg>
-          <h4>One thing to know</h4>
-          <p>
-            iOS will not let any app be woken from fully closed by a button
-            press. Grove has to be running for your ring to reach it.
-          </p>
-          <div class="todo">
-            Backgrounded is fine. Locked is fine. Pocketed is fine.<br>
-            <b>Swiping Grove away turns the ring off</b> until you open it again.
-          </div>
-        </div>
-        <div class="dots"><i></i><i></i><i></i><i class="on"></i></div>
-        <button class="btn-wide">Sign in with Noctus</button>
-      </div></div></div>
-      <h3>The limit</h3>
-      <p>
-        Said up front rather than discovered on a walk. It is the one thing
-        about Grove that cannot be fixed, so it is the last thing you read
-        before signing in.
-      </p>
-    </article>
-
-  </div>
+  <section class="band">
+    <h2>The horizon tells you what it is doing.</h2>
+    <div class="ladder">
+      <div class="r"><span class="thumb"><canvas data-sky="rung" data-mood="ready"></canvas></span><b>Ready</b><span class="mono">silent</span></div>
+      <div class="r"><span class="thumb"><canvas data-sky="rung" data-mood="listen"></canvas></span><b>Listening</b><span class="mono">rising chime</span></div>
+      <div class="r"><span class="thumb"><canvas data-sky="rung" data-mood="think"></canvas></span><b>Thinking</b><span class="mono">silent</span></div>
+      <div class="r"><span class="thumb"><canvas data-sky="rung" data-mood="work"></canvas></span><b>Working</b><span class="mono">soft pulse</span></div>
+      <div class="r"><span class="thumb"><canvas data-sky="rung" data-mood="speak"></canvas></span><b>Speaking</b><span class="mono">one note</span></div>
+    </div>
+  </section>
 </div>
-</section>
 
-<section>
+<!-- ======================================================== hardware -->
 <div class="wrap">
-  <div class="section-head">
-    <h2>Three tiers, cheapest first.</h2>
-    <p>
-      A reply that takes four seconds feels broken in your ear in a way it never
-      did in a chat bubble, and the account model allows two of the good ones an
-      hour. So a turn only climbs when the tier below genuinely cannot serve it.
-    </p>
-  </div>
-
-  <div class="tiers">
-    <div class="tier">
-      <span class="who">Local rules</span>
-      <span class="what">Whether this sentence should cause something to happen, and which tool fits. Never a model's call.</span>
-      <span class="cost">free</span>
-    </div>
-    <div class="tier">
-      <span class="who">Light model</span>
-      <span class="what">The conversation itself, plus routing. Runs on your own network when it can.</span>
-      <span class="cost">near free</span>
-    </div>
-    <div class="tier">
-      <span class="who">Noctus</span>
-      <span class="what">Anything needing your real account — integrations, history, billing.</span>
-      <span class="cost">2 / hour</span>
-    </div>
-  </div>
-
-  <p class="measure" style="margin:var(--s5) 0 0;color:var(--ink-soft)">
-    Grove answers before it runs anything. A run can take ten seconds, and ten
-    seconds of silence reads as a crash.
-  </p>
-</div>
-</section>
-
-<section>
-<div class="wrap">
-  <div class="section-head">
-    <h2>Choose your pair.</h2>
-    <p>
-      Glasses and ring come in one box. The frame colour is yours; the ring is
-      black unless you would rather it disappeared against a lighter frame.
-    </p>
-  </div>
-
-  <div class="kit">
-    <div class="stage" id="stage">
-      <!-- Front view. The frame takes its fill from the chosen swatch, the
-           ring band from the other — so the choice is shown, not described. -->
-      <svg viewBox="0 0 320 168" role="img" aria-labelledby="kit-alt">
-        <title id="kit-alt">Grove glasses and ring in the colours you have chosen</title>
-        <!-- Temples first, so the fronts sit over where they join. -->
-        <path class="frame" d="M20 52 4 40c-3-2-6 3-3 5l17 13Z"/>
-        <path class="frame" d="M300 52l16-12c3-2 6 3 3 5l-17 13Z"/>
-        <rect class="frame" x="14" y="38" width="132" height="64" rx="22"/>
-        <rect class="lens" x="24" y="47" width="112" height="46" rx="16"/>
-        <rect class="frame" x="174" y="38" width="132" height="64" rx="22"/>
-        <rect class="lens" x="184" y="47" width="112" height="46" rx="16"/>
-        <rect class="frame" x="140" y="54" width="40" height="11" rx="5"/>
-        <!-- The ring, set apart so it reads as the second thing in the box. -->
-        <g transform="translate(138 122)">
-          <circle class="band" cx="22" cy="22" r="21"/>
-          <circle cx="22" cy="22" r="12.5" fill="#F6F7F9"/>
-        </g>
-      </svg>
-    </div>
-
-    <div class="choose">
-      <h3>Grove, in a box</h3>
-      <p class="note">
-        The glasses are an ordinary Bluetooth headset, so your phone routes
-        sound to them the moment they pair. The ring is the button.
-      </p>
-
-      <div class="option">
-        <span class="label" id="frame-label">Frame</span>
-        <div class="swatches" role="radiogroup" aria-labelledby="frame-label" id="frames">
-          <button class="swatch" role="radio" aria-checked="true" data-name="Grove white" data-fill="#EFEEEA" data-edge="#D9D8D2">
-            <span class="chip" style="background:#EFEEEA"></span>White
-          </button>
-          <button class="swatch" role="radio" aria-checked="false" data-name="Grove blue" data-fill="#3D5A80" data-edge="#2F4763">
-            <span class="chip" style="background:#3D5A80"></span>Blue
-          </button>
-          <button class="swatch" role="radio" aria-checked="false" data-name="Grove beige" data-fill="#D8C9B2" data-edge="#BFAE93">
-            <span class="chip" style="background:#D8C9B2"></span>Beige
-          </button>
-        </div>
-      </div>
-
-      <div class="option">
-        <span class="label" id="ring-label">Ring</span>
-        <div class="swatches" role="radiogroup" aria-labelledby="ring-label" id="rings">
-          <button class="swatch" role="radio" aria-checked="true" data-name="black ring" data-fill="#1E2024">
-            <span class="chip" style="background:#1E2024"></span>Black
-          </button>
-          <button class="swatch" role="radio" aria-checked="false" data-name="white ring" data-fill="#F0EFEC">
-            <span class="chip" style="background:#F0EFEC"></span>White
-          </button>
-        </div>
-      </div>
-
-      <div class="price">
-        <div>
-          <div class="amount">$79.99</div>
-          <div class="chosen" id="chosen">Grove white, black ring</div>
-        </div>
-        <button class="buy" type="button">Reserve a pair</button>
-      </div>
-    </div>
-  </div>
-</div>
-</section>
-
-<section>
-<div class="wrap">
-  <div class="section-head">
-    <h2>What it costs to run.</h2>
-    <p>
-      Talking is cheap; looking things up on the web and writing documents are
-      not. So those are what the plans count, and the free one is a real one.
-    </p>
-  </div>
-
-  <div class="plans">
-    <div class="plan">
-      <span class="name">Free</span>
-      <span class="cost">$0</span>
-      <ul>
-        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>15 turns a day</li>
-        <li class="off">No web search</li>
-        <li class="off">No documents</li>
-        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>Calendar, mail and memory</li>
-      </ul>
-    </div>
-    <div class="plan picked">
-      <span class="name">Plus</span>
-      <span class="cost">$9.99 <span>a month</span></span>
-      <ul>
-        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>50 turns a day</li>
-        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>150 web searches a month</li>
-        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>15 documents a month</li>
-        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>Everything in Free</li>
-      </ul>
-    </div>
-    <div class="plan">
-      <span class="name">Pro</span>
-      <span class="cost">$19.99 <span>a month</span></span>
-      <ul>
-        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>150 turns a day</li>
-        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>500 web searches a month</li>
-        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>60 documents a month</li>
-        <li><svg class="tickmark" aria-hidden="true"><use href="#u-check"/></svg>Research reports with sources</li>
-      </ul>
-    </div>
-  </div>
-</div>
-</section>
-
-<section>
-<div class="wrap">
-  <div class="section-head">
-    <h2>What it cannot do.</h2>
-    <p>Constraints the product is shaped around, not gaps waiting to be filled.</p>
-  </div>
-
-  <div class="limits">
-    <div class="limit">
-      <h3>Wake from closed</h3>
+  <section class="band">
+    <h2>Neither of these has any Bluetooth code in it.</h2>
+    <div class="kit">
       <div>
-        <p>
-          No iOS app can be woken from a fully terminated state by a button
-          press. Grove has to be running — backgrounded, locked and pocketed are
-          all fine. Force-quitting it turns the ring off until you open it again.
-        </p>
+        <svg aria-hidden="true" style="color:var(--amber)"><use href="#u-glasses"/></svg>
+        <span><b>Glasses</b><span class="mono">an ordinary headset</span></span>
       </div>
-    </div>
-
-    <div class="limit">
-      <h3>Stay quiet and stay alive</h3>
       <div>
-        <p>
-          Holding the audio session is what makes Grove the now-playing app, and
-          that is what lets the ring reach it. An idle session gets torn down, so
-          the module renders a silent loop to hold its place.
-        </p>
-        <span class="flag">Most likely cause of an App Store rejection in the project. Fine for personal builds and TestFlight.</span>
+        <svg aria-hidden="true" style="color:var(--dusk)"><use href="#u-ring"/></svg>
+        <span><b>Ring</b><span class="mono">a media remote</span></span>
       </div>
     </div>
-
-    <div class="limit">
-      <h3>Drive the glasses</h3>
-      <div>
-        <p>
-          There is nothing to drive. They are an ordinary Bluetooth headset and
-          iOS handles the routing, which is why there is no Bluetooth code in the
-          app at all. The one thing worth checking is whether they connected for
-          playback only.
-        </p>
-      </div>
-    </div>
-  </div>
+  </section>
 </div>
-</section>
 
+<!-- ========================================================== footer -->
 <div class="wrap">
-  <footer>
-    <p>
-      Interface preview. Brand marks are the real Noctus icon set; the rest is
-      one stroke family at a single weight.
-    </p>
-    <span class="built">groveapp_preview.html</span>
+  <footer class="foot">
+    <span class="mono">nothing here is in src/ yet</span>
+    <span class="swatches" aria-hidden="true">
+      <i style="background:#D9DEEC"></i><i style="background:#A9B2D4"></i>
+      <i style="background:#8A8FB8"></i><i style="background:#6E6490"></i>
+      <i style="background:#F3A063"></i><i style="background:#DC5F38"></i>
+    </span>
   </footer>
 </div>
 
+</div><!-- /.above -->
+
+<svg width="0" height="0" aria-hidden="true" style="position:absolute"><defs>
+  <linearGradient id="gl" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#7DD3FC"/><stop offset="1" stop-color="#A5B4FC"/>
+  </linearGradient>
+</defs></svg>
+
 <script>
-(function () {
-  // The orb is the only stateful thing on the page. Pressing mic walks the
-  // states the app actually has; pressing close returns it to rest.
-  var STATES = [
-    { key:'listening', line:'Listening', cap:'play something mellow' },
-    { key:'thinking',  line:'Thinking',  cap:'…' },
-    { key:'speaking',  line:'Speaking',  cap:'Putting on the Sunday playlist.' },
-    { key:'working',   line:'Working',   cap:'Queuing it on your glasses…' },
-    { key:'idle',      line:'Ready — press to talk', cap:'Moved your two o’clock to Thursday and let Priya know.' }
-  ];
-  var i = STATES.length - 1;
-  var caption = document.getElementById('orb-caption');
-  var line    = document.getElementById('state-line');
-  var orb     = document.getElementById('orb');
+(() => {
+'use strict';
+const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  function paint() {
-    var s = STATES[i];
-    caption.textContent = s.cap;
-    line.textContent = s.line;
-    orb.setAttribute('data-state', s.key);
-  }
+/* =====================================================================
+   THE SKY
 
-  document.getElementById('btn-mic').addEventListener('click', function () {
-    i = (i + 1) % STATES.length;
-    paint();
-  });
-  document.getElementById('btn-close').addEventListener('click', function () {
-    i = STATES.length - 1;
-    paint();
-  });
+   A field of colour with a grain wave for its lower edge.
 
-  paint();
-})();
+   Above the horizon: the dusk gradient, clipped to the wave, so the
+   colour itself has a wavy bottom rather than a straight one with
+   something drawn over it. Below it: grains, falling away and thinning
+   out, so the colour dissolves into the paper instead of stopping.
 
-(function () {
-  // The configurator. Picking a swatch repaints the drawing, because the point
-  // of choosing a colour is seeing it — and the selection reads back in words
-  // under the price, so the choice is never colour-only.
-  var stage  = document.getElementById('stage');
-  var chosen = document.getElementById('chosen');
-  if (!stage || !chosen) return;
+   The horizon is four sines summed, on wavelengths and rates that are
+   co-prime-ish, so crests do not line up twice in an afternoon. Its
+   height is the state: it rises when Grove is listening and sinks when
+   it is not, and nothing else in the app animates at all.
+   ===================================================================== */
 
-  var picked = { frame: 'Grove white', ring: 'black ring' };
+/* Gradient stops, from the top of the canvas down to the lowest the
+   horizon goes. The warm end lands at the waterline on purpose: that is
+   the whole look — cool at altitude, burning where it meets the
+   surface. */
+const SKIES = {
+  'hero-dark': {
+    stops: [[0,'rgba(120,128,172,0)'],[0.3,'rgba(124,122,168,0.5)'],
+            [0.62,'rgba(140,110,160,0.78)'],[0.84,'rgba(224,138,88,0.92)'],
+            [1,'rgba(220,95,56,1)']],
+    grain: [245,172,124], amp: 0.95, rate: 0.34, cols: 560, layers: 18, fall: 0.2,
+    mid: 0.46, bright: 1,
+  },
+  // Daylight is ocean, night keeps the sunset. The dusk gradient is
+  // beautiful on a dark screen and far too loud on a white one, where
+  // it was the brightest thing on a surface whose whole job is quiet.
+  'phone-light': {
+    stops: [[0,'rgba(232,237,247,1)'],[0.34,'rgba(190,200,232,1)'],
+            [0.62,'rgba(146,156,210,1)'],[0.85,'rgba(104,110,176,1)'],
+            [1,'rgba(74,76,140,1)']],
+    grain: [104,110,176], amp: 0.8, rate: 0.3, cols: 158, layers: 18, fall: 0.22,
+    mid: 0.5, bright: 1,
+  },
+  'phone-dark': {
+    stops: [[0,'rgba(44,46,70,1)'],[0.4,'rgba(66,62,98,1)'],
+            [0.68,'rgba(112,82,118,1)'],[0.88,'rgba(206,122,78,1)'],
+            [1,'rgba(192,78,46,1)']],
+    grain: [245,172,124], amp: 0.8, rate: 0.3, cols: 158, layers: 18, fall: 0.22,
+    mid: 0.5, bright: 1,
+  },
+  rung: {
+    stops: [[0,'rgba(120,128,172,0)'],[0.44,'rgba(126,118,162,0.42)'],
+            [0.78,'rgba(196,126,96,0.72)'],[1,'rgba(220,95,56,0.95)']],
+    grain: [245,172,124], amp: 0.9, rate: 0.34, cols: 72, layers: 6, fall: 0.4,
+    mid: 0.46, bright: 1,
+  },
+};
 
-  function select(group, button) {
-    group.querySelectorAll('.swatch').forEach(function (other) {
-      other.setAttribute('aria-checked', String(other === button));
-      other.tabIndex = other === button ? 0 : -1;
-    });
-    if (group.id === 'frames') {
-      stage.style.setProperty('--frame', button.dataset.fill);
-      stage.style.setProperty('--frame-edge', button.dataset.edge);
-      picked.frame = button.dataset.name;
-    } else {
-      stage.style.setProperty('--ring', button.dataset.fill);
-      picked.ring = button.dataset.name;
-    }
-    chosen.textContent = picked.frame + ', ' + picked.ring;
-  }
+/* Amplitude, rate and height per state. Nothing here changes hue: a
+   palette that doubled as the status would stop telling you anything. */
+const MOODS = {
+  ready:  { amp: 0.55, rate: 0.26, mid: 0.50 },
+  listen: { amp: 1.50, rate: 0.74, mid: 0.66 },
+  think:  { amp: 0.60, rate: 1.70, mid: 0.54 },
+  work:   { amp: 0.95, rate: 0.30, mid: 0.58 },
+  speak:  { amp: 1.30, rate: 0.98, mid: 0.62 },
+};
 
-  ['frames', 'rings'].forEach(function (id) {
-    var group = document.getElementById(id);
-    if (!group) return;
-    var swatches = Array.prototype.slice.call(group.querySelectorAll('.swatch'));
-    swatches.forEach(function (button, index) {
-      button.tabIndex = button.getAttribute('aria-checked') === 'true' ? 0 : -1;
-      button.addEventListener('click', function () { select(group, button); });
-      // Arrow keys move between swatches, which is what a radio group does.
-      button.addEventListener('keydown', function (event) {
-        var step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
-                 : event.key === 'ArrowLeft'  || event.key === 'ArrowUp'   ? -1 : 0;
-        if (!step) return;
-        event.preventDefault();
-        var next = swatches[(index + step + swatches.length) % swatches.length];
-        select(group, next);
-        next.focus();
+const PARTS = [
+  { k: 1.0, w: 0.55, p: 0.0, a: 1.00 },
+  { k: 2.3, w: 0.81, p: 1.7, a: 0.46 },
+  { k: 3.7, w: 1.19, p: 3.1, a: 0.26 },
+  { k: 6.1, w: 1.63, p: 5.2, a: 0.13 },
+];
+
+/* Cheap integer hash, kept in 32 bits the whole way.
+   Math.random would reshuffle the sand on every resize, which turns a
+   redraw into a visible twitch — so the scatter has to be a pure
+   function of the index.
+
+   The obvious one-liner, n*(n*n*15731+789221), leaves 32-bit range at
+   about n = 1300 and lands on a float past 2^53, where the low bits are
+   simply gone. Every index above that collapses onto a handful of
+   values: grains stacked into visible rows, and whole clusters of the
+   brain piled onto one point. Math.imul keeps every step a real 32-bit
+   multiply, which is the entire fix. */
+function hash(n){
+  n = (n | 0) ^ 0x27d4eb2d;
+  n = Math.imul(n ^ (n >>> 15), 0x2c1b3c6d);
+  n = Math.imul(n ^ (n >>> 12), 0x297a2d39);
+  return ((n ^ (n >>> 15)) >>> 0) / 4294967296;
+}
+
+const skies = [];
+
+function buildSky(canvas){
+  const spec = SKIES[canvas.dataset.sky] || SKIES['hero-dark'];
+  const mood = canvas.dataset.mood ? MOODS[canvas.dataset.mood] : null;
+  const w = {
+    canvas, ctx: canvas.getContext('2d'), spec,
+    amp: mood ? mood.amp : spec.amp,
+    rate: mood ? mood.rate : spec.rate,
+    mid: mood ? mood.mid : spec.mid,
+    wantMid: mood ? mood.mid : spec.mid,
+    grains: [], dpr: 0, cw: 0, ch: 0, grad: null, gradAt: -1,
+    lift: 0, liftAt: 0.5, clock: hash(spec.cols) * 40,
+  };
+
+  /* Contour lines, not a cloud.
+
+     The grains sit on a fixed number of layers below the surface, each
+     tracing the same waveform a little deeper and a little fainter —
+     the way a receding wave leaves lines in wet sand.
+
+     An earlier version jittered depth inside each cell. That is the
+     better random distribution and much the worse picture: the layers
+     dissolved into an even speckle and the surface stopped reading as a
+     surface at all. So depth is quantised and only x is jittered, by
+     well under a column, which keeps each line a line while stopping
+     the columns from stacking into vertical stripes. */
+  const cols = spec.cols;
+  const layers = spec.layers;
+  for (let c = 0; c < cols; c++) {
+    for (let j = 0; j < layers; j++) {
+      const i = c * layers + j;
+      w.grains.push({
+        x: (c + hash(i * 7 + 1) * 0.7 + 0.15) / cols,
+        d: j / (layers - 1),
+        bob: hash(i * 7 + 3) * 6.283,
+        jit: hash(i * 7 + 4) - 0.5,
       });
+    }
+  }
+  skies.push(w);
+  return w;
+}
+
+function fit(w){
+  const r = w.canvas.getBoundingClientRect();
+  if (!r.width || !r.height) return false;
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  if (w.cw === r.width && w.ch === r.height && w.dpr === dpr) return true;
+  w.cw = r.width; w.ch = r.height; w.dpr = dpr;
+  w.canvas.width = Math.round(r.width * dpr);
+  w.canvas.height = Math.round(r.height * dpr);
+  w.grad = null;
+  return true;
+}
+
+function surface(w, x, amp, base){
+  let s = 0;
+  for (let j = 0; j < 4; j++) {
+    const P = PARTS[j];
+    s += P.a * Math.sin(x * P.k * 6.283 + w.clock * P.w + P.p);
+  }
+  s /= 1.85;
+  // The swell under the pointer: the surface is something you can push
+  // on, which is the only control this element has or needs.
+  const near = 1 - Math.min(1, Math.abs(x - w.liftAt) * 4.5);
+  const swell = near > 0 ? near * near * w.lift : 0;
+  return base + s * amp - swell * w.ch * 0.26;
+}
+
+function drawSky(w, dt){
+  if (!fit(w)) return;
+  const ctx = w.ctx, cw = w.cw, ch = w.ch, spec = w.spec;
+
+  w.clock += dt * w.rate;
+  w.mid += (w.wantMid - w.mid) * 0.05;       // the horizon eases, never jumps
+
+  ctx.setTransform(w.dpr, 0, 0, w.dpr, 0, 0);
+  ctx.clearRect(0, 0, cw, ch);
+
+  const base = ch * w.mid;
+  const amp = ch * 0.13 * w.amp;
+  const low = base + amp;
+
+  if (!w.grad || w.gradAt !== Math.round(low)) {
+    w.grad = ctx.createLinearGradient(0, 0, 0, low);
+    for (const st of spec.stops) w.grad.addColorStop(st[0], st[1]);
+    w.gradAt = Math.round(low);
+  }
+
+  /* -------------------------------- the colour, clipped to the wave */
+
+  // Clipped rather than filled column by column: 300 createLinearGradient
+  // calls a frame is the difference between this running and not.
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(cw, 0);
+  for (let x = cw; x >= 0; x -= 2) ctx.lineTo(x, surface(w, x / cw, amp, base));
+  ctx.closePath();
+  ctx.clip();
+  ctx.fillStyle = w.grad;
+  ctx.fillRect(0, 0, cw, low + 2);
+  ctx.restore();
+
+  /* ----------------------------------- the grains, falling away */
+
+  const fall = ch * spec.fall;
+  const g0 = spec.grain[0], g1 = spec.grain[1], g2 = spec.grain[2];
+
+  for (let i = 0; i < w.grains.length; i++) {
+    const g = w.grains[i];
+    const y = surface(w, g.x, amp, base)
+            + g.d * fall
+            + Math.sin(w.clock * 2.1 + g.bob) * 1.6
+            + g.jit * 1.3;
+    if (y < -4 || y > ch + 4) continue;
+
+    // Dense at the waterline, gone below it. Cubed, because a linear
+    // fade leaves a haze across the whole lower half.
+    // Faded to nothing at both ends. Grains are placed slightly outside
+    // their column so the scatter has no structure, which also means a
+    // few land outside the canvas and pile up against its edge.
+    const edge = Math.max(0, Math.min(1, Math.min(g.x, 1 - g.x) / 0.05));
+    const fade = 1 - g.d;
+    const a = fade * fade * fade * edge * spec.bright;
+    if (a < 0.012) continue;
+    ctx.fillStyle = 'rgba(' + g0 + ',' + g1 + ',' + g2 + ',' + a.toFixed(3) + ')';
+    const px = 1 + fade * 0.5;
+    ctx.fillRect(g.x * cw, y, px, px);
+  }
+}
+
+/* =====================================================================
+   THE BRAIN
+
+   Every memory Grove holds, as one disc of dots.
+
+   It packs outward from the middle, which means the size of the thing
+   is the size of what it knows: a quiet first week is a small circle, a
+   year in is a wide one. Each kind of memory takes a wedge of the disc
+   rather than its own floating blob, because five blobs are five
+   things and this is meant to read as one mind.
+
+   Dots are linked to their nearest neighbours regardless of which wedge
+   they fall in, so the plot is genuinely connected across the seams.
+   Scrolling the list under it lights that wedge and greys the rest: the
+   map is the scrollbar.
+   ===================================================================== */
+
+const CLUSTERS = [
+  { id:'did',     c:[125,211,252], count:24 },
+  { id:'open',    c:[243,160,99],  count:14 },
+  { id:'people',  c:[134,239,172], count:26 },
+  { id:'repeats', c:[240,131,106], count:10 },
+  { id:'about',   c:[196,181,253], count:22 },
+];
+
+function buildBrain(host){
+  const canvas = host.querySelector('canvas');
+  const b = { host, canvas, ctx: canvas.getContext('2d'), nodes: [], links: [],
+              dpr: 0, cw: 0, ch: 0, active: 'did', glow: {}, clock: 0 };
+
+  const total = CLUSTERS.reduce((n, cl) => n + cl.count, 0);
+  // Radius grows with the square root of the count, so doubling what
+  // Grove remembers widens the disc without quadrupling it.
+  b.spread = Math.min(0.30, 0.105 * Math.sqrt(total / 12));
+
+  let placed = 0;
+  CLUSTERS.forEach((cl, ci) => {
+    b.glow[cl.id] = ci === 0 ? 1 : 0;
+    const from = (placed / total) * 6.283;
+    const span = (cl.count / total) * 6.283;
+    for (let i = 0; i < cl.count; i++) {
+      const s = ci * 1013 + i * 7;
+      // Square-rooted radius, or everything crowds the rim and the
+      // middle comes out hollow.
+      const rad = Math.sqrt(0.06 + hash(s + 2) * 0.94) * b.spread;
+      // Spilled a little past the wedge, so the seams are not visible
+      // as five hard pie slices.
+      const ang = from + (hash(s + 1) * 1.1 - 0.05) * span;
+      b.nodes.push({
+        cl: ci,
+        x: 0.5 + Math.cos(ang) * rad * 1.52,
+        y: 0.5 + Math.sin(ang) * rad * 1.45,
+        s: 0.8 + hash(s + 3) * 1.0,
+        ph: hash(s + 4) * 6.283,
+        sp: 0.5 + hash(s + 5),
+      });
+      placed++;
+    }
+  });
+
+  // Nearest neighbours across the whole disc, not within a wedge: that
+  // is the difference between one connected plot and five constellations
+  // sharing a frame.
+  for (let i = 0; i < b.nodes.length; i++) {
+    const near = [];
+    for (let j = 0; j < b.nodes.length; j++) {
+      if (i === j) continue;
+      const dx = (b.nodes[i].x - b.nodes[j].x) * 1.6;
+      const dy = b.nodes[i].y - b.nodes[j].y;
+      near.push([dx * dx + dy * dy, j]);
+    }
+    near.sort((p, q) => p[0] - q[0]);
+    for (let k = 0; k < 3 && k < near.length; k++) b.links.push([i, near[k][1]]);
+  }
+  return b;
+}
+
+function drawBrain(b, dt){
+  const r = b.canvas.getBoundingClientRect();
+  if (!r.width) return;
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  if (b.cw !== r.width || b.ch !== r.height || b.dpr !== dpr) {
+    b.cw = r.width; b.ch = r.height; b.dpr = dpr;
+    b.canvas.width = Math.round(r.width * dpr);
+    b.canvas.height = Math.round(r.height * dpr);
+  }
+  const ctx = b.ctx, cw = b.cw, ch = b.ch;
+  b.clock += dt;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cw, ch);
+
+  for (const cl of CLUSTERS) {
+    const want = cl.id === b.active ? 1 : 0;
+    b.glow[cl.id] += (want - b.glow[cl.id]) * Math.min(1, dt * 7);
+  }
+
+  const px = (n) => (n.x + Math.sin(b.clock * n.sp * 0.4 + n.ph) * 0.005) * cw;
+  const py = (n) => (n.y + Math.cos(b.clock * n.sp * 0.33 + n.ph) * 0.009) * ch;
+
+  // Anything not the live wedge goes to a cold grey rather than merely
+  // dimming: a dark blue dot at low opacity still reads as blue, and the
+  // whole point is that one kind is lit and the rest are not.
+  const GREY = [128, 138, 158];
+  const mix = (c, g) => [
+    GREY[0] + (c[0] - GREY[0]) * g,
+    GREY[1] + (c[1] - GREY[1]) * g,
+    GREY[2] + (c[2] - GREY[2]) * g,
+  ];
+
+  ctx.lineWidth = 0.55;
+  for (const L of b.links) {
+    const n0 = b.nodes[L[0]], n1 = b.nodes[L[1]];
+    const g = Math.max(b.glow[CLUSTERS[n0.cl].id], b.glow[CLUSTERS[n1.cl].id]);
+    const c = mix(CLUSTERS[n0.cl].c, g);
+    ctx.strokeStyle = 'rgba(' + (c[0]|0) + ',' + (c[1]|0) + ',' + (c[2]|0) + ',' + (0.1 + g * 0.3).toFixed(3) + ')';
+    ctx.beginPath();
+    ctx.moveTo(px(n0), py(n0));
+    ctx.lineTo(px(n1), py(n1));
+    ctx.stroke();
+  }
+
+  for (const n of b.nodes) {
+    const cl = CLUSTERS[n.cl];
+    const g = b.glow[cl.id];
+    const c = mix(cl.c, g);
+    const a = 0.3 + g * 0.7;
+    ctx.fillStyle = 'rgba(' + (c[0]|0) + ',' + (c[1]|0) + ',' + (c[2]|0) + ',' + a.toFixed(3) + ')';
+    ctx.beginPath();
+    ctx.arc(px(n), py(n), n.s * (1.1 + g * 0.6), 0, 6.283);
+    ctx.fill();
+  }
+}
+
+/* ------------------------------------------------------------- loop */
+
+/* One loop for every canvas on the page. Ten rAF loops competing is how
+   a page with ten small animations ends up at thirty frames. */
+const brains = [];
+document.querySelectorAll('canvas[data-sky]').forEach(buildSky);
+document.querySelectorAll('[data-brain]').forEach((h) => brains.push(buildBrain(h)));
+
+let last = 0;
+function frame(now){
+  const dt = last ? Math.min(0.05, (now - last) / 1000) : 0.016;
+  last = now;
+  for (const w of skies) { w.lift += (0 - w.lift) * 0.06; drawSky(w, dt); }
+  for (const b of brains) drawBrain(b, dt);
+  requestAnimationFrame(frame);
+}
+
+if (still) {
+  const once = () => {
+    skies.forEach((w) => { w.cw = 0; w.clock += 4.2; w.mid = w.wantMid; drawSky(w, 0); });
+    brains.forEach((b) => drawBrain(b, 0.5));
+  };
+  once();
+  addEventListener('resize', once);
+} else {
+  requestAnimationFrame(frame);
+}
+
+/* ----------------------------------------------- brain follows scroll */
+
+/* The list drives the map, not the other way round. Scrolling to a
+   section lights its wedge and moves the rail; there is no second
+   control to keep in sync with the first. */
+brains.forEach((b) => {
+  const pane = b.host.closest('.pane');
+  const screen = b.host.closest('.screen');
+  if (!pane) return;
+  const secs = Array.prototype.slice.call(pane.querySelectorAll('[data-sec]'));
+  const rail = screen ? screen.querySelector('[data-rail]') : null;
+  const segs = rail ? Array.prototype.slice.call(rail.children) : [];
+
+  // The headings stick directly under the title-and-map block, so where
+  // they stop is whatever that block measures — read, never guessed.
+  const stop = pane.querySelector('.stop');
+  const measure = () => {
+    if (!stop) return;
+    pane.style.setProperty('--lens-top', Math.round(stop.offsetHeight) + 'px');
+  };
+  requestAnimationFrame(measure);
+  addEventListener('resize', measure);
+
+  const read = () => {
+    // A section becomes the one you are looking at when it reaches the
+    // underside of that block, which is also where its heading parks.
+    const line = pane.getBoundingClientRect().top
+               + (stop ? stop.offsetHeight : 236) + 14;
+    let cur = secs[0];
+    for (const sec of secs) if (sec.getBoundingClientRect().top <= line) cur = sec;
+    if (!cur || cur.dataset.sec === b.active) return;
+    b.active = cur.dataset.sec;
+    segs.forEach((sg) => sg.classList.toggle('on', sg.dataset.seg === b.active));
+  };
+
+  pane.addEventListener('scroll', read, { passive: true });
+  read();
+
+  // Tapping a wedge jumps to its section, so the map is a control too.
+  b.host.addEventListener('pointerdown', (e) => {
+    const r = b.canvas.getBoundingClientRect();
+    const mx = (e.clientX - r.left) / r.width - 0.5;
+    const my = (e.clientY - r.top) / r.height - 0.5;
+    let best = null, bestD = Infinity;
+    for (const n of b.nodes) {
+      const dx = (n.x - 0.5 - mx) * 1.6, dy = n.y - 0.5 - my;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = n; }
+    }
+    if (!best) return;
+    const id = CLUSTERS[best.cl].id;
+    const sec = secs.find((x) => x.dataset.sec === id);
+    if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+});
+
+/* ----------------------------------------------- the sky travels too */
+
+/* The horizon is part of the page, not a header pinned over it, so it
+   rides up with the content at about half speed. Pinning it made the
+   whole screen feel like it was sliding underneath a sticker. */
+document.querySelectorAll('.screen').forEach((screen) => {
+  const sky = screen.querySelector('.sky');
+  const pane = screen.querySelector('.pane');
+  if (!sky || !pane) return;
+  pane.addEventListener('scroll', () => {
+    sky.style.transform = 'translateY(' + (-pane.scrollTop * 0.45).toFixed(1) + 'px)';
+  }, { passive: true });
+});
+
+/* --------------------------------------------------------------- sea */
+
+const sea = document.getElementById('sea');
+const hero = skies[0];
+const word = document.getElementById('st-word');
+const hint = document.getElementById('st-hint');
+
+const STATES = [
+  ['Ready',     'press to talk',        'ready'],
+  ['Listening', 'move my two o clock',  'listen'],
+  ['Thinking',  'choosing abilities',   'think'],
+  ['Working',   'calendar.move',        'work'],
+  ['Speaking',  'moved it, Priya told', 'speak'],
+];
+let at = 0;
+
+function show(){
+  const s = STATES[at];
+  const m = MOODS[s[2]];
+  word.textContent = s[0];
+  hint.textContent = s[1];
+  hero.amp = m.amp;
+  hero.rate = m.rate;
+  hero.wantMid = m.mid;
+  // The phone's own sky follows, so the two always agree about the state.
+  const phone = skies.find((w) => w.canvas.dataset.sky === 'phone-light');
+  if (phone) { phone.amp = m.amp * 0.85; phone.rate = m.rate; phone.wantMid = m.mid * 0.92; }
+}
+
+if (sea && hero) {
+  const push = (e) => {
+    const r = sea.getBoundingClientRect();
+    hero.liftAt = (e.clientX - r.left) / r.width;
+    hero.lift = Math.min(1, hero.lift + 0.22);
+  };
+  sea.addEventListener('pointermove', (e) => { if (e.buttons) push(e); });
+  sea.addEventListener('pointerdown', push);
+  sea.addEventListener('click', () => { at = (at + 1) % STATES.length; show(); });
+  sea.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    at = (at + 1) % STATES.length;
+    show();
+  });
+  show();
+}
+
+/* --------------------------------------------------- the dock bubble */
+
+/* The bubble travels to whatever you tap, which is what makes a tab bar
+   feel like one object rather than four buttons. */
+document.querySelectorAll('[data-dock]').forEach((dock) => {
+  const bubble = dock.querySelector('.bubble');
+  const tabs = Array.prototype.slice.call(dock.querySelectorAll('a'));
+
+  const settle = (el, animate) => {
+    if (!animate) bubble.style.transition = 'none';
+    bubble.style.transform = 'translateX(' + (el.offsetLeft + el.offsetWidth / 2 - 21) + 'px)';
+    if (!animate) requestAnimationFrame(() => { bubble.style.transition = ''; });
+  };
+  const current = () => dock.querySelector('a.on') || tabs[0];
+
+  // offsetLeft is 0 until layout has happened at least once.
+  requestAnimationFrame(() => settle(current(), false));
+  addEventListener('resize', () => settle(current(), false));
+
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', (e) => {
+      e.preventDefault();
+      tabs.forEach((t) => t.classList.remove('on'));
+      tab.classList.add('on');
+      settle(tab, true);
     });
   });
+});
+
+/* ---------------------------------------------------- the status bar */
+
+document.querySelectorAll('[data-hw]').forEach((hw) => {
+  const pip = hw.querySelector('.pip');
+  pip.addEventListener('click', () => {
+    const open = hw.classList.toggle('open');
+    pip.setAttribute('aria-expanded', String(open));
+  });
+});
+
+/* -------------------------------------------------------- phone tilt */
+
+if (!still && matchMedia('(hover: hover)').matches) {
+  document.querySelectorAll('[data-tilt]').forEach((p) => {
+    p.addEventListener('pointermove', (e) => {
+      const b = p.getBoundingClientRect();
+      const x = (e.clientX - b.left) / b.width - 0.5;
+      const y = (e.clientY - b.top) / b.height - 0.5;
+      p.style.transform = 'perspective(1100px) rotateY(' + (x * 5).toFixed(2) + 'deg) rotateX(' + (-y * 5).toFixed(2) + 'deg) translateZ(6px)';
+    });
+    p.addEventListener('pointerleave', () => { p.style.transform = ''; });
+  });
+}
+
+/* ------------------------------------------------------------ water */
+
+if (!still) {
+  let queued = false;
+  addEventListener('pointermove', (e) => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      document.body.style.setProperty('--mx', (e.clientX / innerWidth).toFixed(3));
+      document.body.style.setProperty('--my', (e.clientY / innerHeight).toFixed(3));
+      queued = false;
+    });
+  }, { passive: true });
+}
+
+/* -------------------------------------------------------- swipe away */
+
+/* Leftward only, committing past 40% — the numbers from
+   src/components/swipe-away.tsx, so this feels like the thumb will. */
+document.querySelectorAll('[data-swipe]').forEach((row) => {
+  const front = row.querySelector('.front');
+  const behind = row.querySelector('.behind');
+  let from = null, x = 0, live = false;
+
+  const paint = () => {
+    front.style.transform = 'translateX(' + x + 'px)';
+    behind.style.opacity = Math.min(1, -x / (row.offsetWidth * 0.4)).toFixed(3);
+  };
+
+  front.addEventListener('pointerdown', (e) => {
+    from = e.clientX; live = false;
+    front.setPointerCapture(e.pointerId);
+  });
+  front.addEventListener('pointermove', (e) => {
+    if (from === null) return;
+    const dx = e.clientX - from;
+    if (!live && dx > -8) return;
+    live = true;
+    row.classList.add('dragging');
+    x = Math.min(0, dx);
+    paint();
+  });
+  const release = () => {
+    if (from === null) return;
+    from = null;
+    row.classList.remove('dragging');
+    if (-x >= row.offsetWidth * 0.4) {
+      // It collapses rather than vanishing: in a list where several rows
+      // look alike, the collapse is what tells you which one went.
+      front.style.transform = 'translateX(-' + row.offsetWidth + 'px)';
+      row.style.height = row.offsetHeight + 'px';
+      row.style.transition = 'opacity .2s, height .2s, margin .2s';
+      requestAnimationFrame(() => {
+        row.style.opacity = '0';
+        row.style.height = '0px';
+        row.style.marginBottom = '-7px';
+      });
+      setTimeout(() => row.remove(), 240);
+      return;
+    }
+    x = 0;
+    paint();
+  };
+  front.addEventListener('pointerup', release);
+  front.addEventListener('pointercancel', release);
+});
+
+document.querySelectorAll('.more').forEach((b) =>
+  b.addEventListener('click', () => { b.textContent = 'that is all'; b.disabled = true; })
+);
 })();
-
 </script>
-
 </body>
 </html>

@@ -796,10 +796,20 @@ section('What it did, and what it still owes');
   const owed = screen.slice(screen.indexOf('{owed.map('), screen.indexOf('{owed.map(') + 400);
   check(!/SwipeAway/.test(owed), 'a promise cannot be swiped away');
 
-  // How you talk belongs beside the switches that used to control it.
+  // The read on how someone talks is not shown anywhere any more. It was on
+  // the memory screen, then beside the switches it replaced, and it belongs on
+  // neither: it is an observation about a person, not a control, and a screen
+  // of toggles is the wrong place to be told what you sound like.
+  //
+  // What still has to be true is that it reaches the model. Deleting the
+  // read-out and quietly deleting the behaviour with it is the regression this
+  // guards — the app would look identical and stop adapting.
   const settings = fs.readFileSync(path.join(ROOT, 'src/app/(app)/settings.tsx'), 'utf8');
-  check(/function HowYouTalk\(/.test(settings), 'the read on how they talk is in Settings');
-  check(!/function HowYouTalk\(/.test(screen), 'and not on the memory screen');
+  check(!/function HowYouTalk\(/.test(settings), 'the read on how they talk is not a setting');
+  check(!/function HowYouTalk\(/.test(screen), 'nor is it on the memory screen');
+
+  const brain = fs.readFileSync(path.join(ROOT, 'src/lib/brain.ts'), 'utf8');
+  check(/rapportDirective/.test(brain), 'but it still reaches the prompt');
 }
 
 /* ------------------------------------------------------------- verdict */

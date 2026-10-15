@@ -31,7 +31,6 @@ import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
 import { runSelfCheck, type CheckResult } from '@/lib/selfCheck';
-import { rapport, type Rapport } from '@/lib/rapport';
 import { checkNow, runningLabel, type Caught } from '@/lib/updates';
 import { MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona, type Preset } from '@/lib/persona';
 import { hasOwnKey, setOwnKey } from '@/lib/lightModel';
@@ -208,15 +207,17 @@ export default function Settings() {
 
       {/*
         One switch, where six used to be.
-        
+
         What it calls you, how blunt it is, whether it may swear, how deep it
         goes — all of that was asked on this screen, in the abstract, about
         something the person demonstrates every time they open their mouth. It
-        is read from how they actually talk now; see rapport.ts. This one is
-        left because it cannot be observed: someone who has never been
-        interrupted has given no sign either way.
+        is read from how they actually talk now; see rapport.ts. That reading
+        used to be printed here too, and it is not any more: it is an
+        observation about someone, not a control, and a screen of switches is
+        the wrong place to be told what you sound like. This switch stays
+        because it cannot be observed — someone who has never been interrupted
+        has given no sign either way.
       */}
-      <HowYouTalk />
 
       <Section label="Speaking up">
         <Card style={{ paddingVertical: 2 }}>
@@ -439,61 +440,6 @@ function UpdateNow() {
         <Text style={[Type.bodySm, { color: palette.muted, marginTop: 8 }]}>{said}</Text>
       ) : null}
     </>
-  );
-}
-
-/**
- * Grove's read on how this person speaks.
- *
- * The replacement for six settings nobody should have had to fill in, and so
- * the one thing on this screen that is not a setting at all: it is an
- * inference about someone's manner, made by counting their own turns, and an
- * inference nobody can see is one nobody can correct.
- *
- * It lives here rather than beside the memory because this is where someone
- * comes to change how Grove behaves — and the answer to "why is it talking to
- * me like that" belongs next to the switches that used to control it. Nothing
- * to tap: the way to change it is to talk differently, which is the whole
- * point of it not being a setting.
- */
-function HowYouTalk() {
-  const palette = usePalette();
-  const { uid } = useSession();
-  const [read, setRead] = useState<Rapport | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    void rapport(uid).then((r) => alive && setRead(r));
-    return () => {
-      alive = false;
-    };
-  }, [uid]);
-
-  if (!read || read.seen < 8) return null;
-
-  const tone =
-    read.tone === 'casual'
-      ? 'Loose and informal'
-      : read.tone === 'formal'
-        ? 'Polite, full sentences'
-        : 'Plain and direct';
-  const length =
-    read.brevity === 'clipped' ? 'in short bursts' : read.brevity === 'roomy' ? 'at length' : '';
-
-  return (
-    <Section label="How you talk">
-      <Card>
-        <Text style={[Type.body, { color: palette.ink }]}>
-          {tone}
-          {length ? `, ${length}` : ''}
-          {read.swears ? ', and you swear' : ''}.
-        </Text>
-        <Text style={[Type.bodySm, { color: palette.muted, marginTop: 6 }]}>
-          About {read.length} words a turn, over your last {read.seen} exchanges. Grove matches this
-          rather than asking you to set it — talk differently and it follows.
-        </Text>
-      </Card>
-    </Section>
   );
 }
 

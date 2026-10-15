@@ -40,7 +40,11 @@ export const Colors = {
     mark: '#16181D',
     ink: '#16181D',
     inkSoft: '#5B6069',
-    muted: '#9096A0',
+    /**
+      * 4.7:1 on white. The old #9096A0 was 3.0:1 and this token is used at
+      * 11-12px, where that is not a readable grey — it is a light one.
+      */
+    muted: '#6E7480',
     line: '#E8EAEE',
     lineStrong: '#D7DAE0',
     /** Live hardware, live microphone. Never a background. */
@@ -56,7 +60,7 @@ export const Colors = {
     mark: '#F4F5F7',
     ink: '#F4F5F7',
     inkSoft: '#A2A8B3',
-    muted: '#6E7480',
+    muted: '#8A909C',
     line: '#252932',
     lineStrong: '#333843',
     signal: '#4ADE80',
@@ -75,6 +79,42 @@ export type Palette = { [K in keyof (typeof Colors)['light']]: string };
  * Kept here rather than inside the orb so that an app icon and the orb are
  * visibly from the same set — those are the only two places colour appears.
  */
+/**
+ * The horizon, which is the one moving thing in the app.
+ *
+ * Two skies, because the same gradient cannot do both jobs: dusk is
+ * beautiful on a dark screen and far too loud on a white one, where it was
+ * the brightest thing on a surface whose whole job is to be quiet. So
+ * daylight gets cold light before sunrise, and night keeps the sunset.
+ *
+ * Stops run from the top of the band down to the lowest the horizon falls,
+ * which is why the warm end is last: it lands at the waterline on purpose.
+ */
+export const Sky = {
+  day: {
+    stops: ['#E8EDF7', '#BEC8E8', '#929CD2', '#686EB0', '#4A4C8C'],
+    /** The sand. Deep enough to read against paper. */
+    grain: '#686EB0',
+  },
+  night: {
+    stops: ['#2C2E46', '#423E62', '#705276', '#CE7A4E', '#C04E2E'],
+    grain: '#F5AC7C',
+  },
+} as const;
+
+/**
+ * One accent, for a press that commits something and nothing else.
+ *
+ * It is deliberately not `mark`: an irreversible press is the one control
+ * in the app that should not look like every other control.
+ */
+export const Accent = {
+  from: '#7DD3FC',
+  to: '#A5B4FC',
+  /** 9:1 on the lighter end of that gradient. */
+  on: '#0C1030',
+} as const;
+
 export const Spectrum = {
   mint: '#5EEAD4',
   sky: '#7DD3FC',

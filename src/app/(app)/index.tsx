@@ -20,12 +20,13 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon, iconForKey } from '@/components/app-icon';
 import { Icon } from '@/components/icon';
-import { Orb } from '@/components/orb';
+import { Horizon } from '@/components/horizon';
 import { Card, Dot, Mono, Notice } from '@/components/ui';
 import { Radius, Space, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
@@ -39,8 +40,9 @@ import type { NextUp } from '@/lib/attention';
 export default function Talk() {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const { notice, dismissNotice } = useSession();
-  const { state, caption, heard, level, armed, ringSeen, route, problem, activity, next, press, say, persona } =
+  const { state, caption, heard, armed, ringSeen, route, problem, activity, next, press, say } =
     useAgent();
 
   const [draft, setDraft] = useState('');
@@ -91,19 +93,15 @@ export default function Talk() {
         {problem ? <Notice text={problem} /> : null}
         {reduced && !notice && !problem ? <Notice text={reduced} tone="info" /> : null}
 
-        <View style={{ alignItems: 'center', marginTop: 26 }}>
-          <Orb
-            state={state}
-            level={level}
-            size={210}
-            onPress={press}
-            // The whole palette, not just the tint. Passing the tint alone
-            // recoloured exactly one lobe of four, which read as a glitch
-            // rather than a mode.
-            // Your own colours win over the mode's. Choosing them is choosing
-            // to see your assistant rather than your current situation.
-            palette={persona.palette}
-          />
+        {/*
+          The sky, full width.
+
+          It escapes the scroll view's own padding rather than sitting inside
+          it, because a horizon with a margin either side is a picture of a
+          horizon. Everything else on this screen keeps its gutter.
+        */}
+        <View style={{ marginHorizontal: -Space.screenX, marginTop: 18 }}>
+          <Horizon state={state} width={width} height={236} onPress={press} />
         </View>
 
 
