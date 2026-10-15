@@ -42,7 +42,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import Svg, { Defs, G, LinearGradient, Path, Stop } from 'react-native-svg';
 
-import { Sky } from '@/constants/theme';
+import { skyFor } from '@/constants/theme';
 import type { AgentState } from '@/context/agent';
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
@@ -84,19 +84,39 @@ const MOOD: Record<AgentState, { amp: number; rate: number; mid: number }> = {
   noting: { amp: 0.8, rate: 0.5, mid: 0.56 },
 };
 
+/**
+ * The word under the horizon.
+ *
+ * The height of the sky says what is happening without being read; this says
+ * it for the times you are actually looking. Both, or neither — a state you
+ * can see and cannot name is a mood, not a status.
+ */
+export const STATE_WORD: Record<AgentState, string> = {
+  asleep: 'Asleep',
+  idle: 'Ready',
+  listening: 'Listening',
+  thinking: 'Thinking',
+  speaking: 'Speaking',
+  working: 'Working',
+  noting: 'Taking notes',
+};
+
 export function Horizon({
   state,
   width,
   height = 250,
   onPress,
+  sky: chosen,
 }: {
   state: AgentState;
   width: number;
   height?: number;
   onPress?: () => void;
+  /** A key from SKIES. Unset follows the light or dark scheme. */
+  sky?: string;
 }) {
   const night = useColorScheme() === 'dark';
-  const sky = night ? Sky.night : Sky.day;
+  const sky = skyFor(chosen, night);
   const mood = MOOD[state] ?? MOOD.idle;
 
   /**

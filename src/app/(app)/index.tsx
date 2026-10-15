@@ -26,7 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon, iconForKey } from '@/components/app-icon';
 import { Icon } from '@/components/icon';
-import { Horizon } from '@/components/horizon';
+import { Horizon, STATE_WORD } from '@/components/horizon';
 import { Card, Dot, Mono, Notice } from '@/components/ui';
 import { Radius, Space, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
@@ -42,7 +42,7 @@ export default function Talk() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { notice, dismissNotice } = useSession();
-  const { state, caption, heard, armed, ringSeen, route, problem, activity, next, press, say } =
+  const { state, caption, heard, armed, ringSeen, route, problem, activity, next, press, say, persona } =
     useAgent();
 
   const [draft, setDraft] = useState('');
@@ -87,7 +87,7 @@ export default function Talk() {
           Everything else on this screen keeps its gutter.
         */}
         <View style={{ marginHorizontal: -Space.screenX }}>
-          <Horizon state={state} width={width} height={250} onPress={press} />
+          <Horizon state={state} width={width} height={250} onPress={press} sky={persona.sky} />
         </View>
 
         {notice ? <Notice text={notice} onDismiss={dismissNotice} /> : null}
@@ -95,14 +95,27 @@ export default function Talk() {
         {reduced && !notice && !problem ? <Notice text={reduced} tone="info" /> : null}
 
 
+        {/*
+          The state, named.
+
+          The height of the sky says what is happening without being read.
+          This is for the times you are actually looking at the screen — a
+          state you can see and cannot name is a mood, not a status, and
+          losing the word is what made "is it even listening" a question
+          again.
+        */}
+        <Text style={[Type.state, { color: palette.ink, textAlign: 'center', marginTop: 14 }]}>
+          {STATE_WORD[state]}
+        </Text>
+
         {shown ? (
           <Text
             style={[
-              Type.caption,
+              Type.bodySm,
               {
-                color: state === 'listening' || state === 'noting' ? palette.inkSoft : palette.ink,
+                color: state === 'listening' || state === 'noting' ? palette.inkSoft : palette.muted,
                 textAlign: 'center',
-                marginTop: 18,
+                marginTop: 6,
               },
             ]}
           >
@@ -112,7 +125,7 @@ export default function Talk() {
           <>
             {/*
               A greeting, on screen rather than read out.
-              
+
               Grove used to open by reading its own memory back — "I've got
               Grove, the energy stock document and probabilistic machine
               learning written down" — which is a roster, not a hello, and a
@@ -120,11 +133,9 @@ export default function Talk() {
               nothing at launch now unless you are about to be late. This is
               the warmth, where it costs nobody anything.
             */}
-            <Text style={[Type.caption, { color: palette.ink, textAlign: 'center', marginTop: 18 }]}>
+            <Text style={[Type.bodySm, { color: palette.muted, textAlign: 'center', marginTop: 6 }]}>
               {greeting()}
-            </Text>
-            <Text style={[Type.bodySm, { color: palette.muted, textAlign: 'center', marginTop: 8 }]}>
-              {armed ? 'Press your ring, or the orb above.' : 'Press the orb above to talk.'}
+              {armed ? ' · press your ring' : ' · press the sky to talk'}
             </Text>
           </>
         )}
@@ -414,83 +425,63 @@ function Hardware({
   external: boolean;
   mic: boolean;
 }) {
-  return (
-    <View style={{ flexDirection: 'row', gap: 8 }}>
-      {/*
-        Paired is paired. This used to go amber for a pair connected without a
-        microphone, which was technically true and read as a fault — the
-        glasses were on, Grove was working, and the strip said something was
-        wrong. The microphone is the phone's in that case and everything still
-        works, so it is a note under the name rather than a warning colour.
-      */}
-      <Chip
-        icon="glasses"
-        label={external ? routeName : 'Phone'}
-        hint={external && !mic ? 'phone mic' : undefined}
-        tone={external ? 'live' : 'off'}
-      />
-      {/*
-        Three states, because there are three. Grove cannot see a paired ring —
-        iOS exposes no Bluetooth remote to a third-party app — so "armed" was
-        claiming knowledge it did not have, and said the same thing on a phone
-        with no ring at all. Ready means the session is held and a press would
-        arrive; armed means one actually has.
-      */}
-      <Chip
-        icon="ring"
-        label={!armed ? 'Ring off' : ringSeen ? 'Ring armed' : 'Ring ready'}
-        tone={!armed ? 'off' : ringSeen ? 'live' : 'alert'}
-      />
-    </View>
-  );
-}
-
-function Chip({
-  icon,
-  label,
-  hint,
-  tone,
-}: {
-  icon: 'glasses' | 'ring';
-  label: string;
-  hint?: string;
-  tone: 'live' | 'alert' | 'off';
-}) {
   const palette = usePalette();
+  const [open, setOpen] = useState(false);
+
+  // Everything being fine is the usual case, and the usual case deserves the
+  // least ink on the screen. Two chips announcing that nothing is wrong sat
+  // across the top of the sky all day; one dot says the same thing, and the
+  // detail is one tap away for the times it actually matters.
+  const trouble = !external || (armed && !ringSeen);
+
   return (
-    <View
-      style={{
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        paddingVertical: 10,
-        paddingHorizontal: 12,
-        borderRadius: Radius.control,
-        backgroundColor: palette.raised,
-        borderWidth: 1,
-        borderColor: palette.line,
-      }}
-    >
-      <Icon name={icon} size={17} color={tone === 'off' ? palette.muted : palette.inkSoft} />
-      <View style={{ flex: 1 }}>
-        <Text
+    <View style={{ alignItems: 'center', gap: 8 }}>
+      <Pressable
+        onPress={() => setOpen((was) => !was)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`What is connected. ${external ? routeName : 'Phone'}, ${
+          !armed ? 'ring off' : ringSeen ? 'ring armed' : 'ring ready'
+        }.`}
+        hitSlop={14}
+        style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}
+      >
+        <View
           style={{
-            fontFamily: Type.cardTitle.fontFamily,
-            fontSize: 12.5,
-            color: tone === 'off' ? palette.muted : palette.ink,
+            width: open ? 5 : 8,
+            height: open ? 5 : 8,
+            borderRadius: 4,
+            backgroundColor: trouble ? palette.alert : palette.raised,
+            borderWidth: trouble ? 0 : 1,
+            borderColor: palette.line,
           }}
-          numberOfLines={1}
+        />
+      </Pressable>
+
+      {open ? (
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 9,
+            height: 34,
+            paddingHorizontal: 13,
+            borderRadius: Radius.pill,
+            backgroundColor: palette.glass,
+            borderWidth: 1,
+            borderColor: palette.glassLine,
+          }}
         >
-          {label}
-        </Text>
-        {hint ? (
-          <Text style={{ fontFamily: Type.body.fontFamily, fontSize: 10, color: palette.alert }}>
-            {hint}
+          <Icon name="glasses" size={16} color={palette.inkSoft} />
+          <Text style={[Type.bodySm, { color: palette.ink }]}>
+            {external ? routeName : 'Phone'}
+            <Text style={{ color: palette.muted }}>
+              {external && !mic ? ' · phone mic' : ''}
+              {!armed ? ' · ring off' : ringSeen ? ' · ring armed' : ' · ring ready'}
+            </Text>
           </Text>
-        ) : null}
-      </View>
-      <Dot tone={tone} />
+        </View>
+      ) : null}
     </View>
   );
 }

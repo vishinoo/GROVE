@@ -115,6 +115,48 @@ export const Sky = {
 } as const;
 
 /**
+ * The skies someone can choose between.
+ *
+ * Presets rather than a colour wheel, because this gradient has a job: it has
+ * to stay legible as a background for black text at the bottom and hold a
+ * readable waterline at the top. Five stops picked by hand do that; five stops
+ * picked from a wheel very often do not.
+ *
+ * `day` is first and is the default, so an install that has never opened this
+ * screen looks like the design rather than like a choice nobody made.
+ */
+export const SKIES: { key: string; label: string; stops: readonly string[]; grain: string }[] = [
+  { key: 'day', label: 'Dawn', stops: Sky.day.stops, grain: Sky.day.grain },
+  { key: 'dusk', label: 'Dusk', stops: Sky.night.stops, grain: Sky.night.grain },
+  {
+    key: 'tide',
+    label: 'Tide',
+    stops: ['#DEF0EE', '#9ED6D2', '#56B0B2', '#22828C', '#10606C'],
+    grain: '#2E8C94',
+  },
+  {
+    key: 'ash',
+    label: 'Ash',
+    stops: ['#ECEDEF', '#C8CAD0', '#9A9DA6', '#6B6F79', '#44474F'],
+    grain: '#6B6F79',
+  },
+  {
+    key: 'bloom',
+    label: 'Bloom',
+    stops: ['#F6E9F2', '#E3C3DC', '#C79BC8', '#9B6FAE', '#6B4A86'],
+    grain: '#9B6FAE',
+  },
+];
+
+export function skyFor(key: string | undefined, night: boolean) {
+  // No choice made is not a choice of dawn — at night the sunset is still the
+  // right answer, and forcing dawn onto a dark screen is how the first port
+  // of this ended up with a white sky in a dark room.
+  if (!key) return night ? Sky.night : Sky.day;
+  return SKIES.find((sky) => sky.key === key) ?? (night ? Sky.night : Sky.day);
+}
+
+/**
  * One accent, for a press that commits something and nothing else.
  *
  * It is deliberately not `mark`: an irreversible press is the one control

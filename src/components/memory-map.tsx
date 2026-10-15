@@ -71,8 +71,21 @@ export function MemoryMap({
   width: number;
   height?: number;
 }) {
+  /*
+    Keyed on the numbers, not on the object.
+
+    `counts` is a fresh object literal on every render, so a memo that depends
+    on it recomputes a hundred nodes and three hundred edges on every scroll
+    tick — most of a frame, for an identical answer. The sizes joined into a
+    string is a dependency that changes when the memory actually changes,
+    which is the point: the map grows as Grove learns things and holds still
+    otherwise.
+  */
+  const sizes = MAP_SECTIONS.map((section) => Math.max(0, counts[section.id] ?? 0)).join(',');
+
   const { nodes, links } = useMemo(() => {
-    const total = MAP_SECTIONS.reduce((n, s) => n + Math.max(0, counts[s.id] ?? 0), 0);
+    const each = sizes.split(',').map(Number);
+    const total = each.reduce((n, v) => n + v, 0);
     if (total === 0) return { nodes: [] as Node[], links: [] as [number, number][] };
 
     // Radius grows with the square root of the count, so doubling what Grove
@@ -82,7 +95,7 @@ export function MemoryMap({
     const out: Node[] = [];
     let placed = 0;
     MAP_SECTIONS.forEach((section, si) => {
-      const n = Math.max(0, counts[section.id] ?? 0);
+      const n = each[si];
       const from = (placed / total) * 6.283;
       const span = (n / total) * 6.283;
       for (let i = 0; i < n; i++) {
@@ -119,7 +132,7 @@ export function MemoryMap({
       for (let k = 0; k < 3 && k < near.length; k++) edges.push([i, near[k][1]]);
     }
     return { nodes: out, links: edges };
-  }, [counts, width, height]);
+  }, [sizes, width, height]);
 
   const lit = MAP_SECTIONS.findIndex((s) => s.id === active);
 

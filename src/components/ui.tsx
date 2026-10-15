@@ -178,7 +178,12 @@ export function Peek({
   show = 2,
   style,
 }: {
-  label: string;
+  /**
+   * Omitted where the screen names the section somewhere else — Sparks puts
+   * the heading in its pinned header, and a second copy scrolling up the page
+   * is the same word twice.
+   */
+  label?: string;
   children: ReactNode;
   /** How many to show before the button. */
   show?: number;
@@ -193,10 +198,12 @@ export function Peek({
 
   return (
     <View style={[{ marginBottom: Space.section }, style]}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <Text style={[monoLabel, { color: palette.muted }]}>{label}</Text>
-        <Text style={[monoLabel, { color: palette.lineStrong }]}>{items.length}</Text>
-      </View>
+      {label ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <Text style={[monoLabel, { color: palette.muted }]}>{label}</Text>
+          <Text style={[monoLabel, { color: palette.lineStrong }]}>{items.length}</Text>
+        </View>
+      ) : null}
 
       {(all ? items : items.slice(0, show)).map((item, i) => (
         <View key={i}>{item}</View>

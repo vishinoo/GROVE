@@ -776,12 +776,23 @@ section('What it did, and what it still owes');
   const swipe = fs.readFileSync(path.join(ROOT, 'src/components/swipe-away.tsx'), 'utf8');
   check(/Math\.min\(0, x\.value \+ event\.changeX\)/.test(swipe), 'rows pull left, the way every list does');
   check(/Swipe left to forget/.test(swipe), 'and say so to a screen reader');
-  check(/<Peek label="What it did" show=\{5\}>/.test(screen), 'the action log shows five before the rest');
+  // Sparks names the section you are in once, in its pinned header, so the
+  // blocks themselves carry no label any more. What still has to hold is the
+  // shape: five shown, the rest behind a press.
+  check(/<Peek show=\{5\}>/.test(screen), 'the action log shows five before the rest');
   check(/entry\.tool\)/.test(screen), 'and only exchanges that actually did something');
   check(/still going/.test(screen), 'something still running says so');
 
   // Goals and commitments are one list: the split was a filing decision.
-  check(/label="Still to do"/.test(screen), 'goals and promises are one list');
+  // Goals and open commitments render inside one block. Checking for the
+  // heading stopped working when the heading moved; checking that nothing
+  // opens a new section between the two maps is the thing that was ever
+  // actually meant.
+  const bothLists = screen.slice(screen.indexOf('{goals.map('), screen.indexOf('{owed.map('));
+  check(
+    bothLists.length > 0 && !/<(Peek|Section)\b/.test(bothLists),
+    'goals and promises are one list'
+  );
   // Labels only: the comment above it explains why that name was dropped, and
   // a check that cannot tell prose from an interface fails on its own reason.
   const labels = [...screen.matchAll(/label="([^"]+)"/g)].map((m) => m[1]);

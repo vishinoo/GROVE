@@ -21,16 +21,18 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Pressable,
+  ScrollView,
   Text,
   TextInput,
   View,
   useWindowDimensions,
   type LayoutChangeEvent,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/icon';
 import { MAP_SECTIONS, MemoryMap, type MapSection } from '@/components/memory-map';
-import { Card, Peek, Screen, Section } from '@/components/ui';
+import { Card, Mono, Peek, Section } from '@/components/ui';
 import { SwipeAway } from '@/components/swipe-away';
 import { Space, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
@@ -64,6 +66,8 @@ export default function Sparks() {
     list — there is only one source of truth for where you are.
   */
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const [header, setHeader] = useState(0);
   const [lit, setLit] = useState<MapSection>('did');
   const tops = useRef<Partial<Record<MapSection, number>>>({});
 
@@ -77,7 +81,7 @@ export default function Sparks() {
     // actually becomes the one you are looking at.
     for (const section of MAP_SECTIONS) {
       const top = tops.current[section.id];
-      if (top !== undefined && top <= y + 230) current = section.id;
+      if (top !== undefined && top <= y + 24) current = section.id;
     }
     if (current !== lit) setLit(current);
   };
@@ -92,13 +96,18 @@ export default function Sparks() {
   };
 
   return (
-    <Screen
-      title="Sparks"
-      onScroll={onScroll}
-      sticky={
-        <MemoryMap counts={counts} active={lit} width={width - Space.screenX * 2} />
-      }
-    >
+    <View style={{ flex: 1, backgroundColor: palette.paper }}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{
+          paddingTop: header || 300,
+          paddingHorizontal: Space.screenX,
+          paddingBottom: insets.bottom + 108,
+        }}
+        onScroll={(event) => onScroll(event.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={32}
+        keyboardShouldPersistTaps="handled"
+      >
 
       <View onLayout={mark('did')}>
         <Done />
@@ -117,7 +126,7 @@ export default function Sparks() {
       */}
       <View onLayout={mark('open')} />
       {goals.length > 0 || owed.length > 0 ? (
-        <Peek label="Still to do" show={5}>
+        <Peek show={5}>
           {goals.map((fact) => (
             <SwipeAway key={fact.id} label={fact.value} onDelete={() => void forgetFact(fact.id)}>
               <FactCard fact={fact} onSave={(value) => void editFact(fact.id, value)} />
@@ -144,7 +153,7 @@ export default function Sparks() {
       */}
       <View onLayout={mark('repeats')} />
       {stuck.length > 0 ? (
-        <Section label="Keeps tripping you up">
+        <Section>
           {stuck.slice(0, 20).map((item) => (
             <SwipeAway key={item.id} label={item.what} onDelete={() => void forgetStruggle(item.id)}>
             <Card style={{ marginBottom: 6 }}>
@@ -187,7 +196,7 @@ export default function Sparks() {
       */}
       <View onLayout={mark('people')} />
       {life.entities.length > 0 ? (
-        <Peek label="People and projects">
+        <Peek>
           {[...life.entities]
             .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen))
             .slice(0, 40)
@@ -205,7 +214,7 @@ export default function Sparks() {
 
       <View onLayout={mark('happened')} />
       {life.episodes.length > 0 ? (
-        <Peek label="What happened">
+        <Peek>
           {life.episodes.slice(0, 15).map((episode) => (
             <SwipeAway
               key={episode.id}
@@ -231,14 +240,14 @@ export default function Sparks() {
       */}
       <View onLayout={mark('about')} />
       {plain.length === 0 ? (
-        <Section label="Facts about you">
+        <Section>
           <Text style={[Type.bodySm, { color: palette.muted }]}>
             Nothing yet. Tell Grove something about yourself and it turns up here.
           </Text>
         </Section>
       ) : (
         <>
-          <Peek label="Facts about you" show={3}>
+          <Peek show={3}>
             {plain.map((fact) => (
               <SwipeAway key={fact.id} label={fact.value} onDelete={() => void forgetFact(fact.id)}>
                 <FactCard fact={fact} onSave={(value) => void editFact(fact.id, value)} />
@@ -251,7 +260,73 @@ export default function Sparks() {
         </>
       )}
 
-    </Screen>
+      </ScrollView>
+
+      {/*
+        The header does not scroll.
+
+        It was a sticky child of the scroll view, which pins at the scroll
+        view's own top edge — above the notch, with the clock sitting on the
+        map. An overlay pins where the screen actually begins, and the list is
+        padded to clear whatever it measures rather than a guessed number.
+      */}
+      <View
+        onLayout={(event) => setHeader(event.nativeEvent.layout.height)}
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: 0,
+          backgroundColor: palette.paper,
+          paddingTop: insets.top + 14,
+          paddingHorizontal: Space.screenX,
+          paddingBottom: 10,
+        }}
+      >
+        <Text style={[Type.screenTitle, { color: palette.ink, marginBottom: 12 }]}>Sparks</Text>
+
+        <MemoryMap counts={counts} active={lit} width={width - Space.screenX * 2} />
+
+        {/*
+          The heading lives here rather than above each block. The map already
+          says which part of it you are in; printing the same word again as
+          the list scrolls past is the word twice.
+        */}
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 12 }}>
+          <Text style={[Type.cardTitle, { color: palette.ink, fontSize: 17 }]}>
+            {MAP_SECTIONS.find((section) => section.id === lit)?.label}
+          </Text>
+          <Mono style={{ color: palette.muted }}>{counts[lit]}</Mono>
+        </View>
+      </View>
+
+      {/*
+        The scrollbar, with the sections marked on it in their own colours.
+        The heading says where you are; this says how far along.
+      */}
+      <View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          right: 6,
+          top: (header || 300) + 8,
+          bottom: insets.bottom + 104,
+          width: 3,
+        }}
+      >
+        {MAP_SECTIONS.map((section) => (
+          <View
+            key={section.id}
+            style={{
+              flex: 1,
+              marginVertical: 2.5,
+              borderRadius: 2,
+              backgroundColor: section.id === lit ? section.colour : palette.line,
+            }}
+          />
+        ))}
+      </View>
+    </View>
   );
 }
 
@@ -277,7 +352,7 @@ function Done() {
   if (ran.length === 0) return null;
 
   return (
-    <Peek label="What it did" show={5}>
+    <Peek show={5}>
       {ran.map((entry) => {
         const tool = entry.tool!;
         const failed = tool.state === 'failed' || tool.state === 'blocked';

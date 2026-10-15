@@ -98,7 +98,7 @@ export default function Connections() {
   };
 
   return (
-    <Screen title="Connections" subtitle="What Grove may reach on your behalf.">
+    <Screen title="Connections">
       {notice ? <Notice text={notice} onDismiss={dismissNotice} /> : null}
       {error ? (
         <View style={{ gap: 8 }}>
@@ -162,17 +162,6 @@ export default function Connections() {
         </Panel>
       </Section>
 
-      <Text
-        style={[
-          Type.bodySm,
-          { color: palette.muted, paddingHorizontal: 2, marginTop: 4 },
-        ]}
-      >
-        Reminders, Music, Maps and Messages are permissions on this phone —
-        allowing one asks iOS, not a website. Google Workspace signs in through
-        Google and keeps its tokens in this phone&rsquo;s Keychain. Anything you
-        turn down here is changed again in iOS Settings › Grove.
-      </Text>
     </Screen>
   );
 }

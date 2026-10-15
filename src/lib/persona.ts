@@ -77,6 +77,12 @@ export type Persona = {
    * clearing it is one tap away.
    */
   palette?: string[];
+  /**
+   * Which sky the horizon draws. A key into SKIES rather than the colours
+   * themselves, so a preset can be corrected later without rewriting what
+   * every install has stored.
+   */
+  sky?: string;
   /** The user's own words for how Grove should talk. May be empty. */
   manner: string;
   /**
@@ -277,6 +283,7 @@ export async function loadPersona(): Promise<Persona> {
       mode: typeof parsed.mode === 'string' ? parsed.mode : 'normal',
       // Four hex colours or nothing. A partial palette would paint some lobes
       // and leave others on the mode's, which reads as a rendering bug.
+      sky: typeof parsed.sky === 'string' ? parsed.sky : undefined,
       palette:
         Array.isArray(parsed.palette) &&
         parsed.palette.length === 4 &&

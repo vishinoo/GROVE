@@ -24,9 +24,8 @@ import Svg, { Defs, LinearGradient as SvgGradient, Rect, Stop } from 'react-nati
 import * as Updates from 'expo-updates';
 
 import { Icon } from '@/components/icon';
-import { SPECTRUM } from '@/components/orb';
 import { Button, Card, Dot, Mono, Notice, Row, Screen, Section } from '@/components/ui';
-import { Radius, Sky, Type } from '@/constants/theme';
+import { Radius, SKIES, Sky, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
@@ -39,21 +38,6 @@ import { availableVoices, bestVoiceId, characterVoice, hasEnhancedVoice, speak }
 import * as trigger from '@/lib/trigger';
 import type * as SpeechTypes from 'expo-speech';
 
-/**
- * The colours on offer.
- *
- * A fixed set rather than a colour wheel, because the orb is four soft radial
- * gradients drifting over one another: picked freely, most combinations turn to
- * grey mud where they overlap. These are saturated enough to stay distinct when
- * they cross, which is the only property that matters here.
- */
-const SWATCHES = [
-  '#5EEAD4', '#7DD3FC', '#A5B4FC', '#86EFAC',
-  '#0EA5E9', '#38BDF8', '#6366F1', '#22D3EE',
-  '#8B5CF6', '#A78BFA', '#C4B5FD', '#D946EF',
-  '#F43F5E', '#FB923C', '#FBBF24', '#E879F9',
-  '#F472B6', '#34D399', '#FDE047', '#94A3B8',
-];
 
 export default function Settings() {
   const palette = usePalette();
@@ -62,12 +46,6 @@ export default function Settings() {
   // spark and a fact are the same idea from different ends, and keeping the
   // list somewhere you pass anyway beats burying it in Settings.
   const { persona, updatePersona, armed, route } = useAgent();
-  // What the preview shows: your colours if you have chosen any, otherwise the
-  // orb's own, so tapping a circle starts from what is on screen rather than
-  // from a default nobody picked.
-  const draftPalette = persona.palette ?? SPECTRUM;
-  /** Which lobe is being recoloured, or null when the picker is closed. */
-  const [editing, setEditing] = useState<number | null>(null);
   const updateLabel = runningLabel();
 
   const reduced = reducedModeReason();
@@ -132,65 +110,69 @@ export default function Settings() {
           </View>
 
           <Text style={[Type.bodySm, { color: palette.muted, textAlign: 'center' }]}>
-            You&rsquo;ll be saying it out loud in public. Tap a circle to recolour it.
+            You&rsquo;ll be saying it out loud in public. The sky below is the one
+            you see on the Talk screen.
           </Text>
 
-          <View style={{ flexDirection: 'row', gap: 12 }}>
-            {draftPalette.map((colour, lobe) => (
-              <Pressable
-                key={lobe}
-                accessibilityRole="button"
-                accessibilityLabel={`Change colour ${lobe + 1}`}
-                onPress={() => setEditing(editing === lobe ? null : lobe)}
-                style={({ pressed }) => ({
-                  width: 38,
-                  height: 38,
-                  borderRadius: 19,
-                  backgroundColor: colour,
-                  borderWidth: editing === lobe ? 3 : 1,
-                  borderColor: editing === lobe ? palette.ink : palette.line,
-                  opacity: pressed ? 0.7 : 1,
-                })}
-              />
-            ))}
-          </View>
+          {/*
+            Skies, not lobes.
 
-          {editing !== null ? (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 9, justifyContent: 'center' }}>
-              {SWATCHES.map((colour) => (
+            This used to recolour the four lobes of the orb, and the orb is
+            gone — the picker was setting colours nothing drew any more. The
+            thing it should control is the horizon, and these are presets
+            rather than a wheel because the gradient has a job: hold a legible
+            waterline at the top and sit under dark text at the bottom. Five
+            stops chosen by hand do that and five stops chosen from a wheel
+            very often do not.
+          */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' }}>
+            {SKIES.map((sky) => {
+              const picked = (persona.sky ?? 'day') === sky.key;
+              return (
                 <Pressable
-                  key={colour}
+                  key={sky.key}
                   accessibilityRole="button"
-                  accessibilityLabel={`Use ${colour}`}
-                  onPress={() => {
-                    const next = [...draftPalette];
-                    next[editing] = colour;
-                    void updatePersona({ ...persona, palette: next });
-                  }}
-                  style={({ pressed }) => ({
-                    width: 30,
-                    height: 30,
-                    borderRadius: 15,
-                    backgroundColor: colour,
-                    borderWidth: draftPalette[editing] === colour ? 3 : 1,
-                    borderColor: draftPalette[editing] === colour ? palette.ink : palette.line,
-                    opacity: pressed ? 0.7 : 1,
-                  })}
-                />
-              ))}
-            </View>
-          ) : null}
-
-          {persona.palette ? (
-            <Button
-              label="Back to mode colours"
-              tone="quiet"
-              onPress={() => {
-                setEditing(null);
-                void updatePersona({ ...persona, palette: undefined });
-              }}
-            />
-          ) : null}
+                  accessibilityState={{ selected: picked }}
+                  accessibilityLabel={sky.label}
+                  onPress={() => set({ sky: sky.key })}
+                  style={({ pressed }) => ({ alignItems: 'center', gap: 5, opacity: pressed ? 0.7 : 1 })}
+                >
+                  <View
+                    style={{
+                      width: 46,
+                      height: 46,
+                      borderRadius: 23,
+                      overflow: 'hidden',
+                      borderWidth: picked ? 3 : 1,
+                      borderColor: picked ? palette.ink : palette.line,
+                    }}
+                  >
+                    <Svg width="100%" height="100%">
+                      <Defs>
+                        <SvgGradient id={`grove-swatch-${sky.key}`} x1="0" y1="0" x2="0" y2="1">
+                          {sky.stops.map((colour, i) => (
+                            <Stop
+                              key={colour}
+                              offset={i / (sky.stops.length - 1)}
+                              stopColor={colour}
+                            />
+                          ))}
+                        </SvgGradient>
+                      </Defs>
+                      <Rect
+                        x="0"
+                        y="0"
+                        width="100%"
+                        height="100%"
+                        fill={`url(#grove-swatch-${sky.key})`}
+                      />
+                    </Svg>
+                  </View>
+                  <Mono style={{ color: picked ? palette.ink : palette.muted }}>{sky.label}</Mono>
+                </Pressable>
+              );
+            })}
+          </View>
         </Card>
       </Section>
 
