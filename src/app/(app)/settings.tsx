@@ -18,14 +18,15 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Linking, Pressable, Switch, Text, TextInput, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import Svg, { Defs, LinearGradient as SvgGradient, Rect, Stop } from 'react-native-svg';
 
 import * as Updates from 'expo-updates';
 
 import { Icon } from '@/components/icon';
-import { Orb, SPECTRUM } from '@/components/orb';
+import { SPECTRUM } from '@/components/orb';
 import { Button, Card, Dot, Mono, Notice, Row, Screen, Section } from '@/components/ui';
-import { Radius, Type } from '@/constants/theme';
+import { Radius, Sky, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
@@ -94,27 +95,41 @@ export default function Settings() {
       */}
       <Section>
         <Card style={{ alignItems: 'center', paddingVertical: 20, gap: 12 }}>
-          <Orb
-            state="idle"
-            level={0}
-            size={140}
-            palette={draftPalette}
-            showCaption={false}
-            onPress={() => {}}
-          />
+          {/*
+            The name sits on a piece of the sky rather than under a preview of
+            the orb. It is the one free-text field on this screen, so it gets
+            the one coloured surface, and tapping the name itself to rename it
+            is the whole interaction — which a label above a box does not say.
+          */}
+          <View
+            style={{
+              width: '100%',
+              height: 112,
+              borderRadius: Radius.card,
+              overflow: 'hidden',
+              justifyContent: 'flex-end',
+            }}
+          >
+            <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+              <Defs>
+                <SvgGradient id="grove-name" x1="0" y1="0" x2="0.35" y2="1">
+                  {Sky.day.stops.map((colour, i) => (
+                    <Stop key={colour} offset={i / (Sky.day.stops.length - 1)} stopColor={colour} />
+                  ))}
+                </SvgGradient>
+              </Defs>
+              <Rect x="0" y="0" width="100%" height="100%" fill="url(#grove-name)" />
+            </Svg>
 
-          <TextInput
-            value={persona.name}
-            onChangeText={(name) => set({ name: name.slice(0, NAME_LIMIT) })}
-            placeholder="Buddy"
-            placeholderTextColor={palette.muted}
-            textAlign="center"
-            accessibilityLabel="What it answers to. Tap to rename."
-            style={[
-              Type.state,
-              { color: palette.ink, paddingVertical: 2, minWidth: 140 },
-            ]}
-          />
+            <TextInput
+              value={persona.name}
+              onChangeText={(name) => set({ name: name.slice(0, NAME_LIMIT) })}
+              placeholder="Buddy"
+              placeholderTextColor="rgba(255,255,255,0.65)"
+              accessibilityLabel="What it answers to. Tap to rename."
+              style={[Type.state, { color: '#FFFFFF', paddingHorizontal: 14, paddingBottom: 12 }]}
+            />
+          </View>
 
           <Text style={[Type.bodySm, { color: palette.muted, textAlign: 'center' }]}>
             You&rsquo;ll be saying it out loud in public. Tap a circle to recolour it.

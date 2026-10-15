@@ -75,34 +75,24 @@ export default function Talk() {
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
-          paddingTop: insets.top + 10,
           paddingHorizontal: Space.screenX,
           paddingBottom: 24,
         }}
         keyboardShouldPersistTaps="handled"
       >
-        <Hardware
-          armed={armed}
-          ringSeen={ringSeen}
-          routeName={route.name}
-          external={route.isExternal}
-          mic={route.hasExternalMic}
-        />
+        {/*
+          The sky, full width and starting at the very top of the screen —
+          behind the status bar, not below it. A horizon with a margin either
+          side, or a strip of page above it, is a picture of a horizon.
+          Everything else on this screen keeps its gutter.
+        */}
+        <View style={{ marginHorizontal: -Space.screenX }}>
+          <Horizon state={state} width={width} height={250} onPress={press} />
+        </View>
 
         {notice ? <Notice text={notice} onDismiss={dismissNotice} /> : null}
         {problem ? <Notice text={problem} /> : null}
         {reduced && !notice && !problem ? <Notice text={reduced} tone="info" /> : null}
-
-        {/*
-          The sky, full width.
-
-          It escapes the scroll view's own padding rather than sitting inside
-          it, because a horizon with a margin either side is a picture of a
-          horizon. Everything else on this screen keeps its gutter.
-        */}
-        <View style={{ marginHorizontal: -Space.screenX, marginTop: 18 }}>
-          <Horizon state={state} width={width} height={236} onPress={press} />
-        </View>
 
 
         {shown ? (
@@ -150,6 +140,30 @@ export default function Talk() {
           </View>
         ) : null}
       </ScrollView>
+
+      {/*
+        The hardware strip rides on the sky rather than pushing it down the
+        page. "Are my glasses on" is a glance, and the answer belongs in the
+        corner you are already looking at, not in a row that costs the horizon
+        forty pixels of height.
+      */}
+      <View
+        pointerEvents="box-none"
+        style={{
+          position: 'absolute',
+          top: insets.top + 6,
+          left: Space.screenX,
+          right: Space.screenX,
+        }}
+      >
+        <Hardware
+          armed={armed}
+          ringSeen={ringSeen}
+          routeName={route.name}
+          external={route.isExternal}
+          mic={route.hasExternalMic}
+        />
+      </View>
 
       {/*
         Shown whenever speech is unavailable, and also when it is — typing is

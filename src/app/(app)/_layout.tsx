@@ -99,9 +99,9 @@ function Dock({ state, navigation }: DockProps) {
           flexDirection: 'row',
           alignItems: 'center',
           borderRadius: Radius.pill,
-          backgroundColor: palette.raised,
+          backgroundColor: palette.glass,
           borderWidth: 1,
-          borderColor: palette.line,
+          borderColor: palette.glassLine,
         },
         Elevation.lift,
       ]}

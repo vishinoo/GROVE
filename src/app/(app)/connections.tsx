@@ -15,7 +15,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, Text, View } from 'react-native';
 
 import { AppIcon } from '@/components/app-icon';
-import { Card, Mono, Notice, Screen, Section } from '@/components/ui';
+import { Mono, Notice, Panel, Screen, Section } from '@/components/ui';
 import { Radius, Type } from '@/constants/theme';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
@@ -134,28 +134,32 @@ export default function Connections() {
 
       {connected.length > 0 ? (
         <Section label="Connected">
-          {connected.map((item) => (
-            <Row
+          <Panel>
+            {connected.map((item) => (
+              <Row
               key={item.key}
               item={item}
               connected
-              busy={working === item.key}
-              onPress={() => void act(item)}
-            />
-          ))}
+                busy={working === item.key}
+                onPress={() => void act(item)}
+              />
+            ))}
+          </Panel>
         </Section>
       ) : null}
 
       <Section label={connected.length > 0 ? 'Available' : undefined}>
-        {rest.map((item) => (
-          <Row
-            key={item.key}
-            item={item}
-            connected={false}
-            busy={working === item.key}
-            onPress={() => void act(item)}
-          />
-        ))}
+        <Panel>
+          {rest.map((item) => (
+            <Row
+              key={item.key}
+              item={item}
+              connected={false}
+              busy={working === item.key}
+              onPress={() => void act(item)}
+            />
+          ))}
+        </Panel>
       </Section>
 
       <Text
@@ -210,7 +214,7 @@ function Row({
         : 'Not built yet';
 
   return (
-    <Card style={{ marginBottom: 8, opacity: disabled ? 0.55 : 1 }}>
+    <View style={{ paddingHorizontal: 13, paddingVertical: 12, opacity: disabled ? 0.55 : 1 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
         <AppIcon name={item.icon} size={32} />
 
@@ -258,6 +262,6 @@ function Row({
           </Pressable>
         )}
       </View>
-    </Card>
+    </View>
   );
 }

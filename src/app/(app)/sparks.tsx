@@ -18,13 +18,21 @@
  * in two places means one of them is wrong the moment either changes.
  */
 
-import { useEffect, useState } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Pressable,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
+  type LayoutChangeEvent,
+} from 'react-native';
 
 import { Icon } from '@/components/icon';
+import { MAP_SECTIONS, MemoryMap, type MapSection } from '@/components/memory-map';
 import { Card, Peek, Screen, Section } from '@/components/ui';
 import { SwipeAway } from '@/components/swipe-away';
-import { Type } from '@/constants/theme';
+import { Space, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { usePalette } from '@/hooks/use-palette';
 import { VALUE_MAX } from '@/lib/memory';
@@ -38,7 +46,7 @@ import { when as transcriptWhen } from '@/lib/transcript';
 
 export default function Sparks() {
   const palette = usePalette();
-  const { facts, editFact, forgetFact, life, forgetEntity, forgetEpisode, struggles, gotStruggle, forgetStruggle } =
+  const { activity, facts, editFact, forgetFact, life, forgetEntity, forgetEpisode, struggles, gotStruggle, forgetStruggle } =
     useAgent();
   // Goals and facts are shown apart because they are read differently: a goal
   // is something you check on, a fact is something you correct.
@@ -47,13 +55,54 @@ export default function Sparks() {
   const stuck = struggles.filter((x) => !x.gotItAt);
   const owed = openCommitments(life);
 
+  /*
+    The map is the scrollbar.
+
+    Each block reports where it starts; the scroll offset says which one you
+    have reached, and that lights its wedge and cools the rest. Driving it off
+    layout rather than a tab strip means the map can never disagree with the
+    list — there is only one source of truth for where you are.
+  */
+  const { width } = useWindowDimensions();
+  const [lit, setLit] = useState<MapSection>('did');
+  const tops = useRef<Partial<Record<MapSection, number>>>({});
+
+  const mark = (id: MapSection) => (event: LayoutChangeEvent) => {
+    tops.current[id] = event.nativeEvent.layout.y;
+  };
+
+  const onScroll = (y: number) => {
+    let current: MapSection = 'did';
+    // Measured against a line below the pinned map, which is where a section
+    // actually becomes the one you are looking at.
+    for (const section of MAP_SECTIONS) {
+      const top = tops.current[section.id];
+      if (top !== undefined && top <= y + 230) current = section.id;
+    }
+    if (current !== lit) setLit(current);
+  };
+
+  const counts: Record<MapSection, number> = {
+    did: activity.filter((entry) => entry.tool).length,
+    open: goals.length + owed.length,
+    repeats: stuck.length,
+    people: life.entities.length,
+    happened: life.episodes.length,
+    about: plain.length,
+  };
+
   return (
     <Screen
       title="Sparks"
-      subtitle="What Grove has done, and everything it keeps about you. Swipe any of it away."
+      onScroll={onScroll}
+      sticky={
+        <MemoryMap counts={counts} active={lit} width={width - Space.screenX * 2} />
+      }
     >
 
-      <Done />
+      <View onLayout={mark('did')}>
+        <Done />
+      </View>
 
       {/*
         Goals and promises in one place, because the distinction was a
@@ -66,6 +115,7 @@ export default function Sparks() {
         sent Jason the build" — which also marks it kept in the long memory,
         and swiping it would record nothing and quietly lose the thread.
       */}
+      <View onLayout={mark('open')} />
       {goals.length > 0 || owed.length > 0 ? (
         <Peek label="Still to do" show={5}>
           {goals.map((fact) => (
@@ -92,6 +142,7 @@ export default function Sparks() {
         Hidden when empty, like the inbox — a tutor with nothing to teach does
         not need a panel.
       */}
+      <View onLayout={mark('repeats')} />
       {stuck.length > 0 ? (
         <Section label="Keeps tripping you up">
           {stuck.slice(0, 20).map((item) => (
@@ -134,6 +185,7 @@ export default function Sparks() {
         believes something wrong about a person you see every week is worse
         than one that remembers nothing.
       */}
+      <View onLayout={mark('people')} />
       {life.entities.length > 0 ? (
         <Peek label="People and projects">
           {[...life.entities]
@@ -151,6 +203,7 @@ export default function Sparks() {
         </Peek>
       ) : null}
 
+      <View onLayout={mark('happened')} />
       {life.episodes.length > 0 ? (
         <Peek label="What happened">
           {life.episodes.slice(0, 15).map((episode) => (
@@ -176,6 +229,7 @@ export default function Sparks() {
         lie told by a layout. Empty is its own section, and the trailing note
         about correcting a line only exists once there is a line to correct.
       */}
+      <View onLayout={mark('about')} />
       {plain.length === 0 ? (
         <Section label="Facts about you">
           <Text style={[Type.bodySm, { color: palette.muted }]}>

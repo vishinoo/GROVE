@@ -51,6 +51,16 @@ export const Colors = {
     signal: '#22C55E',
     /** Something the user has to fix. Never a background. */
     alert: '#F59E0B',
+    /**
+     * The dock, which floats over content and has to show it moving
+     * underneath — that motion is what says the list continues.
+     *
+     * Translucent, not blurred. A real frosted pane needs `expo-blur`, which
+     * is a native module, and adding one turns every future design change
+     * into a device build instead of an over-the-air update.
+     */
+    glass: 'rgba(255,255,255,0.78)',
+    glassLine: 'rgba(255,255,255,0.9)',
     shadow: '#16181D',
   },
   dark: {
@@ -65,6 +75,8 @@ export const Colors = {
     lineStrong: '#333843',
     signal: '#4ADE80',
     alert: '#FBBF24',
+    glass: 'rgba(17,21,27,0.74)',
+    glassLine: 'rgba(255,255,255,0.12)',
     shadow: '#000000',
   },
 } as const;

@@ -119,31 +119,48 @@ export function Horizon({
     clock.value += dt * rate.value;
   }, true);
 
-  /** The waterline, as a polyline across the band. */
-  const surface = useDerivedValue(() => {
+  /**
+   * Both path strings, built in one pass.
+   *
+   * The fill has to walk the surface RIGHT TO LEFT. Reusing the left-to-right
+   * line for it — which is what the first version did — makes the outline
+   * cross itself between the top corners and the first surface point, and SVG
+   * fills that as two triangles meeting in the middle. It renders as a bowtie,
+   * which is exactly what shipped.
+   */
+  const paths = useDerivedValue(() => {
     'worklet';
     const base = height * mid.value;
     const a = height * 0.13 * amp.value;
-    let d = '';
-    for (let i = 0; i <= STEPS; i++) {
+
+    const at = (i: number) => {
+      'worklet';
       const x = i / STEPS;
       let s = 0;
       for (let j = 0; j < 4; j++) {
         const P = PARTS[j];
         s += P.a * Math.sin(x * P.k * 6.283 + clock.value * P.w + P.p);
       }
-      const y = base + (s / 1.85) * a;
-      d += (i === 0 ? 'M' : 'L') + (x * width).toFixed(1) + ' ' + y.toFixed(1);
+      return { x: x * width, y: base + (s / 1.85) * a };
+    };
+
+    let line = '';
+    for (let i = 0; i <= STEPS; i++) {
+      const pt = at(i);
+      line += (i === 0 ? 'M' : 'L') + pt.x.toFixed(1) + ' ' + pt.y.toFixed(1);
     }
-    return d;
+
+    let back = '';
+    for (let i = STEPS; i >= 0; i--) {
+      const pt = at(i);
+      back += 'L' + pt.x.toFixed(1) + ' ' + pt.y.toFixed(1);
+    }
+
+    return { line, fill: 'M0 0L' + width.toFixed(1) + ' 0' + back + 'Z' };
   });
 
-  const lineProps = useAnimatedProps(() => ({ d: surface.value }));
-
-  /** The same line, closed upward, so the colour has a wavy bottom edge. */
-  const skyProps = useAnimatedProps(() => ({
-    d: 'M0 0 L' + width + ' 0 L' + width + ' 0 ' + surface.value.replace('M', 'L') + ' L0 0 Z',
-  }));
+  const lineProps = useAnimatedProps(() => ({ d: paths.value.line }));
+  const skyProps = useAnimatedProps(() => ({ d: paths.value.fill }));
 
   /**
    * Built once. These never change, and rebuilding eighteen objects a frame
@@ -177,9 +194,11 @@ export function Horizon({
           <AnimatedPath
             animatedProps={lineProps}
             stroke={sky.grain}
-            strokeWidth={1.3}
+            strokeWidth={1.6}
             strokeLinecap="round"
-            strokeDasharray="1.6 2.6"
+            // A dash of almost nothing under a round cap is a dot. A real
+            // dash length draws little capsules, which read as stitching.
+            strokeDasharray="0.01 2.6"
             strokeDashoffset={layer.dash}
             fill="none"
           />

@@ -25,16 +25,65 @@ import { Elevation, Radius, Space, Type, monoLabel } from '@/constants/theme';
 import { usePalette } from '@/hooks/use-palette';
 
 /** A scrolling screen with a title, correctly inset for the dock. */
+/**
+ * A list as one box with hairlines between the rows, rather than a card per
+ * item.
+ *
+ * A card each gives every row its own border, its own corners and its own
+ * shadow, and a list of six of them reads as a pile rather than a list. One
+ * panel says these things are the same kind of thing, which is the only
+ * reason they are next to each other.
+ */
+export function Panel({ children, style }: { children: ReactNode; style?: ViewStyle }) {
+  const palette = usePalette();
+  const rows = Children.toArray(children).filter(Boolean);
+  if (rows.length === 0) return null;
+
+  return (
+    <View
+      style={[
+        {
+          backgroundColor: palette.raised,
+          borderWidth: 1,
+          borderColor: palette.line,
+          borderRadius: Radius.card + 2,
+          overflow: 'hidden',
+        },
+        style,
+      ]}
+    >
+      {rows.map((row, index) => (
+        <View
+          key={index}
+          style={{ borderTopWidth: index === 0 ? 0 : 1, borderTopColor: palette.line }}
+        >
+          {row}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 export function Screen({
   title,
   subtitle,
   children,
   action,
+  sticky,
+  onScroll,
 }: {
   title: string;
   subtitle?: string;
   children: ReactNode;
   action?: ReactNode;
+  /**
+   * Pinned under the title while the rest scrolls. One screen uses it — the
+   * memory map — and it is a prop rather than a wrapper because a map that
+   * scrolls away is a picture, not a control.
+   */
+  sticky?: ReactNode;
+  /** Content offset, for a screen whose header has to follow the list. */
+  onScroll?: (y: number) => void;
 }) {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
@@ -50,6 +99,11 @@ export function Screen({
           paddingBottom: insets.bottom + 108,
         }}
         keyboardShouldPersistTaps="handled"
+        // Index 1 is the sticky slot below. Passed only when something is in
+        // it, so every other screen keeps exactly the behaviour it had.
+        stickyHeaderIndices={sticky ? [1] : undefined}
+        onScroll={onScroll ? (event) => onScroll(event.nativeEvent.contentOffset.y) : undefined}
+        scrollEventThrottle={32}
       >
         <View
           style={{
@@ -63,6 +117,16 @@ export function Screen({
           <Text style={[Type.screenTitle, { color: palette.ink, flex: 1 }]}>{title}</Text>
           {action}
         </View>
+
+        {/*
+          Always rendered when `sticky` is set, and never otherwise, so the
+          index handed to stickyHeaderIndices is the one that is actually
+          there. A conditional that collapses to null shifts every index after
+          it and pins the wrong thing.
+        */}
+        {sticky ? (
+          <View style={{ backgroundColor: palette.paper, paddingBottom: 12 }}>{sticky}</View>
+        ) : null}
 
         {subtitle ? (
           <Text style={[Type.bodySm, { color: palette.muted, marginBottom: 20 }]}>{subtitle}</Text>
