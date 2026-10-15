@@ -68,14 +68,31 @@ const PARTS = [
  */
 const LAYERS = 34;
 
-/** How far the sand falls below the waterline, as a fraction of the band. */
-const FALL = 0.34;
+/**
+ * How far the sand falls below the waterline, and how high the crest rises —
+ * both as fractions of the band.
+ *
+ * These are not free. The deepest sand sits at mid + AMPLITUDE*amp + FALL, and
+ * when that passes 1 the trough is cut off square against the bottom of the
+ * band. It did: the last values put the sand at 296 in a 250 band, which on a
+ * dark screen looked like shadow and on a white one looked like a mistake.
+ *
+ * At the worst case here — mid 0.56, amp 1.5 — the sand lands at about 0.83,
+ * so it fades out with room to spare.
+ */
+const FALL = 0.22;
+const AMPLITUDE = 0.16;
 
-/** Crest height, as a fraction of the band. Below about a fifth it is a ripple. */
-const AMPLITUDE = 0.22;
-
-/** Samples across the width. Below about thirty the 6.1 harmonic aliases. */
-const STEPS = 34;
+/**
+ * Samples across the width.
+ *
+ * Thirty-four is enough to carry the 6.1 harmonic without aliasing and not
+ * nearly enough to look curved: at a 390-point width that is eleven pixels a
+ * segment, and every crest came to a visible corner. Seventy-six puts a joint
+ * every five pixels, which reads as a curve. It costs two longer strings a
+ * frame and nothing else — the layers all reuse the same one.
+ */
+const STEPS = 76;
 
 /**
  * Height and agitation per state.
@@ -85,13 +102,13 @@ const STEPS = 34;
  * is the message.
  */
 const MOOD: Record<AgentState, { amp: number; rate: number; mid: number }> = {
-  asleep: { amp: 0.35, rate: 0.16, mid: 0.54 },
-  idle: { amp: 0.85, rate: 0.26, mid: 0.64 },
-  listening: { amp: 1.5, rate: 0.74, mid: 0.72 },
-  thinking: { amp: 0.8, rate: 1.7, mid: 0.66 },
-  working: { amp: 1.1, rate: 0.3, mid: 0.69 },
-  speaking: { amp: 1.35, rate: 0.98, mid: 0.7 },
-  noting: { amp: 1.0, rate: 0.5, mid: 0.67 },
+  asleep: { amp: 0.4, rate: 0.16, mid: 0.46 },
+  idle: { amp: 0.9, rate: 0.26, mid: 0.54 },
+  listening: { amp: 1.5, rate: 0.74, mid: 0.56 },
+  thinking: { amp: 0.85, rate: 1.7, mid: 0.55 },
+  working: { amp: 1.15, rate: 0.3, mid: 0.55 },
+  speaking: { amp: 1.4, rate: 0.98, mid: 0.56 },
+  noting: { amp: 1.05, rate: 0.5, mid: 0.55 },
 };
 
 /**
@@ -114,7 +131,7 @@ export const STATE_WORD: Record<AgentState, string> = {
 export function Horizon({
   state,
   width,
-  height = 250,
+  height = 280,
   onPress,
   sky: chosen,
   level = 0,

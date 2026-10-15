@@ -90,7 +90,7 @@ export default function Talk() {
           <Horizon
             state={state}
             width={width}
-            height={250}
+            height={280}
             onPress={press}
             sky={persona.sky}
             level={level}
@@ -439,7 +439,11 @@ function Hardware({
   // least ink on the screen. Two chips announcing that nothing is wrong sat
   // across the top of the sky all day; one dot says the same thing, and the
   // detail is one tap away for the times it actually matters.
-  const trouble = !external || (armed && !ringSeen);
+  //
+  // White, then green. Amber was reading as a warning for the ordinary state
+  // of having no glasses on — nothing is wrong when you are holding the
+  // phone, so nothing should be coloured.
+  const live = external && armed && ringSeen;
 
   return (
     <View style={{ alignItems: 'center', gap: 8 }}>
@@ -458,8 +462,8 @@ function Hardware({
             width: open ? 5 : 8,
             height: open ? 5 : 8,
             borderRadius: 4,
-            backgroundColor: trouble ? palette.alert : palette.raised,
-            borderWidth: trouble ? 0 : 1,
+            backgroundColor: live ? palette.signal : palette.raised,
+            borderWidth: live ? 0 : 1,
             borderColor: palette.line,
           }}
         />

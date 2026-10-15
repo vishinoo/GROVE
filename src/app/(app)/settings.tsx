@@ -33,7 +33,7 @@ import Svg, { Defs, LinearGradient as SvgGradient, Rect, Stop } from 'react-nati
 import * as Updates from 'expo-updates';
 
 import { Icon } from '@/components/icon';
-import { Button, Card, Dot, Mono, Notice, Panel, Row, Screen, Section } from '@/components/ui';
+import { Button, Card, Dot, Mono, Notice, Row, Screen, Section } from '@/components/ui';
 import { Radius, SKIES, Type, skyFor } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
@@ -129,51 +129,6 @@ export default function Settings() {
             />
           </View>
 
-          <Text style={[Type.bodySm, { color: palette.muted, textAlign: 'center' }]}>
-            You&rsquo;ll be saying it out loud in public. The sky below is the one
-            you see on the Talk screen.
-          </Text>
-
-          {/*
-            Skies, not lobes.
-
-            This used to recolour the four lobes of the orb, and the orb is
-            gone — it was setting colours nothing drew any more.
-
-            Named rather than swatched. Five gradient circles are five small
-            pictures of the same thing, and at that size the two cool ones are
-            indistinguishable. The card above is the preview and it changes as
-            you pick, so the list only has to say which is which.
-          */}
-          <Panel style={{ width: '100%' }}>
-            {SKIES.map((sky) => {
-              const picked = (persona.sky ?? 'day') === sky.key;
-              return (
-                <Pressable
-                  key={sky.key}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: picked }}
-                  accessibilityLabel={sky.label}
-                  onPress={() => set({ sky: sky.key })}
-                  style={({ pressed }) => ({
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 11,
-                    paddingHorizontal: 14,
-                    paddingVertical: 13,
-                    opacity: pressed ? 0.6 : 1,
-                  })}
-                >
-                  <Text
-                    style={[Type.body, { flex: 1, color: picked ? palette.ink : palette.inkSoft }]}
-                  >
-                    {sky.label}
-                  </Text>
-                  {picked ? <Icon name="check" size={16} color={palette.ink} /> : null}
-                </Pressable>
-              );
-            })}
-          </Panel>
         </Card>
       </Section>
 
@@ -287,11 +242,72 @@ export default function Settings() {
         has given no sign either way.
       */}
 
+      {/*
+        Back to swatches, and further down.
+
+        A list of names was the wrong trade: the card at the top is a preview
+        of one sky, and choosing between five of them is a comparison, which
+        is a thing you do by looking rather than by reading. It sits below the
+        voice now because it is the least consequential control on the screen
+        and it was the second thing on it.
+      */}
+      <Section label="Sky">
+        <Card style={{ alignItems: 'center', paddingVertical: 18 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14, justifyContent: 'center' }}>
+            {SKIES.map((sky) => {
+              const picked = (persona.sky ?? 'day') === sky.key;
+              return (
+                <Pressable
+                  key={sky.key}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: picked }}
+                  accessibilityLabel={sky.label}
+                  onPress={() => set({ sky: sky.key })}
+                  style={({ pressed }) => ({ alignItems: 'center', gap: 6, opacity: pressed ? 0.7 : 1 })}
+                >
+                  <View
+                    style={{
+                      width: 46,
+                      height: 46,
+                      borderRadius: 23,
+                      overflow: 'hidden',
+                      borderWidth: picked ? 3 : 1,
+                      borderColor: picked ? palette.ink : palette.line,
+                    }}
+                  >
+                    <Svg width="100%" height="100%">
+                      <Defs>
+                        <SvgGradient id={`grove-swatch-${sky.key}`} x1="0" y1="0" x2="0" y2="1">
+                          {sky.stops.map((colour, i) => (
+                            <Stop
+                              key={colour}
+                              offset={i / (sky.stops.length - 1)}
+                              stopColor={colour}
+                            />
+                          ))}
+                        </SvgGradient>
+                      </Defs>
+                      <Rect
+                        x="0"
+                        y="0"
+                        width="100%"
+                        height="100%"
+                        fill={`url(#grove-swatch-${sky.key})`}
+                      />
+                    </Svg>
+                  </View>
+                  <Mono style={{ color: picked ? palette.ink : palette.muted }}>{sky.label}</Mono>
+                </Pressable>
+              );
+            })}
+          </View>
+        </Card>
+      </Section>
+
       <Section label="Speaking up">
         <Card style={{ paddingVertical: 2 }}>
           <Row
             label="Speaks up unprompted"
-            hint="Leave-by times, and a fixture missing from your diary. At most three a day."
             right={
               <Switch
                 value={persona.speaksUp !== false}
@@ -361,7 +377,6 @@ export default function Settings() {
           />
           <Row
             label="Keep speech on this device"
-            hint={persona.preferOnDevice ? undefined : 'Better with names.'}
             right={
               <Switch
                 value={persona.preferOnDevice}
