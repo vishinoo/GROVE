@@ -21,18 +21,17 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Pressable,
-  ScrollView,
   Text,
   TextInput,
   View,
   useWindowDimensions,
-  type LayoutChangeEvent,
 } from 'react-native';
 import Animated, {
-  Easing,
+  runOnJS,
+  useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
-  withTiming,
+  type SharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -52,26 +51,59 @@ import {
 import { shortDate } from '@/lib/when';
 import { when as transcriptWhen } from '@/lib/transcript';
 
+/** Where a section counts as the one you are reading: just under the map. */
+const READING_LINE = 250;
+
+/** How far either side of that it takes to fade right out. */
+const FADE_OVER = 220;
+
 /**
- * One section at a time.
+ * One section at a time, tied to the scroll rather than to a flag.
  *
- * Sparks holds six kinds of memory and showing all six at once made it a very
- * long page that you scrolled past rather than read. Only the section you are
- * in is lit; the others stay in the layout — so the scroll position means
- * something and the rail can measure it — and fade almost out.
+ * The first version switched opacity when the current section changed, which
+ * meant everything below the one you were on sat at a flat six percent — a
+ * screenful of ghost text that never moved, and no sign that scrolling would
+ * bring anything back. Reading a section's distance from the line instead
+ * makes the next one fade up as it arrives and the last one fade away as it
+ * leaves, so the page always shows you something becoming readable.
  *
- * Driven off which section is current rather than off the scroll offset
- * directly. Opacity recomputed every frame is a frame's work for a value that
- * changes six times in a screenful.
+ * Each section measures itself. The parent needs the offsets anyway, for the
+ * map and the rail, so it is handed them from here rather than measured twice.
  */
-function Fading({ active, children }: { active: boolean; children: ReactNode }) {
-  const shown = useSharedValue(active ? 1 : 0.06);
-  shown.value = withTiming(active ? 1 : 0.06, {
-    duration: 260,
-    easing: Easing.out(Easing.cubic),
+function Fading({
+  id,
+  scrollY,
+  onMeasure,
+  children,
+}: {
+  id: MapSection;
+  scrollY: SharedValue<number>;
+  onMeasure: (id: MapSection, top: number) => void;
+  children: ReactNode;
+}) {
+  const top = useSharedValue(0);
+  const span = useSharedValue(1);
+
+  const style = useAnimatedStyle(() => {
+    const into = scrollY.value + READING_LINE - top.value;
+    const early = Math.max(0, -into) / FADE_OVER;
+    const late = Math.max(0, into - span.value) / FADE_OVER;
+    const shown = Math.min(1 - Math.min(1, early), 1 - Math.min(1, late));
+    return { opacity: Math.max(0.05, shown) };
   });
-  const style = useAnimatedStyle(() => ({ opacity: shown.value }));
-  return <Animated.View style={style}>{children}</Animated.View>;
+
+  return (
+    <Animated.View
+      onLayout={(event) => {
+        top.value = event.nativeEvent.layout.y;
+        span.value = Math.max(1, event.nativeEvent.layout.height);
+        onMeasure(id, event.nativeEvent.layout.y);
+      }}
+      style={style}
+    >
+      {children}
+    </Animated.View>
+  );
 }
 
 export default function Sparks() {
@@ -99,20 +131,27 @@ export default function Sparks() {
   const [lit, setLit] = useState<MapSection>('did');
   const tops = useRef<Partial<Record<MapSection, number>>>({});
 
-  const mark = (id: MapSection) => (event: LayoutChangeEvent) => {
-    tops.current[id] = event.nativeEvent.layout.y;
+  const scrollY = useSharedValue(0);
+
+  const mark = (id: MapSection, top: number) => {
+    tops.current[id] = top;
   };
 
-  const onScroll = (y: number) => {
+  // Guarded, so crossing the UI-thread boundary sixty times a second costs a
+  // comparison and almost never a React render.
+  const look = (y: number) => {
     let current: MapSection = 'did';
-    // Measured against a line below the pinned map, which is where a section
-    // actually becomes the one you are looking at.
     for (const section of MAP_SECTIONS) {
       const top = tops.current[section.id];
-      if (top !== undefined && top <= y + 24) current = section.id;
+      if (top !== undefined && top <= y + READING_LINE) current = section.id;
     }
-    if (current !== lit) setLit(current);
+    setLit((was) => (was === current ? was : current));
   };
+
+  const onScroll = useAnimatedScrollHandler((event) => {
+    scrollY.value = event.contentOffset.y;
+    runOnJS(look)(event.contentOffset.y);
+  });
 
   const counts: Record<MapSection, number> = {
     did: activity.filter((entry) => entry.tool).length,
@@ -125,23 +164,21 @@ export default function Sparks() {
 
   return (
     <View style={{ flex: 1, backgroundColor: palette.paper }}>
-      <ScrollView
+      <Animated.ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
           paddingTop: header || 300,
           paddingHorizontal: Space.screenX,
-          paddingBottom: insets.bottom + 108,
+          paddingBottom: insets.bottom + 220,
         }}
-        onScroll={(event) => onScroll(event.nativeEvent.contentOffset.y)}
-        scrollEventThrottle={32}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
         keyboardShouldPersistTaps="handled"
       >
 
-      <View onLayout={mark('did')}>
-        <Fading active={lit === 'did'}>
+      <Fading id="did" scrollY={scrollY} onMeasure={mark}>
           <Done />
         </Fading>
-      </View>
 
       {/*
         Goals and promises in one place, because the distinction was a
@@ -154,8 +191,7 @@ export default function Sparks() {
         sent Jason the build" — which also marks it kept in the long memory,
         and swiping it would record nothing and quietly lose the thread.
       */}
-      <View onLayout={mark('open')}>
-        <Fading active={lit === 'open'}>
+      <Fading id="open" scrollY={scrollY} onMeasure={mark}>
       {goals.length > 0 || owed.length > 0 ? (
         <Peek show={5}>
           {goals.map((fact) => (
@@ -182,10 +218,8 @@ export default function Sparks() {
         Hidden when empty, like the inbox — a tutor with nothing to teach does
         not need a panel.
       */}</Fading>
-      </View>
 
-<View onLayout={mark('repeats')}>
-        <Fading active={lit === 'repeats'}>
+<Fading id="repeats" scrollY={scrollY} onMeasure={mark}>
       {stuck.length > 0 ? (
         <Section>
           {stuck.slice(0, 20).map((item) => (
@@ -228,10 +262,8 @@ export default function Sparks() {
         believes something wrong about a person you see every week is worse
         than one that remembers nothing.
       */}</Fading>
-      </View>
 
-<View onLayout={mark('people')}>
-        <Fading active={lit === 'people'}>
+<Fading id="people" scrollY={scrollY} onMeasure={mark}>
       {life.entities.length > 0 ? (
         <Peek>
           {[...life.entities]
@@ -248,10 +280,8 @@ export default function Sparks() {
             ))}
         </Peek>
       ) : null}</Fading>
-      </View>
 
-<View onLayout={mark('happened')}>
-        <Fading active={lit === 'happened'}>
+<Fading id="happened" scrollY={scrollY} onMeasure={mark}>
       {life.episodes.length > 0 ? (
         <Peek>
           {life.episodes.slice(0, 15).map((episode) => (
@@ -277,10 +307,8 @@ export default function Sparks() {
         lie told by a layout. Empty is its own section, and the trailing note
         about correcting a line only exists once there is a line to correct.
       */}</Fading>
-      </View>
 
-<View onLayout={mark('about')}>
-        <Fading active={lit === 'about'}>
+<Fading id="about" scrollY={scrollY} onMeasure={mark}>
       {plain.length === 0 ? (
         <Section>
           <Text style={[Type.bodySm, { color: palette.muted }]}>
@@ -301,9 +329,8 @@ export default function Sparks() {
           </Text>
         </>
       )}</Fading>
-      </View>
 
-      </ScrollView>
+      </Animated.ScrollView>
 
       {/*
         The header does not scroll.

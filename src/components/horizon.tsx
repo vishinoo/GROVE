@@ -58,11 +58,21 @@ const PARTS = [
   { k: 6.1, w: 1.63, p: 5.2, a: 0.13 },
 ];
 
-/** Grain layers. Eighteen is dense enough to read as sand rather than ripples. */
-const LAYERS = 18;
+/**
+ * Grain layers.
+ *
+ * Eighteen read as ripples — a few separate contour lines with gaps you could
+ * see the paper through. The dune in the design is a mass: dense enough at the
+ * waterline to be a silhouette, thinning out underneath. That needs roughly
+ * twice the layers at two thirds the spacing, which is this.
+ */
+const LAYERS = 34;
 
 /** How far the sand falls below the waterline, as a fraction of the band. */
-const FALL = 0.22;
+const FALL = 0.34;
+
+/** Crest height, as a fraction of the band. Below about a fifth it is a ripple. */
+const AMPLITUDE = 0.22;
 
 /** Samples across the width. Below about thirty the 6.1 harmonic aliases. */
 const STEPS = 34;
@@ -75,13 +85,13 @@ const STEPS = 34;
  * is the message.
  */
 const MOOD: Record<AgentState, { amp: number; rate: number; mid: number }> = {
-  asleep: { amp: 0.25, rate: 0.16, mid: 0.52 },
-  idle: { amp: 0.55, rate: 0.26, mid: 0.63 },
-  listening: { amp: 1.5, rate: 0.74, mid: 0.74 },
-  thinking: { amp: 0.6, rate: 1.7, mid: 0.66 },
-  working: { amp: 0.95, rate: 0.3, mid: 0.7 },
-  speaking: { amp: 1.3, rate: 0.98, mid: 0.72 },
-  noting: { amp: 0.8, rate: 0.5, mid: 0.68 },
+  asleep: { amp: 0.35, rate: 0.16, mid: 0.54 },
+  idle: { amp: 0.85, rate: 0.26, mid: 0.64 },
+  listening: { amp: 1.5, rate: 0.74, mid: 0.72 },
+  thinking: { amp: 0.8, rate: 1.7, mid: 0.66 },
+  working: { amp: 1.1, rate: 0.3, mid: 0.69 },
+  speaking: { amp: 1.35, rate: 0.98, mid: 0.7 },
+  noting: { amp: 1.0, rate: 0.5, mid: 0.67 },
 };
 
 /**
@@ -179,7 +189,7 @@ export function Horizon({
   const paths = useDerivedValue(() => {
     'worklet';
     const base = height * mid.value;
-    const a = height * 0.13 * amp.value * (1 + swell.value);
+    const a = height * AMPLITUDE * amp.value * (1 + swell.value);
 
     const at = (i: number) => {
       'worklet';
@@ -218,7 +228,7 @@ export function Horizon({
     () =>
       Array.from({ length: LAYERS }, (_, j) => ({
         dy: (j / (LAYERS - 1)) * height * FALL,
-        opacity: Math.pow(1 - j / LAYERS, 2.6),
+        opacity: Math.pow(1 - j / LAYERS, 1.6),
         // Offset per layer, or the dots stack into vertical stripes.
         dash: (j * 1.37) % 4.2,
       })),
@@ -242,11 +252,11 @@ export function Horizon({
           <AnimatedPath
             animatedProps={lineProps}
             stroke={sky.grain}
-            strokeWidth={1.6}
+            strokeWidth={1.5}
             strokeLinecap="round"
             // A dash of almost nothing under a round cap is a dot. A real
             // dash length draws little capsules, which read as stitching.
-            strokeDasharray="0.01 2.6"
+            strokeDasharray="0.01 1.9"
             strokeDashoffset={layer.dash}
             fill="none"
           />

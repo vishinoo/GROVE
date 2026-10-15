@@ -18,21 +18,30 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Linking, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import {
+  Linking,
+  Pressable,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+  useColorScheme,
+} from 'react-native';
 import Svg, { Defs, LinearGradient as SvgGradient, Rect, Stop } from 'react-native-svg';
 
 import * as Updates from 'expo-updates';
 
 import { Icon } from '@/components/icon';
-import { Button, Card, Dot, Mono, Notice, Row, Screen, Section } from '@/components/ui';
-import { Radius, SKIES, Sky, Type } from '@/constants/theme';
+import { Button, Card, Dot, Mono, Notice, Panel, Row, Screen, Section } from '@/components/ui';
+import { Radius, SKIES, Type, skyFor } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
 import { runSelfCheck, type CheckResult } from '@/lib/selfCheck';
 import { checkNow, runningLabel, type Caught } from '@/lib/updates';
-import { MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona, type Preset } from '@/lib/persona';
+import { MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona } from '@/lib/persona';
 import { hasOwnKey, setOwnKey } from '@/lib/lightModel';
 import { availableVoices, bestVoiceId, characterVoice, hasEnhancedVoice, speak } from '@/lib/speak';
 import * as trigger from '@/lib/trigger';
@@ -46,6 +55,11 @@ export default function Settings() {
   // spark and a fact are the same idea from different ends, and keeping the
   // list somewhere you pass anyway beats burying it in Settings.
   const { persona, updatePersona, armed, route } = useAgent();
+  const night = useColorScheme() === 'dark';
+  const chosenSky = skyFor(persona.sky, night);
+  const gradientId = `grove-name-${persona.sky ?? 'day'}`;
+  /** Not one of the presets, so the box is theirs and worth showing. */
+  const custom = !PRESETS.some((preset) => preset.manner.trim() === persona.manner.trim());
   const updateLabel = runningLabel();
 
   const reduced = reducedModeReason();
@@ -90,13 +104,19 @@ export default function Settings() {
           >
             <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
               <Defs>
-                <SvgGradient id="grove-name" x1="0" y1="0" x2="0.35" y2="1">
-                  {Sky.day.stops.map((colour, i) => (
-                    <Stop key={colour} offset={i / (Sky.day.stops.length - 1)} stopColor={colour} />
+                {/* Keyed on the choice, or the gradient is cached under one
+                    id and the card never repaints when you pick another. */}
+                <SvgGradient id={gradientId} x1="0" y1="0" x2="0.35" y2="1">
+                  {chosenSky.stops.map((colour, i) => (
+                    <Stop
+                      key={colour}
+                      offset={i / (chosenSky.stops.length - 1)}
+                      stopColor={colour}
+                    />
                   ))}
                 </SvgGradient>
               </Defs>
-              <Rect x="0" y="0" width="100%" height="100%" fill="url(#grove-name)" />
+              <Rect x="0" y="0" width="100%" height="100%" fill={`url(#${gradientId})`} />
             </Svg>
 
             <TextInput
@@ -118,88 +138,139 @@ export default function Settings() {
             Skies, not lobes.
 
             This used to recolour the four lobes of the orb, and the orb is
-            gone — the picker was setting colours nothing drew any more. The
-            thing it should control is the horizon, and these are presets
-            rather than a wheel because the gradient has a job: hold a legible
-            waterline at the top and sit under dark text at the bottom. Five
-            stops chosen by hand do that and five stops chosen from a wheel
-            very often do not.
+            gone — it was setting colours nothing drew any more.
+
+            Named rather than swatched. Five gradient circles are five small
+            pictures of the same thing, and at that size the two cool ones are
+            indistinguishable. The card above is the preview and it changes as
+            you pick, so the list only has to say which is which.
           */}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' }}>
+          <Panel style={{ width: '100%' }}>
             {SKIES.map((sky) => {
               const picked = (persona.sky ?? 'day') === sky.key;
               return (
                 <Pressable
                   key={sky.key}
-                  accessibilityRole="button"
+                  accessibilityRole="radio"
                   accessibilityState={{ selected: picked }}
                   accessibilityLabel={sky.label}
                   onPress={() => set({ sky: sky.key })}
-                  style={({ pressed }) => ({ alignItems: 'center', gap: 5, opacity: pressed ? 0.7 : 1 })}
+                  style={({ pressed }) => ({
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 11,
+                    paddingHorizontal: 14,
+                    paddingVertical: 13,
+                    opacity: pressed ? 0.6 : 1,
+                  })}
                 >
-                  <View
-                    style={{
-                      width: 46,
-                      height: 46,
-                      borderRadius: 23,
-                      overflow: 'hidden',
-                      borderWidth: picked ? 3 : 1,
-                      borderColor: picked ? palette.ink : palette.line,
-                    }}
+                  <Text
+                    style={[Type.body, { flex: 1, color: picked ? palette.ink : palette.inkSoft }]}
                   >
-                    <Svg width="100%" height="100%">
-                      <Defs>
-                        <SvgGradient id={`grove-swatch-${sky.key}`} x1="0" y1="0" x2="0" y2="1">
-                          {sky.stops.map((colour, i) => (
-                            <Stop
-                              key={colour}
-                              offset={i / (sky.stops.length - 1)}
-                              stopColor={colour}
-                            />
-                          ))}
-                        </SvgGradient>
-                      </Defs>
-                      <Rect
-                        x="0"
-                        y="0"
-                        width="100%"
-                        height="100%"
-                        fill={`url(#grove-swatch-${sky.key})`}
-                      />
-                    </Svg>
-                  </View>
-                  <Mono style={{ color: picked ? palette.ink : palette.muted }}>{sky.label}</Mono>
+                    {sky.label}
+                  </Text>
+                  {picked ? <Icon name="check" size={16} color={palette.ink} /> : null}
                 </Pressable>
               );
             })}
-          </View>
+          </Panel>
         </Card>
       </Section>
 
+      {/*
+        Pills, and the prompt only when you are writing one.
+
+        This was a row that opened a list, above a box holding whatever the
+        chosen preset's manner happened to be — four hundred words of
+        second-person instructions, on a settings screen, reading "400/400" as
+        though the user had written it and run out of room. Nobody needs to
+        read Jarvis at himself. Pick a name, or pick Custom and get an empty
+        box that is actually yours.
+      */}
       <Section label="How it talks">
-        <MannerPicker
-          manner={persona.manner}
-          onSelect={(preset) => set({ manner: preset.manner, delivery: preset.delivery })}
-        />
-        <Card>
-          <TextInput
-            value={persona.manner}
-            onChangeText={(manner) => set({ manner: manner.slice(0, MANNER_LIMIT) })}
-            placeholder="Short and dry. Don’t be chirpy."
-            placeholderTextColor={palette.muted}
-            multiline
-            style={{
-              minHeight: 76,
-              fontFamily: Type.body.fontFamily,
-              fontSize: 14.5,
-              lineHeight: 21,
-              color: palette.ink,
-            }}
-          />
-          <Mono style={{ marginTop: 8 }}>
-            {persona.manner.length}/{MANNER_LIMIT}
-          </Mono>
-        </Card>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+          {PRESETS.map((preset) => {
+            const picked = preset.manner.trim() === persona.manner.trim();
+            return (
+              <Pressable
+                key={preset.key}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: picked }}
+                accessibilityLabel={`${preset.label}. ${preset.blurb}`}
+                onPress={() => set({ manner: preset.manner, delivery: preset.delivery })}
+                style={({ pressed }) => ({
+                  height: 34,
+                  paddingHorizontal: 15,
+                  borderRadius: Radius.pill,
+                  justifyContent: 'center',
+                  backgroundColor: picked ? palette.mark : palette.raised,
+                  borderWidth: 1,
+                  borderColor: picked ? palette.mark : palette.line,
+                  opacity: pressed ? 0.7 : 1,
+                })}
+              >
+                <Text
+                  style={{
+                    fontFamily: Type.cardTitle.fontFamily,
+                    fontSize: 13.5,
+                    color: picked ? palette.raised : palette.ink,
+                  }}
+                >
+                  {preset.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+
+          <Pressable
+            accessibilityRole="radio"
+            accessibilityState={{ selected: custom }}
+            accessibilityLabel="Custom. Write your own."
+            onPress={() => set({ manner: custom ? persona.manner : '' })}
+            style={({ pressed }) => ({
+              height: 34,
+              paddingHorizontal: 15,
+              borderRadius: Radius.pill,
+              justifyContent: 'center',
+              backgroundColor: custom ? palette.mark : palette.raised,
+              borderWidth: 1,
+              borderColor: custom ? palette.mark : palette.line,
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            <Text
+              style={{
+                fontFamily: Type.cardTitle.fontFamily,
+                fontSize: 13.5,
+                color: custom ? palette.raised : palette.ink,
+              }}
+            >
+              Custom
+            </Text>
+          </Pressable>
+        </View>
+
+        {custom ? (
+          <Card style={{ marginTop: 10 }}>
+            <TextInput
+              value={persona.manner}
+              onChangeText={(manner) => set({ manner: manner.slice(0, MANNER_LIMIT) })}
+              placeholder="Short and dry. Don’t be chirpy."
+              placeholderTextColor={palette.muted}
+              multiline
+              style={{
+                minHeight: 76,
+                fontFamily: Type.body.fontFamily,
+                fontSize: 14.5,
+                lineHeight: 21,
+                color: palette.ink,
+              }}
+            />
+            <Mono style={{ marginTop: 8 }}>
+              {persona.manner.length}/{MANNER_LIMIT}
+            </Mono>
+          </Card>
+        ) : null}
       </Section>
 
       {/*
@@ -452,92 +523,6 @@ function UpdateNow() {
  * tuning stops it sounding like a satnav. That download is free and is a bigger
  * improvement than anything this app can do in code.
  */
-
-/**
- * Three characters, collapsed to one row.
- *
- * Presets were taken off this screen once, for a good reason: as a row of
- * buttons beside the manner box they were a second source of truth, and one
- * that silently overwrote what you had written. This puts them back the way
- * the voice list works instead — collapsed to the one in use, and writing into
- * the box rather than living alongside it. The box is still the only thing
- * saved. A preset is just a way to fill it in, and the moment you edit it the
- * row says Custom and stops claiming otherwise.
- */
-function MannerPicker({
-  manner,
-  onSelect,
-}: {
-  manner: string;
-  onSelect: (preset: Preset) => void;
-}) {
-  const palette = usePalette();
-  const [open, setOpen] = useState(false);
-
-  // Matched on the text, not on a stored key, so an edited preset is honestly
-  // reported as Custom rather than still claiming to be the thing it was.
-  const current = PRESETS.find((preset) => preset.manner.trim() === manner.trim());
-
-  return (
-    <Card style={{ paddingVertical: 2, marginBottom: 10 }}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        accessibilityLabel={`Manner: ${current?.label ?? 'custom'}. Tap to change.`}
-        onPress={() => setOpen((was) => !was)}
-        style={({ pressed }) => ({
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 10,
-          paddingVertical: 13,
-          opacity: pressed ? 0.6 : 1,
-        })}
-      >
-        <View style={{ flex: 1 }}>
-          <Text style={[Type.body, { color: palette.ink }]}>{current?.label ?? 'Custom'}</Text>
-          <Text style={[Type.bodySm, { color: palette.muted }]}>
-            {current?.blurb ?? 'Your own words, in the box below.'}
-          </Text>
-        </View>
-        <Mono>{PRESETS.length}</Mono>
-        <Icon name={open ? 'down' : 'chevron'} size={14} color={palette.muted} />
-      </Pressable>
-
-      {open
-        ? PRESETS.map((preset) => {
-            const on = preset.key === current?.key;
-            return (
-              <Pressable
-                key={preset.key}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: on }}
-                accessibilityLabel={`${preset.label}. ${preset.blurb}`}
-                onPress={() => {
-                  onSelect(preset);
-                  setOpen(false);
-                }}
-                style={({ pressed }) => ({
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 10,
-                  paddingVertical: 11,
-                  borderTopWidth: 1,
-                  borderTopColor: palette.line,
-                  opacity: pressed ? 0.6 : 1,
-                })}
-              >
-                <Dot tone={on ? 'live' : 'off'} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[Type.body, { color: palette.ink }]}>{preset.label}</Text>
-                  <Text style={[Type.bodySm, { color: palette.muted }]}>{preset.blurb}</Text>
-                </View>
-              </Pressable>
-            );
-          })
-        : null}
-    </Card>
-  );
-}
 
 function VoicePicker({
   selected,
