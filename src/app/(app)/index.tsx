@@ -42,7 +42,7 @@ export default function Talk() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { notice, dismissNotice } = useSession();
-  const { state, caption, heard, armed, ringSeen, route, problem, activity, next, press, say, persona } =
+  const { state, caption, heard, level, armed, ringSeen, route, problem, activity, next, press, say, persona } =
     useAgent();
 
   const [draft, setDraft] = useState('');
@@ -87,7 +87,14 @@ export default function Talk() {
           Everything else on this screen keeps its gutter.
         */}
         <View style={{ marginHorizontal: -Space.screenX }}>
-          <Horizon state={state} width={width} height={250} onPress={press} sky={persona.sky} />
+          <Horizon
+            state={state}
+            width={width}
+            height={250}
+            onPress={press}
+            sky={persona.sky}
+            level={level}
+          />
         </View>
 
         {notice ? <Notice text={notice} onDismiss={dismissNotice} /> : null}
@@ -104,7 +111,7 @@ export default function Talk() {
           losing the word is what made "is it even listening" a question
           again.
         */}
-        <Text style={[Type.state, { color: palette.ink, textAlign: 'center', marginTop: 14 }]}>
+        <Text style={[Type.state, { color: palette.ink, textAlign: 'center', marginTop: 2 }]}>
           {STATE_WORD[state]}
         </Text>
 

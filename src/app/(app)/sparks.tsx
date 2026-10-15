@@ -18,7 +18,7 @@
  * in two places means one of them is wrong the moment either changes.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -28,6 +28,12 @@ import {
   useWindowDimensions,
   type LayoutChangeEvent,
 } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/icon';
@@ -45,6 +51,28 @@ import {
 } from '@/lib/life';
 import { shortDate } from '@/lib/when';
 import { when as transcriptWhen } from '@/lib/transcript';
+
+/**
+ * One section at a time.
+ *
+ * Sparks holds six kinds of memory and showing all six at once made it a very
+ * long page that you scrolled past rather than read. Only the section you are
+ * in is lit; the others stay in the layout — so the scroll position means
+ * something and the rail can measure it — and fade almost out.
+ *
+ * Driven off which section is current rather than off the scroll offset
+ * directly. Opacity recomputed every frame is a frame's work for a value that
+ * changes six times in a screenful.
+ */
+function Fading({ active, children }: { active: boolean; children: ReactNode }) {
+  const shown = useSharedValue(active ? 1 : 0.06);
+  shown.value = withTiming(active ? 1 : 0.06, {
+    duration: 260,
+    easing: Easing.out(Easing.cubic),
+  });
+  const style = useAnimatedStyle(() => ({ opacity: shown.value }));
+  return <Animated.View style={style}>{children}</Animated.View>;
+}
 
 export default function Sparks() {
   const palette = usePalette();
@@ -110,7 +138,9 @@ export default function Sparks() {
       >
 
       <View onLayout={mark('did')}>
-        <Done />
+        <Fading active={lit === 'did'}>
+          <Done />
+        </Fading>
       </View>
 
       {/*
@@ -124,7 +154,8 @@ export default function Sparks() {
         sent Jason the build" — which also marks it kept in the long memory,
         and swiping it would record nothing and quietly lose the thread.
       */}
-      <View onLayout={mark('open')} />
+      <View onLayout={mark('open')}>
+        <Fading active={lit === 'open'}>
       {goals.length > 0 || owed.length > 0 ? (
         <Peek show={5}>
           {goals.map((fact) => (
@@ -150,8 +181,11 @@ export default function Sparks() {
         the count beside each one is the part no other app can tell you.
         Hidden when empty, like the inbox — a tutor with nothing to teach does
         not need a panel.
-      */}
-      <View onLayout={mark('repeats')} />
+      */}</Fading>
+      </View>
+
+<View onLayout={mark('repeats')}>
+        <Fading active={lit === 'repeats'}>
       {stuck.length > 0 ? (
         <Section>
           {stuck.slice(0, 20).map((item) => (
@@ -193,8 +227,11 @@ export default function Sparks() {
         part of memory most worth being able to read: an assistant that quietly
         believes something wrong about a person you see every week is worse
         than one that remembers nothing.
-      */}
-      <View onLayout={mark('people')} />
+      */}</Fading>
+      </View>
+
+<View onLayout={mark('people')}>
+        <Fading active={lit === 'people'}>
       {life.entities.length > 0 ? (
         <Peek>
           {[...life.entities]
@@ -210,9 +247,11 @@ export default function Sparks() {
               </SwipeAway>
             ))}
         </Peek>
-      ) : null}
+      ) : null}</Fading>
+      </View>
 
-      <View onLayout={mark('happened')} />
+<View onLayout={mark('happened')}>
+        <Fading active={lit === 'happened'}>
       {life.episodes.length > 0 ? (
         <Peek>
           {life.episodes.slice(0, 15).map((episode) => (
@@ -237,8 +276,11 @@ export default function Sparks() {
         inside one — "Facts about you · 1" over the words "nothing yet" is a
         lie told by a layout. Empty is its own section, and the trailing note
         about correcting a line only exists once there is a line to correct.
-      */}
-      <View onLayout={mark('about')} />
+      */}</Fading>
+      </View>
+
+<View onLayout={mark('about')}>
+        <Fading active={lit === 'about'}>
       {plain.length === 0 ? (
         <Section>
           <Text style={[Type.bodySm, { color: palette.muted }]}>
@@ -258,7 +300,8 @@ export default function Sparks() {
             Open a line to correct it. Speech gets names wrong; this is where you fix that.
           </Text>
         </>
-      )}
+      )}</Fading>
+      </View>
 
       </ScrollView>
 

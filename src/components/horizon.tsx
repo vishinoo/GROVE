@@ -75,13 +75,13 @@ const STEPS = 34;
  * is the message.
  */
 const MOOD: Record<AgentState, { amp: number; rate: number; mid: number }> = {
-  asleep: { amp: 0.25, rate: 0.16, mid: 0.4 },
-  idle: { amp: 0.55, rate: 0.26, mid: 0.5 },
-  listening: { amp: 1.5, rate: 0.74, mid: 0.66 },
-  thinking: { amp: 0.6, rate: 1.7, mid: 0.54 },
-  working: { amp: 0.95, rate: 0.3, mid: 0.58 },
-  speaking: { amp: 1.3, rate: 0.98, mid: 0.62 },
-  noting: { amp: 0.8, rate: 0.5, mid: 0.56 },
+  asleep: { amp: 0.25, rate: 0.16, mid: 0.52 },
+  idle: { amp: 0.55, rate: 0.26, mid: 0.63 },
+  listening: { amp: 1.5, rate: 0.74, mid: 0.74 },
+  thinking: { amp: 0.6, rate: 1.7, mid: 0.66 },
+  working: { amp: 0.95, rate: 0.3, mid: 0.7 },
+  speaking: { amp: 1.3, rate: 0.98, mid: 0.72 },
+  noting: { amp: 0.8, rate: 0.5, mid: 0.68 },
 };
 
 /**
@@ -107,6 +107,7 @@ export function Horizon({
   height = 250,
   onPress,
   sky: chosen,
+  level = 0,
 }: {
   state: AgentState;
   width: number;
@@ -114,6 +115,8 @@ export function Horizon({
   onPress?: () => void;
   /** A key from SKIES. Unset follows the light or dark scheme. */
   sky?: string;
+  /** Microphone level, 0-1. The sea gets rougher as you talk into it. */
+  level?: number;
 }) {
   const night = useColorScheme() === 'dark';
   const sky = skyFor(chosen, night);
@@ -133,10 +136,35 @@ export function Horizon({
   mid.value = withTiming(mood.mid, { duration: 900, easing: Easing.out(Easing.cubic) });
   rate.value = withTiming(mood.rate, { duration: 700 });
 
+  /*
+    Both halves of the conversation move the water.
+
+    Listening is the easy one: the microphone level is already measured, so
+    the sea gets rougher as you talk into it. Speaking has no level to read —
+    the voice is going out, not coming in — so it is a swell of its own, fast
+    enough to read as a voice and slow enough not to look like a glitch.
+
+    Without this the horizon only changed when the state did, which made a
+    whole conversation look like four still pictures.
+  */
+  const live = useSharedValue(0);
+  const swell = useSharedValue(0);
+  live.value = withTiming(Math.max(0, Math.min(1, level)), { duration: 90 });
+
+  const talking = state === 'speaking';
+  const hearing = state === 'listening' || state === 'noting';
+
   useFrameCallback((frame) => {
     'worklet';
     const dt = Math.min(0.05, (frame.timeSincePreviousFrame ?? 16) / 1000);
     clock.value += dt * rate.value;
+
+    const want = talking
+      ? 0.3 + 0.26 * Math.sin(clock.value * 7.5)
+      : hearing
+        ? live.value * 0.85
+        : 0;
+    swell.value += (want - swell.value) * Math.min(1, dt * 9);
   }, true);
 
   /**
@@ -151,7 +179,7 @@ export function Horizon({
   const paths = useDerivedValue(() => {
     'worklet';
     const base = height * mid.value;
-    const a = height * 0.13 * amp.value;
+    const a = height * 0.13 * amp.value * (1 + swell.value);
 
     const at = (i: number) => {
       'worklet';

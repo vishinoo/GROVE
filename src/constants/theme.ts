@@ -234,6 +234,14 @@ export const Elevation = {
  */
 export const Fonts = {
   display: 'Inter_700Bold',
+  /**
+   * Screen titles and the state word.
+   *
+   * Bold was doing hierarchy's job twice: these are already the biggest thing
+   * on their screen, and at 26px a heavy weight reads as shouting rather than
+   * as a heading. Light lets the size carry it.
+   */
+  displayLight: 'Inter_300Light',
   displaySemi: 'Inter_600SemiBold',
   body: 'Inter_400Regular',
   bodyMedium: 'Inter_500Medium',
@@ -256,8 +264,8 @@ export const monoLabel = {
 
 export const Type = {
   /** The one word under the orb: "Listening", "Thinking". */
-  state: { fontFamily: Fonts.displaySemi, fontSize: 21, letterSpacing: -0.5 },
-  screenTitle: { fontFamily: Fonts.display, fontSize: 26, letterSpacing: -0.9 },
+  state: { fontFamily: Fonts.displayLight, fontSize: 24, letterSpacing: -0.8 },
+  screenTitle: { fontFamily: Fonts.displayLight, fontSize: 27, letterSpacing: -1 },
   cardTitle: { fontFamily: Fonts.bodySemi, fontSize: 14.5, letterSpacing: -0.15 },
   body: { fontFamily: Fonts.body, fontSize: 14.5, lineHeight: 22 },
   bodySm: { fontFamily: Fonts.body, fontSize: 12.5, lineHeight: 18 },
