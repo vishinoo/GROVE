@@ -526,19 +526,26 @@ export function whoIsWho(life: Life, limit = 10): string {
  * ride on every turn.
  */
 export function lately(life: Life, now = new Date()): string {
-  const recent = life.episodes
-    .filter((ep) => !ep.open && now.getTime() - new Date(ep.at).getTime() < 5 * 86_400_000)
-    .slice(0, 5)
-    .map((ep) => ep.title);
+  /*
+    What is owed, and nothing else.
+
+    This used to open with "Lately in their life:" and five recent episode
+    titles, on every turn. Telling a model five things that happened this week,
+    every time anyone says anything, is an instruction to mention them — and it
+    did: a greeting came back with a fact about last Tuesday's meeting attached.
+    Asking it nicely in the next sentence not to does not work, because the
+    cheapest way to look like you were listening is to use what you were handed.
+
+    An open commitment survives because it is not a topic, it is a thing with
+    someone waiting at the other end of it, and it stays true until it is done.
+    Anything else that happened is a tool call away the moment it is asked for.
+  */
+  void now;
   const owed = openCommitments(life)
     .slice(0, 4)
     .map((ep) => ep.title);
-  const parts = [
-    recent.length ? `Lately in their life: ${recent.join('; ')}.` : '',
-    owed.length ? `Still outstanding: ${owed.join('; ')}.` : '',
-  ].filter(Boolean);
-  return parts.length
-    ? `${parts.join(' ')} Background only — bring one up only when it is genuinely relevant.`
+  return owed.length
+    ? `Still outstanding: ${owed.join('; ')}. Background only — raise one only if they ask, or if what they just said bears on it directly.`
     : '';
 }
 

@@ -51,8 +51,22 @@ import {
 import { shortDate } from '@/lib/when';
 import { when as transcriptWhen } from '@/lib/transcript';
 
-/** Where a section counts as the one you are reading: just under the map. */
-const READING_LINE = 250;
+/**
+ * Where a section counts as the one you are reading.
+ *
+ * This has to be the underside of the pinned header, and the header is
+ * measured, not known — the title, the map and the lens line come to whatever
+ * they come to. It was a hard-coded 250 against a header nearer 330, so a
+ * section became "current" while it was still behind the map: the dots and
+ * the rail moved about eighty pixels before the thing they were pointing at
+ * appeared, which is exactly the length of one card.
+ *
+ * The small margin past it is so a section that is only just peeping out does
+ * not take the lens off the one you are still reading.
+ */
+function readingLine(header: number): number {
+  return (header || 300) + 16;
+}
 
 /** How far either side of that it takes to fade right out. */
 const FADE_OVER = 220;
@@ -73,11 +87,14 @@ const FADE_OVER = 220;
 function Fading({
   id,
   scrollY,
+  line,
   onMeasure,
   children,
 }: {
   id: MapSection;
   scrollY: SharedValue<number>;
+  /** The underside of the pinned header, measured by the screen. */
+  line: number;
   onMeasure: (id: MapSection, top: number) => void;
   children: ReactNode;
 }) {
@@ -85,7 +102,7 @@ function Fading({
   const span = useSharedValue(1);
 
   const style = useAnimatedStyle(() => {
-    const into = scrollY.value + READING_LINE - top.value;
+    const into = scrollY.value + line - top.value;
     const early = Math.max(0, -into) / FADE_OVER;
     const late = Math.max(0, into - span.value) / FADE_OVER;
     const shown = Math.min(1 - Math.min(1, early), 1 - Math.min(1, late));
@@ -128,6 +145,15 @@ export default function Sparks() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [header, setHeader] = useState(0);
+  /**
+   * The same number, where the scroll handler can reach it.
+   *
+   * useAnimatedScrollHandler captures its callbacks once; a handler built on
+   * the first render would close over a header of nought for ever and put the
+   * reading line at sixteen pixels, which lights the last section the moment
+   * you touch the screen.
+   */
+  const headerRef = useRef(0);
   const [lit, setLit] = useState<MapSection>('did');
   const tops = useRef<Partial<Record<MapSection, number>>>({});
 
@@ -140,10 +166,11 @@ export default function Sparks() {
   // Guarded, so crossing the UI-thread boundary sixty times a second costs a
   // comparison and almost never a React render.
   const look = (y: number) => {
+
     let current: MapSection = 'did';
     for (const section of MAP_SECTIONS) {
       const top = tops.current[section.id];
-      if (top !== undefined && top <= y + READING_LINE) current = section.id;
+      if (top !== undefined && top <= y + readingLine(headerRef.current)) current = section.id;
     }
     setLit((was) => (was === current ? was : current));
   };
@@ -176,7 +203,7 @@ export default function Sparks() {
         keyboardShouldPersistTaps="handled"
       >
 
-      <Fading id="did" scrollY={scrollY} onMeasure={mark}>
+      <Fading id="did" scrollY={scrollY} line={readingLine(header)} onMeasure={mark}>
           <Done />
         </Fading>
 
@@ -191,7 +218,7 @@ export default function Sparks() {
         sent Jason the build" — which also marks it kept in the long memory,
         and swiping it would record nothing and quietly lose the thread.
       */}
-      <Fading id="open" scrollY={scrollY} onMeasure={mark}>
+      <Fading id="open" scrollY={scrollY} line={readingLine(header)} onMeasure={mark}>
       {goals.length > 0 || owed.length > 0 ? (
         <Peek show={5}>
           {goals.map((fact) => (
@@ -219,7 +246,7 @@ export default function Sparks() {
         not need a panel.
       */}</Fading>
 
-<Fading id="repeats" scrollY={scrollY} onMeasure={mark}>
+<Fading id="repeats" scrollY={scrollY} line={readingLine(header)} onMeasure={mark}>
       {stuck.length > 0 ? (
         <Section>
           {stuck.slice(0, 20).map((item) => (
@@ -263,7 +290,7 @@ export default function Sparks() {
         than one that remembers nothing.
       */}</Fading>
 
-<Fading id="people" scrollY={scrollY} onMeasure={mark}>
+<Fading id="people" scrollY={scrollY} line={readingLine(header)} onMeasure={mark}>
       {life.entities.length > 0 ? (
         <Peek>
           {[...life.entities]
@@ -281,7 +308,7 @@ export default function Sparks() {
         </Peek>
       ) : null}</Fading>
 
-<Fading id="happened" scrollY={scrollY} onMeasure={mark}>
+<Fading id="happened" scrollY={scrollY} line={readingLine(header)} onMeasure={mark}>
       {life.episodes.length > 0 ? (
         <Peek>
           {life.episodes.slice(0, 15).map((episode) => (
@@ -308,7 +335,7 @@ export default function Sparks() {
         about correcting a line only exists once there is a line to correct.
       */}</Fading>
 
-<Fading id="about" scrollY={scrollY} onMeasure={mark}>
+<Fading id="about" scrollY={scrollY} line={readingLine(header)} onMeasure={mark}>
       {plain.length === 0 ? (
         <Section>
           <Text style={[Type.bodySm, { color: palette.muted }]}>
@@ -341,7 +368,10 @@ export default function Sparks() {
         padded to clear whatever it measures rather than a guessed number.
       */}
       <View
-        onLayout={(event) => setHeader(event.nativeEvent.layout.height)}
+        onLayout={(event) => {
+          headerRef.current = event.nativeEvent.layout.height;
+          setHeader(event.nativeEvent.layout.height);
+        }}
         style={{
           position: 'absolute',
           left: 0,

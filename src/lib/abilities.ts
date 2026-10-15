@@ -2596,10 +2596,17 @@ const CALL: Ability = {
  * time half of a question is handled separately from the words, because "that
  * idea from last month" has one useful word in it and it is not "idea".
  */
+/**
+ * Questions with no subject in them, which are the only ones a sweep of recent
+ * memory actually answers.
+ */
+const OPEN_ENDED =
+  /\b(what (have|has|did) (i|we) been|what(?:'s| is| has) been (going on|happening)|catch me up|what am i (working on|doing)|lately|recently|this week|past (few )?(days|weeks))\b/i;
+
 const LIFE_SEARCH: Ability = {
   id: 'memory.search',
   name: 'Long memory',
-  what: 'Searches everything Grove has remembered about their life — people, projects, ideas, decisions and when things happened.',
+  what: 'Searches what Grove has written down about their life — people, projects, ideas, decisions, and when things happened. Only for when they are actually asking what you remember, or asking about someone or something by name. Not for greetings, small talk, opinions, or anything you can answer without looking.',
   where: 'device',
   wired: true,
   needs: [],
@@ -2626,8 +2633,20 @@ const LIFE_SEARCH: Ability = {
     const found = searchLife(life, about, window);
 
     if (!window && found.entities.length === 0 && found.episodes.length === 0) {
-      // "What have I been working on" names nothing in particular, so nothing
-      // scores. The last fortnight is the honest reading of it.
+      /*
+        A miss is an answer. It used to hand back the last fortnight whatever
+        the question was, which meant any search that found nothing delivered a
+        pile of recent memories instead — and the model, given them, used them.
+        That is most of why Grove brought things up at odd moments: it was not
+        remembering, it was being handed a consolation prize and reading it out.
+
+        The fortnight is still right for a question that genuinely names
+        nothing — "what have I been working on" has no subject to match — but
+        that is a specific kind of question, not every miss.
+      */
+      if (!OPEN_ENDED.test(about)) {
+        return { ok: true, spoken: 'I have not written anything down about that.' };
+      }
       const fortnight = life.episodes
         .filter((ep) => Date.now() - new Date(ep.at).getTime() < 14 * 86_400_000)
         .slice(0, 8);
