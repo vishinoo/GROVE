@@ -1,21 +1,18 @@
 /**
- * Connections.
+ * What Grove may reach, as a block inside Settings.
  *
- * Six things, each drawn as the app icon you already recognise. This screen
- * exists because the failure it prevents is invisible: an ability that cannot
- * run because the calendar was never granted fails silently in your ear, while
- * you are walking, with no screen being looked at.
- *
- * So every row says what Grove does with it rather than just naming it, and the
- * two rows that can never work say so outright instead of offering a button
- * that leads nowhere.
+ * It had a tab of its own. Four tabs for a four-screen app is right only if
+ * all four are places you go; this was a place you went once, when something
+ * stopped working, and then never again. It sits above "Does it all work?"
+ * now, which is the other thing on that screen you only open when something
+ * is wrong — and the two answer the same question from opposite ends: what is
+ * connected, and does any of it actually work.
  */
-
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, Text, View } from 'react-native';
 
 import { AppIcon } from '@/components/app-icon';
-import { Mono, Notice, Panel, Screen, Section } from '@/components/ui';
+import { Mono, Notice, Panel, Section } from '@/components/ui';
 import { Radius, Type } from '@/constants/theme';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
@@ -24,7 +21,7 @@ import { CONNECTIONS, providerFor, type Connection } from '@/lib/connections';
 import { grantMessage, type GrantOutcome } from '@/lib/devicePermissions';
 import { missingScopes } from '@/lib/googleAuth';
 
-export default function Connections() {
+export function ConnectionsPanel() {
   const palette = usePalette();
   const { connections, connect, disconnect, notice, dismissNotice } = useSession();
 
@@ -98,7 +95,7 @@ export default function Connections() {
   };
 
   return (
-    <Screen title="Connections">
+    <View style={{ gap: 0 }}>
       {notice ? <Notice text={notice} onDismiss={dismissNotice} /> : null}
       {error ? (
         <View style={{ gap: 8 }}>
@@ -162,7 +159,7 @@ export default function Connections() {
         </Panel>
       </Section>
 
-    </Screen>
+    </View>
   );
 }
 

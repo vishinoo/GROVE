@@ -12,10 +12,17 @@ import { usePalette } from '@/hooks/use-palette';
 /** The travelling marker behind the current tab. */
 const BUBBLE = 38;
 
+/**
+ * Three, not four.
+ *
+ * Connections was a place you went once, when something stopped working, and
+ * then never again — a permanent quarter of the bar for a screen nobody
+ * opens twice. It lives inside Settings now, next to the self-check, which is
+ * the other thing you only open when something is wrong.
+ */
 const TABS: { name: string; label: string; icon: IconName }[] = [
   { name: 'index', label: 'Talk', icon: 'talk' },
   { name: 'sparks', label: 'Sparks', icon: 'map' },
-  { name: 'connections', label: 'Connect', icon: 'plug' },
   { name: 'settings', label: 'Settings', icon: 'settings' },
 ];
 
@@ -27,7 +34,6 @@ export default function AppLayout() {
     <Tabs screenOptions={{ headerShown: false }} tabBar={(props) => <Dock {...props} />}>
       <Tabs.Screen name="index" />
       <Tabs.Screen name="sparks" />
-      <Tabs.Screen name="connections" />
       <Tabs.Screen name="settings" />
     </Tabs>
   );

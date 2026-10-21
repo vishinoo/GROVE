@@ -32,6 +32,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
+import { setThemeChoice, type ThemeChoice } from '@/hooks/use-palette';
 import { capabilities } from '@/lib/capabilities';
 import {
   runAbility,
@@ -380,12 +381,18 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     void loadPersona().then((stored) => {
-      if (mounted.current) setPersona(stored);
+      if (!mounted.current) return;
+      setPersona(stored);
+      // The palette store lives outside React so that the login and onboarding
+      // screens, which render before this provider, are drawn in the right
+      // colours too. Pushed on load and on every change.
+      setThemeChoice(stored.theme as ThemeChoice | undefined);
     });
   }, []);
 
   const updatePersona = useCallback(async (next: Persona) => {
     setPersona(next);
+    setThemeChoice(next.theme as ThemeChoice | undefined);
     await savePersona(next);
   }, []);
 

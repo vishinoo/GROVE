@@ -31,7 +31,7 @@
  */
 
 import { useMemo } from 'react';
-import { Pressable, View, useColorScheme } from 'react-native';
+import { Pressable, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedProps,
@@ -43,6 +43,7 @@ import Animated, {
 import Svg, { Defs, G, LinearGradient, Path, Stop } from 'react-native-svg';
 
 import { skyFor } from '@/constants/theme';
+import { useIsNight } from '@/hooks/use-palette';
 import type { AgentState } from '@/context/agent';
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
@@ -145,7 +146,9 @@ export function Horizon({
   /** Microphone level, 0-1. The sea gets rougher as you talk into it. */
   level?: number;
 }) {
-  const night = useColorScheme() === 'dark';
+  // The app's own choice, not the OS's — the OS is pinned to light until the
+  // next build, and the sky has to agree with the rest of the screen.
+  const night = useIsNight();
   const sky = skyFor(chosen, night);
   const mood = MOOD[state] ?? MOOD.idle;
 

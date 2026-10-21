@@ -16,12 +16,16 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   Text,
   TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
+import Animated, {
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useSharedValue,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon, iconForKey } from '@/components/app-icon';
@@ -40,7 +44,25 @@ import type { NextUp } from '@/lib/attention';
 export default function Talk() {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
+  /*
+    Half the screen.
+
+    The horizon is the thing this app is, and at 280 on a tall phone it was a
+    band across the top of a page of cards. Half gives it the weight of a
+    view you are looking at rather than a header you are looking past, and
+    everything below it is still reachable with a thumb.
+  */
+  const sky = Math.round(height * 0.5);
+
+  const scrollY = useSharedValue(0);
+  const onScroll = useAnimatedScrollHandler((event) => {
+    scrollY.value = event.contentOffset.y;
+  });
+  // Fully there by the time you have scrolled a third of the sky away.
+  const recent = useAnimatedStyle(() => ({
+    opacity: Math.min(1, Math.max(0, scrollY.value / (sky * 0.33))),
+  }));
   const { notice, dismissNotice } = useSession();
   const { state, caption, heard, level, armed, ringSeen, route, problem, activity, next, press, say, persona } =
     useAgent();
@@ -72,13 +94,15 @@ export default function Talk() {
       style={{ flex: 1, backgroundColor: palette.paper }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView
+      <Animated.ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
           paddingHorizontal: Space.screenX,
           paddingBottom: 24,
         }}
         keyboardShouldPersistTaps="handled"
+        onScroll={onScroll}
+        scrollEventThrottle={16}
       >
         {/*
           The sky, full width and starting at the very top of the screen —
@@ -90,7 +114,7 @@ export default function Talk() {
           <Horizon
             state={state}
             width={width}
-            height={280}
+            height={sky}
             onPress={press}
             sky={persona.sky}
             level={level}
@@ -103,61 +127,68 @@ export default function Talk() {
 
 
         {/*
-          The state, named.
+          A greeting, not a status word.
 
-          The height of the sky says what is happening without being read.
-          This is for the times you are actually looking at the screen — a
-          state you can see and cannot name is a mood, not a status, and
-          losing the word is what made "is it even listening" a question
-          again.
+          "Ready" is a machine telling you it is available, which is both
+          obvious — it is on your screen — and the least interesting thing it
+          could say. The sky already carries the state: it is flat when
+          nothing is happening and rough when something is. So the word under
+          it is a hello while Grove is idle, and only becomes the state when
+          the state is worth naming.
         */}
         <Text style={[Type.state, { color: palette.ink, textAlign: 'center', marginTop: 2 }]}>
-          {STATE_WORD[state]}
+          {state === 'idle' || state === 'asleep' ? greeting() : STATE_WORD[state]}
         </Text>
 
-        {shown ? (
-          <Text
-            style={[
-              Type.bodySm,
-              {
-                color: state === 'listening' || state === 'noting' ? palette.inkSoft : palette.muted,
-                textAlign: 'center',
-                marginTop: 6,
-              },
-            ]}
-          >
-            {shown}
+        {state === 'idle' || state === 'asleep' ? (
+          <Text style={[Type.bodySm, { color: palette.muted, textAlign: 'center', marginTop: 6 }]}>
+            {armed ? 'Press your ring, or the sky.' : 'Press the sky to talk.'}
           </Text>
-        ) : (
-          <>
-            {/*
-              A greeting, on screen rather than read out.
+        ) : null}
 
-              Grove used to open by reading its own memory back — "I've got
-              Grove, the energy stock document and probabilistic machine
-              learning written down" — which is a roster, not a hello, and a
-              miserable way to be greeted by your own assistant. It says
-              nothing at launch now unless you are about to be late. This is
-              the warmth, where it costs nobody anything.
-            */}
-            <Text style={[Type.bodySm, { color: palette.muted, textAlign: 'center', marginTop: 6 }]}>
-              {greeting()}
-              {armed ? ' · press your ring' : ' · press the sky to talk'}
+        {/*
+          What was heard, and what came back, in the body of the page rather
+          than tucked under the horizon.
+
+          Under the wave it was a caption on a picture: small, centred, and
+          competing with the one thing on the screen that is supposed to hold
+          your eye. Down here it is the content, and it can be as long as it
+          needs to be without pushing the sky around.
+        */}
+        {shown ? (
+          <Card style={{ marginTop: 18 }}>
+            <Text
+              style={[
+                Type.body,
+                { color: state === 'listening' || state === 'noting' ? palette.inkSoft : palette.ink },
+              ]}
+            >
+              {shown}
             </Text>
-          </>
-        )}
+          </Card>
+        ) : null}
 
         <Now next={next} />
 
+        {/*
+          The log arrives as you go looking for it.
+
+          Nothing on this screen is urgent and the log is the least urgent
+          thing on it — a record you read when you want to check something,
+          not when you open the app. Hidden at rest it keeps the first screen
+          to a sky and a sentence; tied to the scroll it is already there by
+          the time you have travelled far enough to want it, rather than
+          appearing suddenly once you cross a line.
+        */}
         {activity.length > 0 ? (
-          <View style={{ marginTop: 32 }}>
+          <Animated.View style={[recent, { marginTop: 32 }]}>
             <Mono style={{ marginBottom: 10 }}>Recent</Mono>
             {activity.map((entry) => (
               <LogRow key={entry.id} entry={entry} />
             ))}
-          </View>
+          </Animated.View>
         ) : null}
-      </ScrollView>
+      </Animated.ScrollView>
 
       {/*
         The hardware strip rides on the sky rather than pushing it down the
@@ -462,9 +493,13 @@ function Hardware({
             width: open ? 5 : 8,
             height: open ? 5 : 8,
             borderRadius: 4,
-            backgroundColor: live ? palette.signal : palette.raised,
+            // White in both themes, because it sits on the sky rather than
+            // on the page — and the sky is pale at the top in daylight and
+            // deep at night, so a palette colour would vanish into one of
+            // them. The ring is what keeps it visible against the pale one.
+            backgroundColor: live ? palette.signal : '#FFFFFF',
             borderWidth: live ? 0 : 1,
-            borderColor: palette.line,
+            borderColor: 'rgba(16,20,24,0.22)',
           }}
         />
       </Pressable>

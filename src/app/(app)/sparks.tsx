@@ -65,7 +65,7 @@ import { when as transcriptWhen } from '@/lib/transcript';
  * not take the lens off the one you are still reading.
  */
 function readingLine(header: number): number {
-  return (header || 300) + 16;
+  return (header || 300) + 56;
 }
 
 /** How far either side of that it takes to fade right out. */
@@ -142,7 +142,7 @@ export default function Sparks() {
     layout rather than a tab strip means the map can never disagree with the
     list — there is only one source of truth for where you are.
   */
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [header, setHeader] = useState(0);
   /**
@@ -383,9 +383,17 @@ export default function Sparks() {
           paddingBottom: 10,
         }}
       >
-        <Text style={[Type.screenTitle, { color: palette.ink, marginBottom: 12 }]}>Sparks</Text>
-
-        <MemoryMap counts={counts} active={lit} width={width - Space.screenX * 2} />
+        {/*
+          No title. The tab bar already says which screen this is, and the map
+          is a better answer to "where am I" than the word Sparks ever was —
+          so the space it took goes to the map, which is the content.
+        */}
+        <MemoryMap
+          counts={counts}
+          active={lit}
+          width={width - Space.screenX * 2}
+          height={Math.round(height * 0.34)}
+        />
 
         {/*
           The heading lives here rather than above each block. The map already

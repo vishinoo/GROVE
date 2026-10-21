@@ -83,6 +83,8 @@ export type Persona = {
    * every install has stored.
    */
   sky?: string;
+  /** 'system', 'light' or 'dark'. Unset is 'system'. */
+  theme?: string;
   /** The user's own words for how Grove should talk. May be empty. */
   manner: string;
   /**
@@ -284,6 +286,10 @@ export async function loadPersona(): Promise<Persona> {
       // Four hex colours or nothing. A partial palette would paint some lobes
       // and leave others on the mode's, which reads as a rendering bug.
       sky: typeof parsed.sky === 'string' ? parsed.sky : undefined,
+      theme:
+        parsed.theme === 'light' || parsed.theme === 'dark' || parsed.theme === 'system'
+          ? parsed.theme
+          : undefined,
       palette:
         Array.isArray(parsed.palette) &&
         parsed.palette.length === 4 &&

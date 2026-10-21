@@ -18,26 +18,18 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import {
-  Linking,
-  Pressable,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  View,
-  useColorScheme,
-} from 'react-native';
+import { Linking, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import Svg, { Defs, LinearGradient as SvgGradient, Rect, Stop } from 'react-native-svg';
 
 import * as Updates from 'expo-updates';
 
+import { ConnectionsPanel } from '@/components/connections-panel';
 import { Icon } from '@/components/icon';
 import { Button, Card, Dot, Mono, Notice, Row, Screen, Section } from '@/components/ui';
 import { Radius, SKIES, Type, skyFor } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
-import { usePalette } from '@/hooks/use-palette';
+import { useIsNight, usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
 import { runSelfCheck, type CheckResult } from '@/lib/selfCheck';
 import { checkNow, runningLabel, type Caught } from '@/lib/updates';
@@ -55,7 +47,7 @@ export default function Settings() {
   // spark and a fact are the same idea from different ends, and keeping the
   // list somewhere you pass anyway beats burying it in Settings.
   const { persona, updatePersona, armed, route } = useAgent();
-  const night = useColorScheme() === 'dark';
+  const night = useIsNight();
   const chosenSky = skyFor(persona.sky, night);
   const gradientId = `grove-name-${persona.sky ?? 'day'}`;
   /** Not one of the presets, so the box is theirs and worth showing. */
@@ -251,6 +243,51 @@ export default function Settings() {
         voice now because it is the least consequential control on the screen
         and it was the second thing on it.
       */}
+      {/*
+        Three, because "follow the phone" is the right default and is also the
+        one that does not work yet: app.json pinned the whole app to light at
+        the OS level, so the system never reports dark. That is changed for the
+        next build; until it exists, Dark is the one that does something, and
+        it does it over the air because only JavaScript decides which palette
+        object comes back.
+      */}
+      <Section label="Appearance">
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+          {(['system', 'light', 'dark'] as const).map((mode) => {
+            const picked = (persona.theme ?? 'system') === mode;
+            return (
+              <Pressable
+                key={mode}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: picked }}
+                accessibilityLabel={mode === 'system' ? 'Follow the phone' : mode}
+                onPress={() => set({ theme: mode })}
+                style={({ pressed }) => ({
+                  height: 34,
+                  paddingHorizontal: 15,
+                  borderRadius: Radius.pill,
+                  justifyContent: 'center',
+                  backgroundColor: picked ? palette.mark : palette.raised,
+                  borderWidth: 1,
+                  borderColor: picked ? palette.mark : palette.line,
+                  opacity: pressed ? 0.7 : 1,
+                })}
+              >
+                <Text
+                  style={{
+                    fontFamily: Type.cardTitle.fontFamily,
+                    fontSize: 13.5,
+                    color: picked ? palette.raised : palette.ink,
+                  }}
+                >
+                  {mode === 'system' ? 'Follow phone' : mode === 'light' ? 'Light' : 'Dark'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </Section>
+
       <Section label="Sky">
         <Card style={{ alignItems: 'center', paddingVertical: 18 }}>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14, justifyContent: 'center' }}>
@@ -394,6 +431,10 @@ export default function Settings() {
       </Section>
 
       {/* --------------------------------------------------------- hardware */}
+
+      <Section label="Connections">
+        <ConnectionsPanel />
+      </Section>
 
       <Section label="Does it all work?">
         <Card>
