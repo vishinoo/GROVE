@@ -221,13 +221,38 @@ disconnected and reconnected.** Nothing else can fix it.
 
 ## When Grove listens, and how you know
 
-**The microphone opens after speech only when something is waiting on an
-answer** — the model called `ask_back`, or an ability asked for a missing detail
-(`pending` in agent.tsx). It used to open after anything ending in a question
-mark, and a personality that ends half its replies on a joke opened the mic at
-random. People stopped trusting when it was safe to talk. Punctuation was never
-the signal; intent is. `utter(text, listenAfter)` takes that decision
-explicitly — never infer it from the text again.
+**Every reply ends with a window you can talk into, and the window shuts
+itself.** Two seconds of silence after an ordinary reply (`GRACE_MS`), seven
+after Grove has actually asked something (`ANSWER_MS`) — because it has asked
+for a decision and deciding takes longer than breathing.
+
+This is a change of mind, and the reasoning it replaced is still half right.
+The mic used to open after anything ending in a question mark, and a
+personality that ends half its replies on a joke opened it at random; people
+stopped trusting when it was safe to talk. So it was cut back to opening only
+when something was genuinely waiting — `ask_back`, or an ability missing a
+detail. Punctuation was never the signal and still is not; `utter(text,
+listenAfter)` still takes that decision explicitly and it must never be
+inferred from the text again.
+
+What was wrong was the conclusion, not the diagnosis. Reaching for the ring
+again to add one more sentence is its own failure, and it is the common case.
+What makes the window safe is that it closes on its own, and that **a window
+Grove opened itself makes no sound at either end** — `quietListen` in
+agent.tsx. A press still chimes, because a press is a question about whether
+the thing heard you and the sound is the answer; a grace window nobody used
+costs nothing and leaves no trace. Without that, a conversation came with a
+two-tone jingle between every sentence.
+
+**A claim to be listening must be backed by a recogniser.** Hearing a word used
+to clear the give-up timer outright, so one word followed by silence left
+nothing able to close the microphone — and if the recogniser never fired its
+own end, which coming back from the background it sometimes does not, the
+screen said Listening until the next press. The timer is now re-armed to
+`TRAILING_MS` rather than cancelled, and a watchdog checks `isListening()`
+while the state claims otherwise. There was already a recovery for this on a
+press; that does nothing for someone who just looks at the screen and believes
+it.
 
 `ask_back` is a declared tool rather than an ability: calling it ends the turn,
 the question is the reply, and the answer arrives as the next sentence with the

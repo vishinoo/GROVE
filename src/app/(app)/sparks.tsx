@@ -18,7 +18,7 @@
  * in two places means one of them is wrong the moment either changes.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Pressable,
   Text,
@@ -36,10 +36,15 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/icon';
-import { MAP_SECTIONS, MemoryMap, type MapSection } from '@/components/memory-map';
+import {
+  MAP_SECTIONS,
+  MemoryMap,
+  type MapItem,
+  type MapSection,
+} from '@/components/memory-map';
 import { Card, Mono, Peek, Section } from '@/components/ui';
 import { SwipeAway } from '@/components/swipe-away';
-import { Space, Type } from '@/constants/theme';
+import { Radius, Space, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { usePalette } from '@/hooks/use-palette';
 import { VALUE_MAX } from '@/lib/memory';
@@ -180,6 +185,66 @@ export default function Sparks() {
     runOnJS(look)(event.contentOffset.y);
   });
 
+  /*
+    The map is built from the memories themselves, not from how many there are.
+
+    Six counts produced a hundred anonymous dots in wedges — a picture of how
+    much Grove remembered rather than of what, and nothing underneath to show
+    when you tapped it. Every dot here is a real thing with a real id, and the
+    lines are relationships that exist in the data: an episode knows which
+    entities it was about, a fact knows whose it is. Nothing is joined up to
+    make the picture look busier than the memory actually is.
+
+    Weights mean something too. A friction's dot grows with how many times it
+    has recurred, a person's with how much is known about them, an episode's
+    with how many people it touched.
+  */
+  const items: MapItem[] = useMemo(() => {
+    const byName = new Map(life.entities.map((e) => [e.name.toLowerCase(), e.id]));
+    const out: MapItem[] = [];
+
+    for (const entity of life.entities) {
+      out.push({
+        id: entity.id,
+        label: entity.name,
+        section: 'people',
+        weight: 1 + entity.facts.length,
+      });
+    }
+    for (const episode of life.episodes) {
+      out.push({
+        id: episode.id,
+        label: episode.title,
+        section: episode.open ? 'open' : 'happened',
+        weight: 1 + episode.about.length,
+        // The real edge: what this was about.
+        links: episode.about,
+      });
+    }
+    for (const fact of plain) {
+      out.push({
+        id: fact.id,
+        label: fact.value,
+        section: 'about',
+        // Facts carry a subject, so one about a named person joins them.
+        links: byName.has(fact.subject?.toLowerCase() ?? '')
+          ? [byName.get(fact.subject.toLowerCase())!]
+          : undefined,
+      });
+    }
+    for (const goal of goals) {
+      out.push({ id: goal.id, label: goal.value, section: 'open' });
+    }
+    for (const item of stuck) {
+      out.push({ id: item.id, label: item.what, section: 'repeats', weight: item.raised });
+    }
+    for (const entry of activity) {
+      if (!entry.tool) continue;
+      out.push({ id: entry.id, label: entry.said || entry.tool.name, section: 'did' });
+    }
+    return out;
+  }, [life.entities, life.episodes, plain, goals, stuck, activity]);
+
   const counts: Record<MapSection, number> = {
     did: activity.filter((entry) => entry.tool).length,
     open: goals.length + owed.length,
@@ -188,6 +253,9 @@ export default function Sparks() {
     happened: life.episodes.length,
     about: plain.length,
   };
+
+  /** What you last tapped on the map, shown underneath it. */
+  const [opened, setOpened] = useState<MapItem | null>(null);
 
   return (
     <View style={{ flex: 1, backgroundColor: palette.paper }}>
@@ -389,11 +457,45 @@ export default function Sparks() {
           so the space it took goes to the map, which is the content.
         */}
         <MemoryMap
-          counts={counts}
+          items={items}
           active={lit}
+          picked={opened?.id}
+          onPick={(item) => {
+            setOpened((was) => (was?.id === item.id ? null : item));
+            // Tapping a dot moves the lens with it, so the heading, the rail
+            // and the map never disagree about what you are looking at.
+            setLit(item.section);
+          }}
           width={width - Space.screenX * 2}
           height={Math.round(height * 0.34)}
         />
+
+        {/*
+          What you tapped, in words.
+
+          A map you cannot read is a decoration. This is the whole reason the
+          dots are real: one tap and the thing itself is under your thumb, in
+          the colour of the section it belongs to.
+        */}
+        {opened ? (
+          <View
+            style={{
+              marginTop: 10,
+              padding: 12,
+              borderRadius: Radius.card,
+              backgroundColor: palette.raised,
+              borderLeftWidth: 3,
+              borderLeftColor:
+                MAP_SECTIONS.find((section) => section.id === opened.section)?.colour ??
+                palette.line,
+            }}
+          >
+            <Mono style={{ color: palette.muted, marginBottom: 4 }}>
+              {MAP_SECTIONS.find((section) => section.id === opened.section)?.label}
+            </Mono>
+            <Text style={[Type.body, { color: palette.ink }]}>{opened.label}</Text>
+          </View>
+        ) : null}
 
         {/*
           The heading lives here rather than above each block. The map already

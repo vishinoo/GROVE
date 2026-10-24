@@ -52,8 +52,11 @@ export default function Talk() {
     band across the top of a page of cards. Half gives it the weight of a
     view you are looking at rather than a header you are looking past, and
     everything below it is still reachable with a thumb.
+
+    Half is where the waterline sits, not where the band ends: the band runs
+    on to 0.64 so the halftone sea has room to fade out under it.
   */
-  const sky = Math.round(height * 0.5);
+  const sky = Math.round(height * 0.64);
 
   const scrollY = useSharedValue(0);
   const onScroll = useAnimatedScrollHandler((event) => {
@@ -64,8 +67,13 @@ export default function Talk() {
     opacity: Math.min(1, Math.max(0, scrollY.value / (sky * 0.33))),
   }));
   const { notice, dismissNotice } = useSession();
-  const { state, caption, heard, level, armed, ringSeen, route, problem, activity, next, press, say, persona } =
+  const { state, caption, heard, level, armed, ringSeen, route, problem, activity, next, due, press, say, persona } =
     useAgent();
+
+  // Recomputed on every render, and `next` is refreshed each minute, so the
+  // count of minutes stays true without a timer of its own.
+  const resting = state === 'idle' || state === 'asleep';
+  const hello = greeting(next, due);
 
   const [draft, setDraft] = useState('');
   const canListen = capabilities().speech;
@@ -136,11 +144,19 @@ export default function Talk() {
           it is a hello while Grove is idle, and only becomes the state when
           the state is worth naming.
         */}
-        <Text style={[Type.state, { color: palette.ink, textAlign: 'center', marginTop: 2 }]}>
-          {state === 'idle' || state === 'asleep' ? greeting() : STATE_WORD[state]}
+        <Text
+          style={[
+            Type.state,
+            { color: palette.ink, textAlign: 'center', marginTop: 2, maxWidth: 320, alignSelf: 'center' },
+            // A sentence about your day is read, not glanced at: a size down
+            // from the one-word hello, so two lines still clear the composer.
+            resting && !hello.plain ? { fontSize: 19, lineHeight: 25, letterSpacing: -0.4 } : null,
+          ]}
+        >
+          {resting ? hello.line : STATE_WORD[state]}
         </Text>
 
-        {state === 'idle' || state === 'asleep' ? (
+        {resting && hello.plain ? (
           <Text style={[Type.bodySm, { color: palette.muted, textAlign: 'center', marginTop: 6 }]}>
             {armed ? 'Press your ring, or the sky.' : 'Press the sky to talk.'}
           </Text>
@@ -168,7 +184,7 @@ export default function Talk() {
           </Card>
         ) : null}
 
-        <Now next={next} />
+        {resting && hello.covers ? null : <Now next={next} />}
 
         {/*
           The log arrives as you go looking for it.
@@ -297,17 +313,49 @@ export default function Talk() {
 /**
  * What the screen says when nothing is happening.
  *
- * The hour, and nothing else. No name, no count of anything, no reference to
- * what it remembers — the point is that it reads as someone looking up when
- * you walk in, rather than as a dashboard reporting its state.
+ * The hour, unless something in the day is worth a glance — and then that,
+ * instead. Never both: a greeting with a meeting tacked on is a dashboard
+ * that learnt to say hello.
+ *
+ * What counts is the same short list attention.ts speaks up for, read with a
+ * wider window, because a line on a screen you chose to look at costs far
+ * less than a voice in your ear. Nothing here is ever said aloud.
+ *
+ * `covers` says whether the line already names the next event, so the card
+ * underneath does not say it a second time. `plain` is the hour alone, the
+ * only time the "press the sky" hint is worth its line: next to a sentence
+ * that is actually about your day it is clutter, and it fell under the
+ * composer whenever that sentence ran to two lines.
  */
-function greeting(now = new Date()): string {
+function greeting(
+  next: NextUp,
+  due: string | null,
+  now = new Date()
+): { line: string; covers: boolean; plain?: boolean } {
+  if (next?.leaveBy) {
+    const leaveIn = minutesUntil(next.leaveBy, now);
+    if (leaveIn <= 0) return { line: `Time to leave for ${next.title}.`, covers: true };
+    if (leaveIn <= 30) return { line: `Leave by ${clock(next.leaveBy)} for ${next.title}.`, covers: true };
+  }
+  if (next) {
+    const m = minutesUntil(next.at, now);
+    if (m > 0 && m <= 60) {
+      return {
+        line: `You have ${m === 1 ? 'a minute' : `${m} minutes`} before ${next.title}.`,
+        covers: true,
+      };
+    }
+  }
+  if (due) return { line: `You asked me to remind you about ${due} today.`, covers: false };
+
   const h = now.getHours();
-  if (h < 5) return 'Still up?';
-  if (h < 12) return 'Morning.';
-  if (h < 18) return 'Afternoon.';
-  if (h < 22) return 'Evening.';
-  return 'Late one.';
+  const line =
+    h < 5 ? 'Still up?' : h < 12 ? 'Morning.' : h < 18 ? 'Afternoon.' : h < 22 ? 'Evening.' : 'Late one.';
+  return { line, covers: false, plain: true };
+}
+
+function minutesUntil(at: Date, now: Date): number {
+  return Math.round((at.getTime() - now.getTime()) / 60_000);
 }
 
 function Now({ next }: { next: NextUp }) {

@@ -49,6 +49,17 @@ export async function ensureCalendarAccess(): Promise<boolean> {
   }
 }
 
+/** Whether Reminders may be read, without ever asking. */
+export async function hasRemindersAccess(): Promise<boolean> {
+  const m = mod();
+  if (!m) return false;
+  try {
+    return (await m.getRemindersPermissionsAsync()).granted;
+  } catch {
+    return false;
+  }
+}
+
 export async function ensureRemindersAccess(): Promise<boolean> {
   const m = mod();
   if (!m) return false;

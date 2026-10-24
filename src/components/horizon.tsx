@@ -2,8 +2,8 @@
  * The horizon.
  *
  * The top of the Talk screen is a field of colour — dusk over water, cool at
- * altitude and burning at the waterline — and its lower edge is not a line but
- * a band of grains dissolving into the paper underneath. The horizon rises
+ * altitude and burning at the waterline — and under it is a halftone sea: a
+ * fixed grid of dots, full at the surface and shrinking to nothing below. The horizon rises
  * when Grove is listening and sinks when it is not. It is the only thing in
  * the app that moves of its own accord.
  *
@@ -17,14 +17,19 @@
  *
  * HOW IT IS DRAWN, AND WHY IT IS CHEAP
  *
- * Every grain layer is the same curve, translated down. So exactly two path
- * strings are rebuilt per frame — the filled sky and the surface line — and
- * the eighteen layers are that one line re-rendered inside a `<G>` with a
- * static translate, a lower opacity and a different dash offset.
+ * The dots never move. The wave moves through them: a dot is drawn at the
+ * size its depth below the surface asks for, which is what makes it read as
+ * print rather than as particles.
  *
- * The dashes are what make the grain. Varying `strokeDashoffset` per layer is
- * not decoration: identical offsets stack the dots into vertical stripes, and
- * the whole look collapses.
+ * A true halftone sizes every dot every frame — well over a thousand circles.
+ * Instead each depth is one `<Pattern>` of dots at one size, filling the region
+ * below the surface pushed down by that depth. The layers are painted top to
+ * bottom and every tile has a paper-coloured ground, so each deeper layer
+ * paints over the bigger dots above it. Exactly two path strings are rebuilt
+ * per frame — the sky and the water — and every layer reuses the water.
+ *
+ * Each layer is pushed down by a whole number of tiles. Anything else slides
+ * the grid between layers and the dots stop lining up into rows.
  *
  * Both path strings are built in Reanimated worklets, so the wave runs on the
  * UI thread and a slow turn never stutters it.
@@ -40,10 +45,10 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import Svg, { Defs, G, LinearGradient, Path, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, G, LinearGradient, Path, Pattern, Rect, Stop } from 'react-native-svg';
 
 import { skyFor } from '@/constants/theme';
-import { useIsNight } from '@/hooks/use-palette';
+import { useIsNight, usePalette } from '@/hooks/use-palette';
 import type { AgentState } from '@/context/agent';
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
@@ -51,47 +56,50 @@ const AnimatedPath = Animated.createAnimatedComponent(Path);
 /**
  * Four components, co-prime-ish in both wavelength and rate, so no two crests
  * line up twice in an afternoon.
+ *
+ * None of them leads. The first version had one wave the width of the screen
+ * at full strength and the rest at half or less, which is a single swell with
+ * ripples on it — one crest always towering over the others. These are close
+ * enough in strength, and short enough, that three or four crests share the
+ * width.
  */
 const PARTS = [
-  { k: 1.0, w: 0.55, p: 0.0, a: 1.0 },
-  { k: 2.3, w: 0.81, p: 1.7, a: 0.46 },
-  { k: 3.7, w: 1.19, p: 3.1, a: 0.26 },
-  { k: 6.1, w: 1.63, p: 5.2, a: 0.13 },
+  { k: 1.6, w: 0.55, p: 0.0, a: 0.6 },
+  { k: 2.7, w: 0.81, p: 1.7, a: 0.55 },
+  { k: 4.1, w: 1.19, p: 3.1, a: 0.4 },
+  { k: 6.3, w: 1.63, p: 5.2, a: 0.2 },
 ];
+const PARTS_SUM = PARTS.reduce((t, P) => t + P.a, 0);
 
 /**
- * Grain layers.
+ * The halftone grid.
  *
- * Eighteen read as ripples — a few separate contour lines with gaps you could
- * see the paper through. The dune in the design is a mass: dense enough at the
- * waterline to be a silhouette, thinning out underneath. That needs roughly
- * twice the layers at two thirds the spacing, which is this.
+ * TILE is the pitch, and the dots sit on its corners and its centre — a
+ * diagonal grid, which is how print screens are set and why it does not read
+ * as graph paper. DOT is the radius at the surface, just short of the dots
+ * touching. Below that, one layer per tile, each a little smaller, then paper.
  */
-const LAYERS = 34;
+const TILE = 6;
+const DOT = 1.9;
+const DEPTHS = 11;
 
 /**
- * How far the sand falls below the waterline, and how high the crest rises —
- * both as fractions of the band.
+ * How high the crest rises, as a fraction of the band.
  *
- * These are not free. The deepest sand sits at mid + AMPLITUDE*amp + FALL, and
- * when that passes 1 the trough is cut off square against the bottom of the
- * band. It did: the last values put the sand at 296 in a 250 band, which on a
- * dark screen looked like shadow and on a white one looked like a mistake.
- *
- * At the worst case here — mid 0.56, amp 1.5 — the sand lands at about 0.83,
- * so it fades out with room to spare.
+ * Not free. The deepest dots sit at mid + AMPLITUDE*amp*1.43 + DEPTHS*TILE,
+ * and past the bottom of the band the sea is cut off square. At the worst case
+ * here — listening, mid 0.79, talking loudly — that lands within a few points
+ * of the edge on a small phone, where the dots are already too small to see.
  */
-const FALL = 0.22;
-const AMPLITUDE = 0.16;
+const AMPLITUDE = 0.05;
 
 /**
  * Samples across the width.
  *
- * Thirty-four is enough to carry the 6.1 harmonic without aliasing and not
+ * Thirty-four is enough to carry the 6.3 harmonic without aliasing and not
  * nearly enough to look curved: at a 390-point width that is eleven pixels a
  * segment, and every crest came to a visible corner. Seventy-six puts a joint
- * every five pixels, which reads as a curve. It costs two longer strings a
- * frame and nothing else — the layers all reuse the same one.
+ * every five pixels, which reads as a curve.
  */
 const STEPS = 76;
 
@@ -103,13 +111,13 @@ const STEPS = 76;
  * is the message.
  */
 const MOOD: Record<AgentState, { amp: number; rate: number; mid: number }> = {
-  asleep: { amp: 0.4, rate: 0.16, mid: 0.46 },
-  idle: { amp: 0.9, rate: 0.26, mid: 0.54 },
-  listening: { amp: 1.5, rate: 0.74, mid: 0.56 },
-  thinking: { amp: 0.85, rate: 1.7, mid: 0.55 },
-  working: { amp: 1.15, rate: 0.3, mid: 0.55 },
-  speaking: { amp: 1.4, rate: 0.98, mid: 0.56 },
-  noting: { amp: 1.05, rate: 0.5, mid: 0.55 },
+  asleep: { amp: 0.5, rate: 0.16, mid: 0.74 },
+  idle: { amp: 0.9, rate: 0.26, mid: 0.78 },
+  listening: { amp: 1.3, rate: 0.74, mid: 0.79 },
+  thinking: { amp: 0.85, rate: 1.7, mid: 0.785 },
+  working: { amp: 1.1, rate: 0.3, mid: 0.785 },
+  speaking: { amp: 1.25, rate: 0.98, mid: 0.79 },
+  noting: { amp: 1.0, rate: 0.5, mid: 0.785 },
 };
 
 /**
@@ -149,6 +157,7 @@ export function Horizon({
   // The app's own choice, not the OS's — the OS is pinned to light until the
   // next build, and the sky has to agree with the rest of the screen.
   const night = useIsNight();
+  const palette = usePalette();
   const sky = skyFor(chosen, night);
   const mood = MOOD[state] ?? MOOD.idle;
 
@@ -200,16 +209,21 @@ export function Horizon({
   /**
    * Both path strings, built in one pass.
    *
-   * The fill has to walk the surface RIGHT TO LEFT. Reusing the left-to-right
+   * The sky has to walk the surface RIGHT TO LEFT. Reusing the left-to-right
    * line for it — which is what the first version did — makes the outline
    * cross itself between the top corners and the first surface point, and SVG
    * fills that as two triangles meeting in the middle. It renders as a bowtie,
    * which is exactly what shipped.
+   *
+   * The water runs left to right and drops past the bottom of the band, so a
+   * layer pushed down by its depth still reaches the edge.
    */
   const paths = useDerivedValue(() => {
     'worklet';
     const base = height * mid.value;
-    const a = height * AMPLITUDE * amp.value * (1 + swell.value);
+    // Half the swell it used to get: doubling the height on a loud sentence
+    // was the other reason one crest kept towering over the rest.
+    const a = height * AMPLITUDE * amp.value * (1 + swell.value * 0.5);
 
     const at = (i: number) => {
       'worklet';
@@ -219,42 +233,48 @@ export function Horizon({
         const P = PARTS[j];
         s += P.a * Math.sin(x * P.k * 6.283 + clock.value * P.w + P.p);
       }
-      return { x: x * width, y: base + (s / 1.85) * a };
+      // Soft-limited, so the rare moment every component agrees rounds off
+      // instead of spiking: the small swells come up, the big ones level out.
+      const n = s / PARTS_SUM;
+      return { x: x * width, y: base + ((n * 1.8) / (1 + 0.8 * Math.abs(n))) * a };
     };
 
-    let line = '';
+    let surface = '';
+    let back = '';
     for (let i = 0; i <= STEPS; i++) {
       const pt = at(i);
-      line += (i === 0 ? 'M' : 'L') + pt.x.toFixed(1) + ' ' + pt.y.toFixed(1);
+      surface += (i === 0 ? 'M' : 'L') + pt.x.toFixed(1) + ' ' + pt.y.toFixed(1);
+      const r = at(STEPS - i);
+      back += 'L' + r.x.toFixed(1) + ' ' + r.y.toFixed(1);
     }
 
-    let back = '';
-    for (let i = STEPS; i >= 0; i--) {
-      const pt = at(i);
-      back += 'L' + pt.x.toFixed(1) + ' ' + pt.y.toFixed(1);
-    }
-
-    return { line, fill: 'M0 0L' + width.toFixed(1) + ' 0' + back + 'Z' };
+    const floor = (height + DEPTHS * TILE).toFixed(1);
+    return {
+      water: surface + 'L' + width.toFixed(1) + ' ' + floor + 'L0 ' + floor + 'Z',
+      sky: 'M0 0L' + width.toFixed(1) + ' 0' + back + 'Z',
+    };
   });
 
-  const lineProps = useAnimatedProps(() => ({ d: paths.value.line }));
-  const skyProps = useAnimatedProps(() => ({ d: paths.value.fill }));
+  const waterProps = useAnimatedProps(() => ({ d: paths.value.water }));
+  const skyProps = useAnimatedProps(() => ({ d: paths.value.sky }));
 
   /**
-   * Built once. These never change, and rebuilding eighteen objects a frame
-   * to hand them identical numbers is how a cheap thing becomes expensive.
+   * Built once. These never change, and rebuilding a dozen objects a frame to
+   * hand them identical numbers is how a cheap thing becomes expensive.
+   *
+   * The last depth has no dot: it is the paper the sea fades into.
    */
-  const layers = useMemo(
+  const depths = useMemo(
     () =>
-      Array.from({ length: LAYERS }, (_, j) => ({
-        dy: (j / (LAYERS - 1)) * height * FALL,
-        opacity: Math.pow(1 - j / LAYERS, 1.6),
-        // Offset per layer, or the dots stack into vertical stripes.
-        dash: (j * 1.37) % 4.2,
+      Array.from({ length: DEPTHS + 1 }, (_, j) => ({
+        id: `grove-dot-${j}`,
+        dy: j * TILE,
+        r: j === DEPTHS ? 0 : DOT * Math.pow(1 - j / DEPTHS, 0.85),
       })),
-    [height]
+    []
   );
 
+  const half = TILE / 2;
   const band = (
     <Svg width={width} height={height} pointerEvents="none">
       <Defs>
@@ -263,25 +283,38 @@ export function Horizon({
             <Stop key={colour} offset={i / (sky.stops.length - 1)} stopColor={colour} />
           ))}
         </LinearGradient>
+        {depths.map((d) => (
+          <Pattern
+            key={d.id}
+            id={d.id}
+            patternUnits="userSpaceOnUse"
+            x={0}
+            y={0}
+            width={TILE}
+            height={TILE}
+          >
+            <Rect width={TILE} height={TILE} fill={palette.paper} />
+            {d.r > 0 &&
+              [
+                [half, half],
+                [0, 0],
+                [TILE, 0],
+                [0, TILE],
+                [TILE, TILE],
+              ].map(([cx, cy]) => (
+                <Circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={d.r} fill={sky.grain} />
+              ))}
+          </Pattern>
+        ))}
       </Defs>
 
-      <AnimatedPath animatedProps={skyProps} fill="url(#grove-sky)" />
-
-      {layers.map((layer) => (
-        <G key={layer.dy} translateY={layer.dy} opacity={layer.opacity}>
-          <AnimatedPath
-            animatedProps={lineProps}
-            stroke={sky.grain}
-            strokeWidth={1.5}
-            strokeLinecap="round"
-            // A dash of almost nothing under a round cap is a dot. A real
-            // dash length draws little capsules, which read as stitching.
-            strokeDasharray="0.01 1.9"
-            strokeDashoffset={layer.dash}
-            fill="none"
-          />
+      {depths.map((d) => (
+        <G key={d.id} translateY={d.dy}>
+          <AnimatedPath animatedProps={waterProps} fill={`url(#${d.id})`} />
         </G>
       ))}
+
+      <AnimatedPath animatedProps={skyProps} fill="url(#grove-sky)" />
     </Svg>
   );
 

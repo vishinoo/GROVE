@@ -53,7 +53,7 @@ import {
 import { isSpeaking, speak, stopSpeaking } from '@/lib/speak';
 import * as memory from '@/lib/memory';
 import * as life from '@/lib/life';
-import { whatMatters, nextUp, type Attention, type NextUp } from '@/lib/attention';
+import { dueToday, whatMatters, nextUp, type Attention, type NextUp } from '@/lib/attention';
 import { noteAnswered } from '@/lib/interrupt';
 import { learnWeek, noteTurn } from '@/lib/rhythms';
 import { forgetRapport, notice as noticeRapport } from '@/lib/rapport';
@@ -73,6 +73,38 @@ import { useSession } from './session';
  * pocket does not sit there listening.
  */
 const SILENCE_TIMEOUT_MS = 5000;
+
+/**
+ * How long the microphone stays open when Grove opened it itself.
+ *
+ * Every reply now ends with a moment where you can simply carry on talking,
+ * instead of reaching for the ring again to say one more thing. The window is
+ * short on purpose: the failure this design was built to avoid is a mic that
+ * opens at random and sits there, and the fix for that is not refusing to open
+ * it — it is closing it again almost immediately when nobody speaks.
+ *
+ * A question gets much longer, because Grove has just asked for something and
+ * the person has to think before they answer. Two seconds is a pause; seven is
+ * time to decide.
+ */
+const GRACE_MS = 2000;
+const ANSWER_MS = 7000;
+
+/**
+ * Silence after speech has already been heard.
+ *
+ * Separate from the two above, which are "nothing at all yet". Once words have
+ * arrived this is a pause mid-sentence, and cutting someone off at two seconds
+ * because they drew breath is worse than waiting a moment longer.
+ */
+const TRAILING_MS = 2600;
+
+/**
+ * How long a claim to be listening is allowed to go unbacked by a recogniser
+ * before the watchdog treats it as a desync. Long enough to cover the session
+ * handover coming back from the background, which is the slowest honest start.
+ */
+const LISTEN_GRACE_MS = 2500;
 
 export type AgentState =
   | 'asleep'
@@ -123,6 +155,8 @@ type AgentValue = {
 
   /** The next thing in the day, and when to leave for it. Shown, never spoken. */
   next: NextUp;
+  /** A reminder due today, read only when access was already granted. */
+  due: string | null;
 
   /** Things they said they did not understand, hardest first. */
   struggles: struggles.Struggle[];
@@ -165,11 +199,16 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const pulseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** When the recogniser last opened, to spot one that dies on the spot. */
   const openedAt = useRef(0);
+  /** Set while a window Grove opened itself is running, so it makes no sound. */
+  const quietListen = useRef(false);
+  /** When the current claim to be listening began, for the desync watchdog. */
+  const listenStartedAt = useRef(0);
   /** When Grove last made a sound, which is when a phantom press can arrive. */
   const lastSound = useRef(0);
   /** What has already been volunteered, so nothing is said twice. */
   const attention = useRef<Attention>({ said: new Set<string>() });
   const [next, setNext] = useState<NextUp>(null);
+  const [due, setDue] = useState<string | null>(null);
   const [stuck, setStuck] = useState<struggles.Struggle[]>([]);
   /** So a listen can retry itself without `press` being rebuilt. */
   const beginListeningRef = useRef<((continuous: boolean, retrying?: boolean) => void) | null>(null);
@@ -199,11 +238,28 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    * heard you, and the pulse that follows says so without a third sound.
    */
   const soundFor = (was: AgentState, now: AgentState) => {
+    const opening =
+      (now === 'listening' || now === 'noting') && was !== 'listening' && was !== 'noting';
+    const closing =
+      (was === 'listening' || was === 'noting') && (now === 'idle' || now === 'asleep');
+
+    /*
+      A grace window makes no sound at either end.
+
+      Opening the microphone after every single reply is right; announcing it
+      twice with chimes and haptics every single time is not — a conversation
+      would come with a two-tone jingle between every sentence. A press still
+      gets both sounds, because a press is a question about whether the thing
+      heard you and the sound is the answer.
+    */
+    const quietly = quietListen.current;
+    if (closing) quietListen.current = false;
+
     // Haptics first: they work on every build, and the chimes only exist on one
     // that has the native half.
-    if ((now === 'listening' || now === 'noting') && was !== 'listening' && was !== 'noting') {
+    if (opening && !quietly) {
       buzz('open');
-    } else if ((was === 'listening' || was === 'noting') && (now === 'idle' || now === 'asleep')) {
+    } else if (closing && !quietly) {
       buzz('closed');
     }
     const remote = remoteModule();
@@ -214,9 +270,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     trigger.suppressVolumeTriggers();
     const busy = (x: AgentState) => x === 'thinking' || x === 'working';
 
-    if ((now === 'listening' || now === 'noting') && was !== 'listening' && was !== 'noting') {
+    if (opening && !quietly) {
       remote.chime('listen');
-    } else if ((was === 'listening' || was === 'noting') && (now === 'idle' || now === 'asleep')) {
+    } else if (closing && !quietly) {
       // Stopped hearing you without anything to act on — the case that used
       // to be invisible.
       remote.chime('stop');
@@ -478,6 +534,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     setLifeMemory({ entities: [], episodes: [], pending: [] });
     setStuck([]);
     setNext(null);
+    setDue(null);
   }, []);
 
   const forgetFact = useCallback(async (id: string) => {
@@ -1037,17 +1094,41 @@ function shortFailure(text: string): string {
         // were you hoping I could conjure it out of thin air?" — that meant the
         // mic opened at random, and people stopped trusting when it was safe to
         // talk. Punctuation was never the signal; intent is.
-        if (listenAfter && !running.current) {
-          void beginListening(false);
-          return;
-        }
         // A holding line is said in the middle of a turn, not at the end of
         // one. Dropping to resting after it showed Ready while the answer was
         // still on its way, so people pressed — which abandons the turn — and
         // the next question got another holding line, and the next. Every
         // reply became "give me a sec" and nothing else.
+        //
+        // Checked before the grace window, because a turn still in flight is
+        // the one moment where opening the microphone would be wrong: you
+        // would be talking over an answer that is still coming.
         if (stillWorking) {
           setState((current) => (current === 'speaking' ? 'thinking' : current));
+          return;
+        }
+        /*
+          Every reply ends with a moment you can talk into.
+
+          This used to open only when something was genuinely waiting on an
+          answer, because an earlier version opened after anything ending in a
+          question mark and a personality that ends half its replies on a joke
+          opened the mic at random. That reasoning still holds — punctuation
+          was never the signal — but the conclusion was too strong. Having to
+          reach for the ring again to add one more sentence is its own kind of
+          wrong, and it is the common case.
+
+          What makes it safe is that the window shuts itself. Two seconds of
+          silence and it is closed, with no sound at either end, so a window
+          nobody used costs nothing and leaves no trace. A question gets seven,
+          because Grove has just asked for something and thinking takes longer
+          than breathing.
+        */
+        if (!running.current) {
+          void beginListening(false, false, {
+            window: listenAfter ? ANSWER_MS : GRACE_MS,
+            quiet: !listenAfter,
+          });
           return;
         }
         // And even within the same turn, only speaking becomes resting. If
@@ -1116,7 +1197,12 @@ function shortFailure(text: string): string {
   }, []);
 
   const beginListening = useCallback(
-    async (continuous: boolean, retrying = false) => {
+    async (
+      continuous: boolean,
+      retrying = false,
+      opts: { window?: number; quiet?: boolean } = {}
+    ) => {
+      const window = opts.window ?? SILENCE_TIMEOUT_MS;
       // Re-taking the session is asynchronous, and the state says 'listening'
       // for that whole window — so a second press arrives, stops a recogniser
       // that has not started, and the original start then runs anyway against
@@ -1128,6 +1214,8 @@ function shortFailure(text: string): string {
       setHeard('');
       setLevel(0);
 
+      quietListen.current = Boolean(opts.quiet);
+      listenStartedAt.current = Date.now();
       setState('listening');
 
       // Only out of the foreground.
@@ -1162,9 +1250,28 @@ function shortFailure(text: string): string {
       const started = startListening(
         {
           onPartial: (text) => {
-            // Anything heard at all means this is a real conversation, so the
-            // give-up timer stops applying.
-            if (text.trim()) clearSilence();
+            /*
+              Re-armed, not cancelled.
+
+              Hearing a word used to clear the give-up timer outright, which
+              meant one word followed by silence left nothing at all able to
+              close the microphone: if the recogniser then never fired its own
+              end — and coming back from the background it sometimes does not —
+              the screen said Listening until the next press. That is the state
+              it got stuck in.
+
+              A pause mid-sentence gets longer than an empty window, because
+              cutting someone off for drawing breath is the worse failure.
+            */
+            if (text.trim()) {
+              quietListen.current = false;
+              clearSilence();
+              silence.current = setTimeout(() => {
+                if (!mounted.current || turn !== listenSeq.current) return;
+                console.log('[grove:listen] trailing silence — settling');
+                stopListening();
+              }, TRAILING_MS);
+            }
             if (mounted.current) setHeard(text);
           },
           onFinal: (text) => {
@@ -1243,10 +1350,10 @@ function shortFailure(text: string): string {
       clearSilence();
       silence.current = setTimeout(() => {
         if (!mounted.current || turn !== listenSeq.current) return;
-        console.log('[grove:listen] nothing heard in', SILENCE_TIMEOUT_MS, 'ms — cancelling');
+        console.log('[grove:listen] nothing heard in', window, 'ms — cancelling');
         abortListening();
         setState(restingState());
-      }, SILENCE_TIMEOUT_MS);
+      }, window);
     },
     // utter is a useCallback with no deps, so it is stable; listing it would
     // rebuild this and, through `press`, resubscribe the ring on every render.
@@ -1255,6 +1362,33 @@ function shortFailure(text: string): string {
   );
 
   beginListeningRef.current = beginListening;
+
+  /*
+    A claim to be listening has to be backed by a recogniser.
+
+    There is already a recovery for this, but only on a press: press while the
+    state says listening and nothing is recording, and it starts a fresh turn
+    rather than stopping one that does not exist. That fixes it for someone who
+    presses. It does nothing for someone who glances at the screen, sees
+    Listening, and has no reason to think the app is wrong — which is how this
+    was found.
+
+    So it is checked passively too. The grace period before the check matters:
+    coming back from the background, the state says listening for the whole
+    session handover, which is honest and takes a moment.
+  */
+  useEffect(() => {
+    if (state !== 'listening') return;
+    const watch = setInterval(() => {
+      if (!mounted.current || stateNow.current !== 'listening') return;
+      if (Date.now() - listenStartedAt.current < LISTEN_GRACE_MS) return;
+      if (isListening()) return;
+      console.log('[grove:listen] desync — listening with no recogniser, resetting');
+      clearSilence();
+      setState(restingState());
+    }, 1000);
+    return () => clearInterval(watch);
+  }, [state, setState, clearSilence]);
 
   /**
    * The trigger.
@@ -1473,8 +1607,14 @@ function shortFailure(text: string): string {
     // What the Talk screen shows without being asked. A minute is finer than
     // anyone needs and still cheap.
     const refreshNext = async () => {
-      const found = await nextUp().catch(() => null);
-      if (mounted.current) setNext(found);
+      const [found, reminder] = await Promise.all([
+        nextUp().catch(() => null),
+        dueToday().catch(() => null),
+      ]);
+      if (mounted.current) {
+        setNext(found);
+        setDue(reminder);
+      }
     };
     void refreshNext();
     const upcoming = setInterval(() => void refreshNext(), 60_000);
@@ -1544,6 +1684,7 @@ function shortFailure(text: string): string {
       forgetFact,
       forgetEverything,
       next,
+      due,
       struggles: stuck,
       gotStruggle,
       forgetStruggle,
@@ -1572,6 +1713,7 @@ function shortFailure(text: string): string {
       forgetFact,
       forgetEverything,
       next,
+      due,
       stuck,
       gotStruggle,
       forgetStruggle,

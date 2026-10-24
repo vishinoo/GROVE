@@ -1,30 +1,41 @@
 /**
  * The memory map.
  *
- * Everything Grove is holding, drawn as one disc of dots instead of listed as
- * five sections. It packs outward from the middle, so the size of the thing is
- * the size of what it knows: a quiet first week is a small circle, a year in is
- * a wide one. Each kind of memory takes a wedge of the disc rather than its own
- * floating blob, because five blobs are five things and this has to read as one
- * mind.
+ * Every dot is a thing Grove actually remembers — a person, a project, a dated
+ * thing that happened, a fact, a promise, something that keeps going wrong —
+ * and every line is a relationship that exists in the data rather than one
+ * invented to make the picture look busy. An episode knows which entities it
+ * was about; a fact knows whose it is. Those are the edges.
  *
- * Dots link to their nearest neighbours regardless of which wedge they fall in,
- * so the plot is genuinely connected across the seams. Scrolling the list
- * underneath lights that wedge and cools the rest to grey — the map is the
- * scrollbar.
+ * It used to be counts. Six numbers went in, a hundred anonymous dots came
+ * out, arranged in wedges — a diagram of how much Grove remembered rather than
+ * of what. Tapping it could not do anything useful because there was nothing
+ * underneath to show you.
  *
- * WHY IT DOES NOT ANIMATE
+ * LAYOUT
  *
- * A hundred circles and three hundred lines is cheap to draw once and
- * expensive to redraw sixty times a second. The drift it has in the sandbox is
- * the first thing that would cost someone a frame on an older phone, and it
- * earns nothing: the information is which wedge is lit, and that changes when
- * you scroll, not when time passes.
+ * Positions come from a short spring-and-repulsion relaxation, run once per
+ * change of content and never per frame. Wedges put every person in one arc
+ * and every episode in another, which is filing, not structure; letting the
+ * edges pull makes a person sit with the things that happened to them, and
+ * that is the shape worth looking at.
+ *
+ * It is deterministic. The seed is the index, so the same memories always
+ * produce the same map and it does not rearrange itself under you on a
+ * re-render.
  */
 
 import { useMemo } from 'react';
-import { View } from 'react-native';
-import Svg, { Circle, Defs, Line, LinearGradient, Rect, Stop } from 'react-native-svg';
+import { View, type GestureResponderEvent } from 'react-native';
+import Svg, {
+  Circle,
+  Defs,
+  Line,
+  LinearGradient,
+  RadialGradient,
+  Rect,
+  Stop,
+} from 'react-native-svg';
 
 export type MapSection = 'did' | 'open' | 'repeats' | 'people' | 'happened' | 'about';
 
@@ -38,19 +49,27 @@ export const MAP_SECTIONS: { id: MapSection; label: string; colour: string }[] =
   { id: 'about', label: 'About you', colour: '#C4B5FD' },
 ];
 
-/** What an unlit wedge cools to. Dimming a blue dot still reads as blue. */
-const COLD = '#7E8AA6';
+export type MapItem = {
+  id: string;
+  /** What it says when you tap it. */
+  label: string;
+  section: MapSection;
+  /**
+   * How big the dot is, and it has to mean something: times a friction has
+   * recurred, facts known about a person, entities an episode touched. A size
+   * that means nothing is decoration pretending to be data.
+   */
+  weight?: number;
+  /** Ids this is genuinely connected to. */
+  links?: string[];
+};
 
-/**
- * Cheap integer hash, kept in 32 bits the whole way.
- *
- * Math.random would reshuffle the map on every render, which turns a scroll
- * into a visible twitch — the scatter has to be a pure function of the index.
- * The obvious one-liner, n*(n*n*15731+789221), leaves 32-bit range around
- * n = 1300 and lands on a float past 2^53 where the low bits are gone; every
- * index above that collapses onto a handful of values and whole wedges pile
- * onto one point. Math.imul keeps every step a real 32-bit multiply.
- */
+/** What an unlit section cools to. Dimming a blue dot still reads as blue. */
+const COLD = '#6E7A96';
+
+/** Beyond this the relaxation gets slow and the picture gets unreadable. */
+const MAX_NODES = 130;
+
 function hash(n: number): number {
   let v = (n | 0) ^ 0x27d4eb2d;
   v = Math.imul(v ^ (v >>> 15), 0x2c1b3c6d);
@@ -58,97 +77,201 @@ function hash(n: number): number {
   return ((v ^ (v >>> 15)) >>> 0) / 4294967296;
 }
 
-type Node = { x: number; y: number; r: number; section: number };
+type Node = { id: string; x: number; y: number; r: number; section: number; label: string };
 
 export function MemoryMap({
-  counts,
+  items,
   active,
+  picked,
+  onPick,
   width,
   height = 152,
 }: {
-  counts: Record<MapSection, number>;
+  items: MapItem[];
   active: MapSection;
+  picked?: string;
+  onPick?: (item: MapItem) => void;
   width: number;
   height?: number;
 }) {
   /*
-    Keyed on the numbers, not on the object.
+    Keyed on the content, not the array.
 
-    `counts` is a fresh object literal on every render, so a memo that depends
-    on it recomputes a hundred nodes and three hundred edges on every scroll
-    tick — most of a frame, for an identical answer. The sizes joined into a
-    string is a dependency that changes when the memory actually changes,
-    which is the point: the map grows as Grove learns things and holds still
-    otherwise.
+    `items` is rebuilt on every render of the screen above, so a memo that
+    depended on it would relax the whole layout sixty times a second while you
+    scroll. The key changes when the memories change, which is the only time
+    the picture should move.
   */
-  const sizes = MAP_SECTIONS.map((section) => Math.max(0, counts[section.id] ?? 0)).join(',');
+  const key = items
+    .slice(0, MAX_NODES)
+    .map((item) => `${item.id}:${item.weight ?? 1}`)
+    .join('|');
 
-  const { nodes, links } = useMemo(() => {
-    const each = sizes.split(',').map(Number);
-    const total = each.reduce((n, v) => n + v, 0);
-    if (total === 0) return { nodes: [] as Node[], links: [] as [number, number][] };
+  const { nodes, edges } = useMemo(() => {
+    const use = items.slice(0, MAX_NODES);
+    if (use.length === 0) return { nodes: [] as Node[], edges: [] as [number, number][] };
 
-    // Radius grows with the square root of the count, so doubling what Grove
-    // remembers widens the disc without quadrupling it.
-    const spread = Math.min(0.3, 0.105 * Math.sqrt(total / 12));
+    const index = new Map(use.map((item, i) => [item.id, i]));
+    const sectionOf = (item: MapItem) =>
+      Math.max(0, MAP_SECTIONS.findIndex((s) => s.id === item.section));
 
-    const out: Node[] = [];
-    let placed = 0;
-    MAP_SECTIONS.forEach((section, si) => {
-      const n = each[si];
-      const from = (placed / total) * 6.283;
-      const span = (n / total) * 6.283;
-      for (let i = 0; i < n; i++) {
-        const seed = si * 1013 + i * 7;
-        // Square-rooted radius, or everything crowds the rim and the middle
-        // comes out hollow.
-        const rad = Math.sqrt(0.06 + hash(seed + 2) * 0.94) * spread;
-        // Spilled a little past the wedge, so the seams are not five hard
-        // pie slices.
-        const ang = from + (hash(seed + 1) * 1.1 - 0.05) * span;
-        out.push({
-          x: (0.5 + Math.cos(ang) * rad * 1.52) * width,
-          y: (0.5 + Math.sin(ang) * rad * 1.45) * height,
-          r: 0.9 + hash(seed + 3) * 1.1,
-          section: si,
-        });
-      }
-      placed += n;
+    // Seeded on a ring by section, so the relaxation starts somewhere sane and
+    // colours do not have to travel across the whole picture to find a home.
+    const px = new Float64Array(use.length);
+    const py = new Float64Array(use.length);
+    use.forEach((item, i) => {
+      const si = sectionOf(item);
+      const angle = ((si + 0.5) / MAP_SECTIONS.length) * 6.283 + (hash(i * 3) - 0.5) * 1.1;
+      const radius = 0.22 + hash(i * 3 + 1) * 0.26;
+      px[i] = 0.5 + Math.cos(angle) * radius;
+      py[i] = 0.5 + Math.sin(angle) * radius;
     });
 
-    // Nearest neighbours across the whole disc, not within a wedge: that is
-    // the difference between one connected plot and five constellations
-    // sharing a frame.
+    // Real edges only: an episode to the entities it was about, a fact to
+    // whoever it is about. Anything with no connection stays a satellite,
+    // which is honest — plenty of what Grove knows is not joined to anything.
     const edges: [number, number][] = [];
-    for (let i = 0; i < out.length; i++) {
-      const near: [number, number][] = [];
-      for (let j = 0; j < out.length; j++) {
-        if (i === j) continue;
-        const dx = out[i].x - out[j].x;
-        const dy = out[i].y - out[j].y;
-        near.push([dx * dx + dy * dy, j]);
+    use.forEach((item, i) => {
+      for (const other of item.links ?? []) {
+        const j = index.get(other);
+        if (j !== undefined && j !== i) edges.push([i, j]);
       }
-      near.sort((a, b) => a[0] - b[0]);
-      for (let k = 0; k < 3 && k < near.length; k++) edges.push([i, near[k][1]]);
+    });
+
+    /*
+      Relaxation. Repulsion between every pair, springs along the edges, and a
+      weak pull to the middle so disconnected satellites do not drift off.
+
+      Sixty passes over at most a hundred and thirty nodes is about a million
+      operations, once, when the memories change. It is not cheap enough to do
+      per frame and does not need to be.
+    */
+    for (let pass = 0; pass < 70; pass++) {
+      const fx = new Float64Array(use.length);
+      const fy = new Float64Array(use.length);
+
+      for (let i = 0; i < use.length; i++) {
+        for (let j = i + 1; j < use.length; j++) {
+          let dx = px[i] - px[j];
+          let dy = py[i] - py[j];
+          let d2 = dx * dx + dy * dy;
+          if (d2 < 0.0001) {
+            // Exactly coincident points have no direction to be pushed apart
+            // in, so give them one rather than dividing by nothing.
+            dx = (hash(i * 7 + j) - 0.5) * 0.01;
+            dy = (hash(j * 7 + i) - 0.5) * 0.01;
+            d2 = 0.0001;
+          }
+          const push = 0.00016 / d2;
+          fx[i] += dx * push;
+          fy[i] += dy * push;
+          fx[j] -= dx * push;
+          fy[j] -= dy * push;
+        }
+      }
+
+      for (const [i, j] of edges) {
+        const dx = px[j] - px[i];
+        const dy = py[j] - py[i];
+        const pull = 0.012;
+        fx[i] += dx * pull;
+        fy[i] += dy * pull;
+        fx[j] -= dx * pull;
+        fy[j] -= dy * pull;
+      }
+
+      for (let i = 0; i < use.length; i++) {
+        fx[i] += (0.5 - px[i]) * 0.012;
+        fy[i] += (0.5 - py[i]) * 0.012;
+        // Cooling, so late passes settle instead of oscillating.
+        const step = 1 - pass / 80;
+        px[i] += Math.max(-0.05, Math.min(0.05, fx[i])) * step;
+        py[i] += Math.max(-0.05, Math.min(0.05, fy[i])) * step;
+      }
     }
-    return { nodes: out, links: edges };
-  }, [sizes, width, height]);
+
+    /*
+      Centred on the mass, not on the bounding box.
+
+      Scaling min-to-max lets three far-flung satellites set the scale, and the
+      dense middle — the part worth looking at — gets squeezed into a corner
+      with half the panel empty. Centring on the mean and scaling by the spread
+      puts the crowd in the middle and lets the stragglers sit near the edge,
+      clamped so none of them leaves.
+    */
+    let meanX = 0, meanY = 0;
+    for (let i = 0; i < use.length; i++) { meanX += px[i]; meanY += py[i]; }
+    meanX /= use.length; meanY /= use.length;
+    let varX = 0, varY = 0;
+    for (let i = 0; i < use.length; i++) {
+      varX += (px[i] - meanX) ** 2;
+      varY += (py[i] - meanY) ** 2;
+    }
+    const sdX = Math.max(0.02, Math.sqrt(varX / use.length));
+    const sdY = Math.max(0.02, Math.sqrt(varY / use.length));
+    const SPREAD = 2.4;
+    const pad = 0.08;
+    const fit = (v: number) => Math.max(pad, Math.min(1 - pad, v));
+
+    const nodes: Node[] = use.map((item, i) => ({
+      id: item.id,
+      label: item.label,
+      section: sectionOf(item),
+      x: fit(0.5 + ((px[i] - meanX) / (sdX * SPREAD)) * (0.5 - pad)) * width,
+      y: fit(0.5 + ((py[i] - meanY) / (sdY * SPREAD)) * (0.5 - pad)) * height,
+      // Square-rooted, or one friction raised nine times becomes a planet.
+      r: 1.5 + Math.sqrt(Math.max(1, item.weight ?? 1) - 1) * 1.5,
+    }));
+
+    return { nodes, edges };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, width, height]);
 
   const lit = MAP_SECTIONS.findIndex((s) => s.id === active);
 
+  const tap = (event: GestureResponderEvent) => {
+    if (!onPick || nodes.length === 0) return;
+    const { locationX, locationY } = event.nativeEvent;
+    let best = 0;
+    let bestD = Infinity;
+    nodes.forEach((node, i) => {
+      const dx = node.x - locationX;
+      const dy = node.y - locationY;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    // A tap well away from everything is a tap on the background, not a
+    // clumsy tap on the nearest dot forty pixels off.
+    if (bestD > 34 * 34) return;
+    const hit = items.find((item) => item.id === nodes[best].id);
+    if (hit) onPick(hit);
+  };
+
   return (
-    <View style={{ width, height, borderRadius: 18, overflow: 'hidden' }}>
+    <View
+      style={{ width, height, borderRadius: 18, overflow: 'hidden' }}
+      onStartShouldSetResponder={() => true}
+      onResponderRelease={tap}
+      accessibilityRole="image"
+      accessibilityLabel={`A map of ${items.length} things Grove remembers. Tap a dot to read it.`}
+    >
       <Svg width={width} height={height}>
         <Defs>
           <LinearGradient id="grove-map-bg" x1="0" y1="0" x2="0.4" y2="1">
-            <Stop offset="0" stopColor="#171C2E" />
-            <Stop offset="0.58" stopColor="#0B0F1A" />
-            <Stop offset="1" stopColor="#1C1526" />
+            <Stop offset="0" stopColor="#1A2038" />
+            <Stop offset="0.55" stopColor="#0C101C" />
+            <Stop offset="1" stopColor="#1B1428" />
           </LinearGradient>
+          {/* A light behind the densest part, so the thing has a middle. */}
+          <RadialGradient id="grove-map-glow" cx="0.5" cy="0.45" r="0.62">
+            <Stop offset="0" stopColor={MAP_SECTIONS[Math.max(0, lit)]?.colour ?? '#7DD3FC'} stopOpacity="0.18" />
+            <Stop offset="1" stopColor="#0C101C" stopOpacity="0" />
+          </RadialGradient>
         </Defs>
         <Rect x={0} y={0} width={width} height={height} fill="url(#grove-map-bg)" />
+        <Rect x={0} y={0} width={width} height={height} fill="url(#grove-map-glow)" />
 
-        {links.map(([i, j], k) => {
+        {edges.map(([i, j], k) => {
           const on = nodes[i].section === lit || nodes[j].section === lit;
           return (
             <Line
@@ -158,22 +281,26 @@ export function MemoryMap({
               x2={nodes[j].x}
               y2={nodes[j].y}
               stroke={on ? MAP_SECTIONS[nodes[i].section].colour : COLD}
-              strokeWidth={0.6}
-              opacity={on ? 0.5 : 0.16}
+              strokeWidth={0.5}
+              opacity={on ? 0.4 : 0.14}
             />
           );
         })}
 
-        {nodes.map((node, i) => {
+        {nodes.map((node) => {
           const on = node.section === lit;
+          const chosen = picked === node.id;
+          const colour = on || chosen ? MAP_SECTIONS[node.section].colour : COLD;
           return (
             <Circle
-              key={i}
+              key={node.id}
               cx={node.x}
               cy={node.y}
-              r={node.r * (on ? 1.7 : 1.1)}
-              fill={on ? MAP_SECTIONS[node.section].colour : COLD}
-              opacity={on ? 1 : 0.42}
+              r={node.r * (chosen ? 2.1 : on ? 1.45 : 1)}
+              fill={colour}
+              opacity={chosen ? 1 : on ? 0.95 : 0.4}
+              stroke={chosen ? '#FFFFFF' : undefined}
+              strokeWidth={chosen ? 1.4 : 0}
             />
           );
         })}

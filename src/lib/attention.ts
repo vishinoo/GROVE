@@ -29,7 +29,7 @@
  * it.
  */
 
-import { openReminders } from './deviceCalendar';
+import { hasRemindersAccess, openReminders } from './deviceCalendar';
 import * as google from './google';
 import { localTime } from './when';
 import { outOf, spent as chargeBudget, worthSaying, type Candidate } from './interrupt';
@@ -297,4 +297,18 @@ export async function nextUp(now = new Date()): Promise<NextUp> {
         where,
         leaveBy: new Date(next.at.getTime() - (travel + GETTING_READY) * 60_000),
       };
+}
+
+/**
+ * A reminder due today, for the line under the sky.
+ *
+ * Asks permission of nobody: this runs on a minute timer, and a dialog that
+ * appears because a screen refreshed is the opposite of ambient. Without
+ * access already granted it is simply never there.
+ */
+export async function dueToday(now = new Date()): Promise<string | null> {
+  if (!(await hasRemindersAccess())) return null;
+  const reminders = (await openReminders(20).catch(() => null)) ?? [];
+  const today = reminders.find((r) => r.due && r.due.toDateString() === now.toDateString());
+  return today?.title || null;
 }

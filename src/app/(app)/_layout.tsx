@@ -1,16 +1,28 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Redirect, Tabs } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon, type IconName } from '@/components/icon';
-import { Elevation, Radius } from '@/constants/theme';
+import { Elevation, Fonts, Radius } from '@/constants/theme';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 
 /** The travelling marker behind the current tab. */
 const BUBBLE = 38;
+
+/**
+ * Labels until each tab has been opened once.
+ *
+ * Icons alone are right for someone who knows them and a guess for someone
+ * who does not, and the middle one in particular is a picture of a graph that
+ * could mean anything. So the words stay until every tab has been visited,
+ * and then go — the bar earns its quiet by having explained itself first.
+ */
+const LEARNED_KEY = 'grove.dock.visited';
+const LABELLED = { width: 64, height: 46 };
 
 /**
  * Three, not four.
@@ -19,10 +31,14 @@ const BUBBLE = 38;
  * then never again — a permanent quarter of the bar for a screen nobody
  * opens twice. It lives inside Settings now, next to the self-check, which is
  * the other thing you only open when something is wrong.
+ *
+ * The middle one is labelled Memory, not Sparks. Sparks was what the screen
+ * used to hold; what it holds now is the map of what Grove did, what is still
+ * open and what it knows about you, and a name has to say where it goes.
  */
 const TABS: { name: string; label: string; icon: IconName }[] = [
   { name: 'index', label: 'Talk', icon: 'talk' },
-  { name: 'sparks', label: 'Sparks', icon: 'map' },
+  { name: 'sparks', label: 'Memory', icon: 'map' },
   { name: 'settings', label: 'Settings', icon: 'settings' },
 ];
 
@@ -59,11 +75,10 @@ type DockProps = {
 /**
  * The dock.
  *
- * Four tabs, no labels, and the current one marked by a bubble that travels
- * to whatever you tap next.
- *
- * The labels went because they were the wordiest thing on every screen and
- * named four glyphs that the rest of the phone already taught. The bubble is
+ * Three tabs, and the current one marked by a bubble that travels to whatever
+ * you tap next. Labelled until each has been opened once (see LEARNED_KEY),
+ * then icons alone: after that the words are the wordiest thing on every
+ * screen, naming glyphs you already know. The bubble is
  * not decoration either: a tab bar where only the icon colour changes reads
  * as four buttons, and one where a single object slides between them reads as
  * one control with a position.
@@ -76,6 +91,25 @@ function Dock({ state, navigation }: DockProps) {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   const [width, setWidth] = useState(0);
+  // Null until read, so a returning user never sees the labels flash in.
+  const [visited, setVisited] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    AsyncStorage.getItem(LEARNED_KEY)
+      .then((raw) => setVisited(raw ? (JSON.parse(raw) as string[]) : []))
+      .catch(() => setVisited([]));
+  }, []);
+
+  const here = TABS[state.index]?.name;
+  useEffect(() => {
+    if (!visited || !here || visited.includes(here)) return;
+    const next = [...visited, here];
+    setVisited(next);
+    AsyncStorage.setItem(LEARNED_KEY, JSON.stringify(next)).catch(() => {});
+  }, [here, visited]);
+
+  const labelled = visited !== null && TABS.some((tab) => !visited.includes(tab.name));
+  const marker = labelled ? LABELLED : { width: BUBBLE, height: BUBBLE };
 
   const slot = width / TABS.length;
   const bubble = useSharedValue(0);
@@ -84,11 +118,11 @@ function Dock({ state, navigation }: DockProps) {
   // deep link as readily as a tap.
   useEffect(() => {
     if (!slot) return;
-    bubble.value = withTiming(state.index * slot + slot / 2 - BUBBLE / 2, {
+    bubble.value = withTiming(state.index * slot + slot / 2 - marker.width / 2, {
       duration: 420,
       easing: Easing.out(Easing.cubic),
     });
-  }, [state.index, slot, bubble]);
+  }, [state.index, slot, bubble, marker.width]);
 
   const riding = useAnimatedStyle(() => ({ transform: [{ translateX: bubble.value }] }));
 
@@ -101,7 +135,7 @@ function Dock({ state, navigation }: DockProps) {
           left: 18,
           right: 18,
           bottom: Math.max(insets.bottom, 13),
-          height: 56,
+          height: labelled ? 60 : 56,
           flexDirection: 'row',
           alignItems: 'center',
           borderRadius: Radius.pill,
@@ -120,9 +154,9 @@ function Dock({ state, navigation }: DockProps) {
             {
               position: 'absolute',
               left: 0,
-              width: BUBBLE,
-              height: BUBBLE,
-              borderRadius: BUBBLE / 2,
+              width: marker.width,
+              height: marker.height,
+              borderRadius: marker.height / 2,
               backgroundColor: palette.sunken,
             },
           ]}
@@ -149,7 +183,19 @@ function Dock({ state, navigation }: DockProps) {
             }}
             style={{ flex: 1, alignItems: 'center', justifyContent: 'center', height: '100%' }}
           >
-            <Icon name={tab.icon} size={21} color={focused ? palette.ink : palette.muted} />
+            <Icon name={tab.icon} size={labelled ? 19 : 21} color={focused ? palette.ink : palette.muted} />
+            {labelled ? (
+              <Text
+                style={{
+                  fontFamily: Fonts.bodyMedium,
+                  fontSize: 10.5,
+                  marginTop: 3,
+                  color: focused ? palette.ink : palette.muted,
+                }}
+              >
+                {tab.label}
+              </Text>
+            ) : null}
           </Pressable>
         );
       })}
