@@ -2,10 +2,18 @@
  * The memory map.
  *
  * Every dot is a thing Grove actually remembers — a person, a project, a dated
- * thing that happened, a fact, a promise, something that keeps going wrong —
- * and every line is a relationship that exists in the data rather than one
- * invented to make the picture look busy. An episode knows which entities it
- * was about; a fact knows whose it is. Those are the edges.
+ * thing that happened, a fact, a promise, something that keeps going wrong.
+ * The lines come first from the data: an episode knows which entities it was
+ * about; a fact knows whose it is.
+ *
+ * Everything else is joined to its own section, and every island to the main
+ * body, so the map is one connected thing. Loose dots read as a rendering
+ * fault rather than as "not linked to anything", which is what they meant.
+ * Section is still a real relationship — both are things it did — just a
+ * weaker one than a name in common.
+ *
+ * Every dot is the same size. Sizing by weight made a few planets and a lot
+ * of specks, and the specks were the ones you could not tap.
  *
  * It used to be counts. Six numbers went in, a hundred anonymous dots came
  * out, arranged in wedges — a diagram of how much Grove remembered rather than
@@ -31,7 +39,6 @@ import Svg, {
   Circle,
   Defs,
   Line,
-  LinearGradient,
   RadialGradient,
   Rect,
   Stop,
@@ -55,9 +62,9 @@ export type MapItem = {
   label: string;
   section: MapSection;
   /**
-   * How big the dot is, and it has to mean something: times a friction has
-   * recurred, facts known about a person, entities an episode touched. A size
-   * that means nothing is decoration pretending to be data.
+   * How much there is behind it: times a friction has recurred, facts known
+   * about a person, entities an episode touched. No longer drawn as size —
+   * every dot is the same — but it still re-lays the map when it changes.
    */
   weight?: number;
   /** Ids this is genuinely connected to. */
@@ -65,7 +72,10 @@ export type MapItem = {
 };
 
 /** What an unlit section cools to. Dimming a blue dot still reads as blue. */
-const COLD = '#6E7A96';
+const COLD = '#AEB6C8';
+
+/** Every dot's radius. The same for all of them; see the note at the top. */
+const DOT = 3.2;
 
 /** Beyond this the relaxation gets slow and the picture gets unreadable. */
 const MAX_NODES = 130;
@@ -127,9 +137,8 @@ export function MemoryMap({
       py[i] = 0.5 + Math.sin(angle) * radius;
     });
 
-    // Real edges only: an episode to the entities it was about, a fact to
-    // whoever it is about. Anything with no connection stays a satellite,
-    // which is honest — plenty of what Grove knows is not joined to anything.
+    // Edges from the data first: an episode to the entities it was about, a
+    // fact to whoever it is about.
     const edges: [number, number][] = [];
     use.forEach((item, i) => {
       for (const other of item.links ?? []) {
@@ -137,6 +146,41 @@ export function MemoryMap({
         if (j !== undefined && j !== i) edges.push([i, j]);
       }
     });
+
+    // Then joined up. A dot with no edge links to the last one in its section,
+    // so a section is a chain rather than a scatter; then every island is tied
+    // to the largest body by one edge, through a dot of the same section when
+    // the body has one.
+    const parent = use.map((_, i) => i);
+    const root = (i: number): number => (parent[i] === i ? i : (parent[i] = root(parent[i])));
+    const join = (i: number, j: number) => {
+      edges.push([i, j]);
+      parent[root(i)] = root(j);
+    };
+    for (const [i, j] of edges) parent[root(i)] = root(j);
+
+    const linked = new Set(edges.flat());
+    const lastIn = new Map<number, number>();
+    use.forEach((item, i) => {
+      const si = sectionOf(item);
+      const before = lastIn.get(si);
+      if (!linked.has(i) && before !== undefined) join(i, before);
+      lastIn.set(si, i);
+    });
+
+    const members = new Map<number, number[]>();
+    use.forEach((_, i) => {
+      const r = root(i);
+      members.set(r, [...(members.get(r) ?? []), i]);
+    });
+    const islands = [...members.values()].sort((a, b) => b.length - a.length);
+    const body = islands[0];
+    for (const island of islands.slice(1)) {
+      const from = island[0];
+      const si = sectionOf(use[from]);
+      const to = body.find((i) => sectionOf(use[i]) === si) ?? body[0];
+      join(from, to);
+    }
 
     /*
       Relaxation. Repulsion between every pair, springs along the edges, and a
@@ -219,8 +263,7 @@ export function MemoryMap({
       section: sectionOf(item),
       x: fit(0.5 + ((px[i] - meanX) / (sdX * SPREAD)) * (0.5 - pad)) * width,
       y: fit(0.5 + ((py[i] - meanY) / (sdY * SPREAD)) * (0.5 - pad)) * height,
-      // Square-rooted, or one friction raised nine times becomes a planet.
-      r: 1.5 + Math.sqrt(Math.max(1, item.weight ?? 1) - 1) * 1.5,
+      r: DOT,
     }));
 
     return { nodes, edges };
@@ -249,7 +292,14 @@ export function MemoryMap({
 
   return (
     <View
-      style={{ width, height, borderRadius: 18, overflow: 'hidden' }}
+      style={{
+        width,
+        height,
+        borderRadius: 22,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.14)',
+      }}
       onStartShouldSetResponder={() => true}
       onResponderRelease={tap}
       accessibilityRole="image"
@@ -257,18 +307,15 @@ export function MemoryMap({
     >
       <Svg width={width} height={height}>
         <Defs>
-          <LinearGradient id="grove-map-bg" x1="0" y1="0" x2="0.4" y2="1">
-            <Stop offset="0" stopColor="#1A2038" />
-            <Stop offset="0.55" stopColor="#0C101C" />
-            <Stop offset="1" stopColor="#1B1428" />
-          </LinearGradient>
           {/* A light behind the densest part, so the thing has a middle. */}
           <RadialGradient id="grove-map-glow" cx="0.5" cy="0.45" r="0.62">
             <Stop offset="0" stopColor={MAP_SECTIONS[Math.max(0, lit)]?.colour ?? '#7DD3FC'} stopOpacity="0.18" />
             <Stop offset="1" stopColor="#0C101C" stopOpacity="0" />
           </RadialGradient>
         </Defs>
-        <Rect x={0} y={0} width={width} height={height} fill="url(#grove-map-bg)" />
+        {/* A pane of glass over the field rather than a dark panel of its own:
+            the map sits in the same colour as everything else. */}
+        <Rect x={0} y={0} width={width} height={height} fill="#FFFFFF" fillOpacity={0.07} />
         <Rect x={0} y={0} width={width} height={height} fill="url(#grove-map-glow)" />
 
         {edges.map(([i, j], k) => {
@@ -281,8 +328,8 @@ export function MemoryMap({
               x2={nodes[j].x}
               y2={nodes[j].y}
               stroke={on ? MAP_SECTIONS[nodes[i].section].colour : COLD}
-              strokeWidth={0.5}
-              opacity={on ? 0.4 : 0.14}
+              strokeWidth={0.9}
+              opacity={on ? 0.75 : 0.32}
             />
           );
         })}
@@ -296,11 +343,12 @@ export function MemoryMap({
               key={node.id}
               cx={node.x}
               cy={node.y}
-              r={node.r * (chosen ? 2.1 : on ? 1.45 : 1)}
+              // Same size lit or not; the picked one is marked by its ring.
+              r={node.r}
               fill={colour}
-              opacity={chosen ? 1 : on ? 0.95 : 0.4}
+              opacity={chosen ? 1 : on ? 1 : 0.5}
               stroke={chosen ? '#FFFFFF' : undefined}
-              strokeWidth={chosen ? 1.4 : 0}
+              strokeWidth={chosen ? 1.6 : 0}
             />
           );
         })}

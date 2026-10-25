@@ -36,6 +36,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/icon';
+import { Glass } from '@/components/glass';
 import {
   MAP_SECTIONS,
   MemoryMap,
@@ -128,7 +129,19 @@ function Fading({
   );
 }
 
+/**
+ * On glass, over the same field as Talk: the body below reads the palette
+ * inside the provider, so every colour it uses is the glass one.
+ */
 export default function Sparks() {
+  return (
+    <Glass>
+      <SparksBody />
+    </Glass>
+  );
+}
+
+function SparksBody() {
   const palette = usePalette();
   const { activity, facts, editFact, forgetFact, life, forgetEntity, forgetEpisode, struggles, gotStruggle, forgetStruggle } =
     useAgent();
@@ -259,8 +272,18 @@ export default function Sparks() {
 
   return (
     <View style={{ flex: 1, backgroundColor: palette.paper }}>
+      {/*
+        Clipped below the pinned map. On paper the map's own background hid
+        the list scrolling under it; on glass there is nothing to hide it, so
+        the list is cut off at the map's edge instead. The scroll view keeps
+        its full height and offsets — every measurement the reading line
+        makes is unchanged — and only the part above the edge is hidden.
+      */}
+      <View
+        style={{ position: 'absolute', top: header || 300, left: 0, right: 0, bottom: 0, overflow: 'hidden' }}
+      >
       <Animated.ScrollView
-        style={{ flex: 1 }}
+        style={{ flex: 1, marginTop: -(header || 300) }}
         contentContainerStyle={{
           paddingTop: header || 300,
           paddingHorizontal: Space.screenX,
@@ -426,6 +449,7 @@ export default function Sparks() {
       )}</Fading>
 
       </Animated.ScrollView>
+      </View>
 
       {/*
         The header does not scroll.

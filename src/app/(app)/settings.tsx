@@ -21,15 +21,18 @@ import { useCallback, useEffect, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import Svg, { Defs, LinearGradient as SvgGradient, Rect, Stop } from 'react-native-svg';
 
+import { router } from 'expo-router';
 import * as Updates from 'expo-updates';
 
 import { ConnectionsPanel } from '@/components/connections-panel';
 import { Icon } from '@/components/icon';
 import { Button, Card, Dot, Mono, Notice, Row, Screen, Section } from '@/components/ui';
-import { Radius, SKIES, Type, skyFor } from '@/constants/theme';
+import { FIELD_COLOURS, fieldColour } from '@/components/field-shader';
+import { Glass } from '@/components/glass';
+import { Radius, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
-import { useIsNight, usePalette } from '@/hooks/use-palette';
+import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
 import { runSelfCheck, type CheckResult } from '@/lib/selfCheck';
 import { checkNow, runningLabel, type Caught } from '@/lib/updates';
@@ -37,19 +40,28 @@ import { MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona } from '@/lib/persona';
 import { hasOwnKey, setOwnKey } from '@/lib/lightModel';
 import { availableVoices, bestVoiceId, characterVoice, hasEnhancedVoice, speak } from '@/lib/speak';
 import * as trigger from '@/lib/trigger';
+import { LIMIT } from '@/lib/transcript';
 import type * as SpeechTypes from 'expo-speech';
 
 
+/** On glass, like Memory; see Glass. */
 export default function Settings() {
+  return (
+    <Glass>
+      <SettingsBody />
+    </Glass>
+  );
+}
+
+function SettingsBody() {
   const palette = usePalette();
   const { user, signOut } = useSession();
   // Memory moved to Sparks, where the standing instructions already live: a
   // spark and a fact are the same idea from different ends, and keeping the
   // list somewhere you pass anyway beats burying it in Settings.
-  const { persona, updatePersona, armed, route } = useAgent();
-  const night = useIsNight();
-  const chosenSky = skyFor(persona.sky, night);
-  const gradientId = `grove-name-${persona.sky ?? 'day'}`;
+  const { persona, updatePersona, armed, route, activity } = useAgent();
+  const colour = fieldColour(persona.sky);
+  const gradientId = `grove-name-${colour.key}`;
   /** Not one of the presets, so the box is theirs and worth showing. */
   const custom = !PRESETS.some((preset) => preset.manner.trim() === persona.manner.trim());
   const updateLabel = runningLabel();
@@ -99,12 +111,8 @@ export default function Settings() {
                 {/* Keyed on the choice, or the gradient is cached under one
                     id and the card never repaints when you pick another. */}
                 <SvgGradient id={gradientId} x1="0" y1="0" x2="0.35" y2="1">
-                  {chosenSky.stops.map((colour, i) => (
-                    <Stop
-                      key={colour}
-                      offset={i / (chosenSky.stops.length - 1)}
-                      stopColor={colour}
-                    />
+                  {[colour.c[0], colour.c[1], colour.c[3], colour.c[2]].map((stop, i) => (
+                    <Stop key={stop} offset={i / 3} stopColor={stop} />
                   ))}
                 </SvgGradient>
               </Defs>
@@ -160,7 +168,7 @@ export default function Settings() {
                   style={{
                     fontFamily: Type.cardTitle.fontFamily,
                     fontSize: 13.5,
-                    color: picked ? palette.raised : palette.ink,
+                    color: picked ? palette.onMark : palette.ink,
                   }}
                 >
                   {preset.label}
@@ -189,7 +197,7 @@ export default function Settings() {
               style={{
                 fontFamily: Type.cardTitle.fontFamily,
                 fontSize: 13.5,
-                color: custom ? palette.raised : palette.ink,
+                color: custom ? palette.onMark : palette.ink,
               }}
             >
               Custom
@@ -277,7 +285,7 @@ export default function Settings() {
                   style={{
                     fontFamily: Type.cardTitle.fontFamily,
                     fontSize: 13.5,
-                    color: picked ? palette.raised : palette.ink,
+                    color: picked ? palette.onMark : palette.ink,
                   }}
                 >
                   {mode === 'system' ? 'Follow phone' : mode === 'light' ? 'Light' : 'Dark'}
@@ -288,57 +296,56 @@ export default function Settings() {
         </View>
       </Section>
 
-      <Section label="Sky">
-        <Card style={{ alignItems: 'center', paddingVertical: 18 }}>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14, justifyContent: 'center' }}>
-            {SKIES.map((sky) => {
-              const picked = (persona.sky ?? 'day') === sky.key;
-              return (
-                <Pressable
-                  key={sky.key}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: picked }}
-                  accessibilityLabel={sky.label}
-                  onPress={() => set({ sky: sky.key })}
-                  style={({ pressed }) => ({ alignItems: 'center', gap: 6, opacity: pressed ? 0.7 : 1 })}
-                >
-                  <View
-                    style={{
-                      width: 46,
-                      height: 46,
-                      borderRadius: 23,
-                      overflow: 'hidden',
-                      borderWidth: picked ? 3 : 1,
-                      borderColor: picked ? palette.ink : palette.line,
-                    }}
-                  >
-                    <Svg width="100%" height="100%">
-                      <Defs>
-                        <SvgGradient id={`grove-swatch-${sky.key}`} x1="0" y1="0" x2="0" y2="1">
-                          {sky.stops.map((colour, i) => (
-                            <Stop
-                              key={colour}
-                              offset={i / (sky.stops.length - 1)}
-                              stopColor={colour}
-                            />
-                          ))}
-                        </SvgGradient>
-                      </Defs>
-                      <Rect
-                        x="0"
-                        y="0"
-                        width="100%"
-                        height="100%"
-                        fill={`url(#grove-swatch-${sky.key})`}
-                      />
-                    </Svg>
-                  </View>
-                  <Mono style={{ color: picked ? palette.ink : palette.muted }}>{sky.label}</Mono>
-                </Pressable>
-              );
-            })}
-          </View>
-        </Card>
+      {/*
+        The colour of the field, and nothing to do with the voice.
+
+        It belonged to the personality once, and a manner someone wrote
+        themselves has no colour, so it is its own choice now. Four, all from
+        outdoors, each with its own pace; picking one repaints the field
+        behind this very screen, which is the preview.
+      */}
+      <Section label="Colour">
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {FIELD_COLOURS.map((option) => {
+            const picked = option.key === colour.key;
+            return (
+              <Pressable
+                key={option.key}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: picked }}
+                accessibilityLabel={`${option.label}. ${option.blurb}`}
+                onPress={() => set({ sky: option.key })}
+                style={({ pressed }) => ({
+                  width: '48.5%',
+                  padding: 10,
+                  gap: 9,
+                  borderRadius: Radius.card,
+                  backgroundColor: picked ? 'rgba(255,255,255,0.16)' : palette.raised,
+                  borderWidth: 1,
+                  borderColor: picked ? 'rgba(255,255,255,0.72)' : palette.line,
+                  opacity: pressed ? 0.75 : 1,
+                })}
+              >
+                <View style={{ height: 56, borderRadius: 12, overflow: 'hidden' }}>
+                  <Svg width="100%" height="100%">
+                    <Defs>
+                      <SvgGradient id={`grove-colour-${option.key}`} x1="0" y1="0.2" x2="1" y2="0.8">
+                        {[option.c[0], option.c[1], option.c[3], option.c[2]].map((stop, i) => (
+                          <Stop key={stop} offset={i / 3} stopColor={stop} />
+                        ))}
+                      </SvgGradient>
+                    </Defs>
+                    <Rect x="0" y="0" width="100%" height="100%" fill={`url(#grove-colour-${option.key})`} />
+                  </Svg>
+                </View>
+                <View style={{ gap: 2, paddingHorizontal: 2 }}>
+                  <Text style={[Type.cardTitle, { color: palette.ink }]}>{option.label}</Text>
+                  <Text style={[Type.bodySm, { color: palette.muted }]}>{option.blurb}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
       </Section>
 
       <Section label="Speaking up">
@@ -350,7 +357,7 @@ export default function Settings() {
                 value={persona.speaksUp !== false}
                 onValueChange={(speaksUp) => set({ speaksUp })}
                 trackColor={{ true: palette.mark, false: palette.sunken }}
-                thumbColor={palette.raised}
+                thumbColor="#FFFFFF"
               />
             }
           />
@@ -419,7 +426,7 @@ export default function Settings() {
                 value={persona.preferOnDevice}
                 onValueChange={(preferOnDevice) => set({ preferOnDevice })}
                 trackColor={{ true: palette.mark, false: palette.sunken }}
-                thumbColor={palette.raised}
+                thumbColor="#FFFFFF"
               />
             }
           />
@@ -434,6 +441,19 @@ export default function Settings() {
 
       <Section label="Connections">
         <ConnectionsPanel />
+      </Section>
+
+      {/* What it did, and through which connection: the place you check
+          whether a reminder actually got set. */}
+      <Section label="Logs">
+        <Card style={{ paddingVertical: 2 }}>
+          <Row
+            label="Logs"
+            hint={`The last ${LIMIT} things you asked, and the connection each used.`}
+            value={activity.length ? String(activity.length) : undefined}
+            onPress={() => router.push('/logs')}
+          />
+        </Card>
       </Section>
 
       <Section label="Does it all work?">

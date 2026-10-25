@@ -73,6 +73,7 @@ function Chrome() {
         <Stack.Screen name="onboarding" />
         <Stack.Screen name="login" />
         <Stack.Screen name="(app)" />
+        <Stack.Screen name="logs" options={{ animation: 'slide_from_right' }} />
       </Stack>
     </>
   );

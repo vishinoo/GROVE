@@ -1,11 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Redirect, Tabs } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Field, useField } from '@/components/field';
 import { Icon, type IconName } from '@/components/icon';
+import { useAgent } from '@/context/agent';
 import { Elevation, Fonts, Radius } from '@/constants/theme';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
@@ -45,13 +48,37 @@ const TABS: { name: string; label: string; icon: IconName }[] = [
 export default function AppLayout() {
   const { status } = useSession();
   if (status === 'signed-out') return <Redirect href="/login" />;
+  return <OnTheField />;
+}
+
+/**
+ * One field behind all three tabs.
+ *
+ * Drawn here, once, rather than by each screen, so switching tabs never
+ * restarts the water or moves it: Memory and Settings fade their glass in
+ * over exactly the colour you were just looking at on Talk. The screens are
+ * transparent for the same reason.
+ */
+function OnTheField() {
+  const { state, persona, level } = useAgent();
+  const { width, height } = useWindowDimensions();
+  const field = useField(state, persona, level);
 
   return (
-    <Tabs screenOptions={{ headerShown: false }} tabBar={(props) => <Dock {...props} />}>
-      <Tabs.Screen name="index" />
-      <Tabs.Screen name="sparks" />
-      <Tabs.Screen name="settings" />
-    </Tabs>
+    <View style={{ flex: 1, backgroundColor: '#0B0C12' }}>
+      <StatusBar style="light" />
+      <View style={{ position: 'absolute', top: 0, left: 0 }} pointerEvents="none">
+        <Field uniforms={field.uniforms} palette={field.palette} width={width} fullHeight={height} />
+      </View>
+      <Tabs
+        screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: 'transparent' } }}
+        tabBar={(props) => <Dock {...props} />}
+      >
+        <Tabs.Screen name="index" />
+        <Tabs.Screen name="sparks" />
+        <Tabs.Screen name="settings" />
+      </Tabs>
+    </View>
   );
 }
 

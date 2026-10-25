@@ -423,7 +423,7 @@ section('Everything about someone\'s life is stored sealed');
     'life',       // people, episodes, and the verbatim buffer
     'memory',     // the facts in every prompt
     'struggles',  // what keeps going wrong
-    'transcript', // the last fifteen exchanges
+    'transcript', // the last thirty exchanges
     'docs',
     'rapport',    // how they talk
     'rhythms',

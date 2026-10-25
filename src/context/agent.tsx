@@ -84,27 +84,39 @@ const SILENCE_TIMEOUT_MS = 5000;
  * it — it is closing it again almost immediately when nobody speaks.
  *
  * A question gets much longer, because Grove has just asked for something and
- * the person has to think before they answer. Two seconds is a pause; seven is
- * time to decide.
+ * the person has to think before they answer.
+ *
+ * These started at two seconds and seven and were both too short in use. The
+ * window opens when the speech callback says the sentence is done, which is
+ * not the same moment the sound stops coming out of the glasses — so some of
+ * it is spent listening to the tail of Grove's own voice before the person
+ * has even registered it is their turn. Four and a half, and twelve for a
+ * question, leave room for that and for a normal beat of hesitation.
+ *
+ * The cost of being generous here is small precisely because the window is
+ * silent and closes itself: an unused one leaves no trace. The cost of being
+ * stingy is the thing it was built to fix, which is reaching for the ring
+ * again to say one more sentence.
  */
-const GRACE_MS = 2000;
-const ANSWER_MS = 7000;
+const GRACE_MS = 4500;
+const ANSWER_MS = 12_000;
 
 /**
  * Silence after speech has already been heard.
  *
  * Separate from the two above, which are "nothing at all yet". Once words have
- * arrived this is a pause mid-sentence, and cutting someone off at two seconds
- * because they drew breath is worse than waiting a moment longer.
+ * arrived this is a pause mid-sentence, and cutting someone off because they
+ * drew breath is worse than waiting a moment longer — so this is the most
+ * generous of the three relative to what it is waiting for.
  */
-const TRAILING_MS = 2600;
+const TRAILING_MS = 3600;
 
 /**
  * How long a claim to be listening is allowed to go unbacked by a recogniser
  * before the watchdog treats it as a desync. Long enough to cover the session
  * handover coming back from the background, which is the slowest honest start.
  */
-const LISTEN_GRACE_MS = 2500;
+const LISTEN_GRACE_MS = 3000;
 
 export type AgentState =
   | 'asleep'

@@ -28,17 +28,18 @@ export type Entry = {
 };
 
 /**
- * Fifteen exchanges, and everything past that is deleted rather than archived.
+ * Thirty exchanges, and everything past that is deleted rather than archived.
  *
  * This is a privacy cap as much as a storage one: Grove is listening while you
  * walk around, and a log that keeps every word you have ever said to it is a
- * liability sitting on the phone. Fifteen is enough to scroll back through what
- * just happened and not enough to be a record of your life.
+ * liability sitting on the phone. Thirty is enough to look back over a day of
+ * use from Settings → Logs and not enough to be a record of your life. It was
+ * fifteen while the log was only a strip under the Talk screen.
  *
  * Durable things you actually want kept go in memory.ts as facts you can read
  * and delete, not in here.
  */
-const LIMIT = 15;
+export const LIMIT = 30;
 
 function key(uid: string): string {
   return `grove:activity:v1:${uid}`;

@@ -115,7 +115,7 @@ export function ConnectionsPanel() {
                 opacity: pressed ? 0.75 : 1,
               })}
             >
-              <Text style={{ fontFamily: Type.cardTitle.fontFamily, fontSize: 14, color: palette.raised }}>
+              <Text style={{ fontFamily: Type.cardTitle.fontFamily, fontSize: 14, color: palette.onMark }}>
                 Open iOS Settings
               </Text>
             </Pressable>
@@ -239,7 +239,7 @@ function Row({
                 style={{
                   fontFamily: Type.cardTitle.fontFamily,
                   fontSize: 13,
-                  color: connected ? palette.inkSoft : palette.raised,
+                  color: connected ? palette.inkSoft : palette.onMark,
                 }}
               >
                 {connected ? 'Disconnect' : verb(item)}

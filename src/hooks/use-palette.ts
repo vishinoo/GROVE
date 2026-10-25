@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { createContext, useContext, useSyncExternalStore } from 'react';
 import { Appearance } from 'react-native';
 
 import { Colors, type Palette } from '@/constants/theme';
@@ -69,6 +69,37 @@ export function useIsNight(): boolean {
   return useSyncExternalStore(subscribe, nightNow, () => false);
 }
 
+/**
+ * Glass, for screens drawn over the field.
+ *
+ * Memory and Settings sit on the same moving colour as Talk, dimmed, and
+ * their cards are panes of frosted white over it rather than paper. Rather
+ * than thread a second set of colours through every card, row and label,
+ * a screen on the field says so once and everything inside it asks for the
+ * palette as usual and gets this one. Light or dark does not apply there:
+ * the field is the ground, and white is what reads on it.
+ */
+export const OnField = createContext(false);
+
+const GLASS: Palette = {
+  ...Colors.dark,
+  paper: 'transparent',
+  raised: 'rgba(255,255,255,0.08)',
+  sunken: 'rgba(255,255,255,0.05)',
+  mark: '#FFFFFF',
+  onMark: '#0B0C12',
+  ink: '#FFFFFF',
+  inkSoft: 'rgba(255,255,255,0.82)',
+  muted: 'rgba(255,255,255,0.66)',
+  line: 'rgba(255,255,255,0.13)',
+  lineStrong: 'rgba(255,255,255,0.22)',
+  glass: 'rgba(20,22,30,0.55)',
+  glassLine: 'rgba(255,255,255,0.14)',
+};
+
 export function usePalette(): Palette {
-  return useIsNight() ? Colors.dark : Colors.light;
+  const night = useIsNight();
+  const glass = useContext(OnField);
+  if (glass) return GLASS;
+  return night ? Colors.dark : Colors.light;
 }

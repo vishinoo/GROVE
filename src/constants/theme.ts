@@ -34,6 +34,8 @@ export const Colors = {
     paper: '#F4F5F7',
     /** Cards, sheets, fields with content. */
     raised: '#FFFFFF',
+    /** Text and icons on a filled `mark` button. */
+    onMark: '#FFFFFF',
     /** Inset wells — the text box, stepper buttons. */
     sunken: '#F6F7F9',
     /** Primary fills and the mark. */
@@ -66,6 +68,8 @@ export const Colors = {
   dark: {
     paper: '#0D0E11',
     raised: '#17191E',
+    /** Text and icons on a filled `mark` button. */
+    onMark: '#17191E',
     sunken: '#101216',
     mark: '#F4F5F7',
     ink: '#F4F5F7',

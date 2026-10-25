@@ -15,7 +15,7 @@
 
 import { Platform } from 'react-native';
 
-export type Capability = 'speech' | 'remote' | 'haptics' | 'calendar';
+export type Capability = 'speech' | 'remote' | 'haptics' | 'calendar' | 'canvas';
 
 export type CapabilityReport = {
   /** On-device speech recognition — the ear. */
@@ -25,6 +25,12 @@ export type CapabilityReport = {
   haptics: boolean;
   /** Events and reminders. Present in Expo Go, unlike the other two. */
   calendar: boolean;
+  /**
+   * Skia, which draws the moving field on the Talk screen. Without it the
+   * field stands still; nothing else depends on it, so it is never listed
+   * as missing. The web draws the field with WebGL and does not need it.
+   */
+  canvas: boolean;
   /**
    * True only when every part of the always-on story is present. When false,
    * Grove still works — you type instead of talking, and the phone speaks the
@@ -73,11 +79,14 @@ export function capabilities(): CapabilityReport {
   const calendar =
     Platform.OS !== 'web' && probe(() => require('expo-calendar').getEventsAsync);
 
+  const canvas =
+    Platform.OS === 'web' || probe(() => require('@shopify/react-native-skia').Skia.RuntimeEffect);
+
   const missing: string[] = [];
   if (!speech) missing.push('speech recognition');
   if (!remote && Platform.OS === 'ios') missing.push('the ring trigger');
 
-  cached = { speech, remote, haptics, calendar, full: speech && remote, missing };
+  cached = { speech, remote, haptics, calendar, canvas, full: speech && remote, missing };
   return cached;
 }
 /* eslint-enable @typescript-eslint/no-require-imports */

@@ -222,9 +222,16 @@ disconnected and reconnected.** Nothing else can fix it.
 ## When Grove listens, and how you know
 
 **Every reply ends with a window you can talk into, and the window shuts
-itself.** Two seconds of silence after an ordinary reply (`GRACE_MS`), seven
-after Grove has actually asked something (`ANSWER_MS`) — because it has asked
-for a decision and deciding takes longer than breathing.
+itself.** Four and a half seconds of silence after an ordinary reply
+(`GRACE_MS`), twelve after Grove has actually asked something (`ANSWER_MS`) —
+because it has asked for a decision and deciding takes longer than breathing.
+
+Those started at two and seven and were both too short in use. The window opens
+when the speech callback reports the sentence done, which is not the moment
+sound stops leaving the glasses — so part of it goes on the tail of Grove's own
+voice, before the person has registered it is their turn. Being generous costs
+little precisely because the window is silent and closes itself; being stingy
+is the failure it was built to fix.
 
 This is a change of mind, and the reasoning it replaced is still half right.
 The mic used to open after anything ending in a question mark, and a
@@ -664,7 +671,7 @@ conversation, one call, 3.6 seconds, six people and projects and six dated
 episodes out the other end.
 
 **The buffer is deleted once read.** That is the privacy line, and it is the
-same one `transcript.ts` draws at fifteen exchanges: Grove listens while you
+same one `transcript.ts` draws at thirty exchanges: Grove listens while you
 walk around, so it keeps what things meant and not what was said. Everything it
 keeps is readable and deletable on the Memory screen, because a memory you
 cannot see is one you cannot correct.

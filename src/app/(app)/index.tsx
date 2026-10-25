@@ -11,69 +11,78 @@
  * and it is the reason this app is developable without a device build at all.
  */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   Text,
   TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
-import Animated, {
-  useAnimatedScrollHandler,
-  useAnimatedStyle,
-  useSharedValue,
-} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppIcon, iconForKey } from '@/components/app-icon';
 import { Icon } from '@/components/icon';
-import { Horizon, STATE_WORD } from '@/components/horizon';
-import { Card, Dot, Mono, Notice } from '@/components/ui';
+import { STATE_WORD } from '@/components/field';
+import { Glass } from '@/components/glass';
+import { Card, Mono, Notice } from '@/components/ui';
 import { Radius, Space, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
-import { when } from '@/lib/transcript';
 
 import type { NextUp } from '@/lib/attention';
 
+/** Words written straight onto the field, which is dark enough everywhere for white. */
+const ON_FIELD = '#FFFFFF';
+const ON_FIELD_SOFT = 'rgba(255,255,255,0.74)';
+
+/** Faded in and out with focus, like the other tabs on the field; see Glass. */
 export default function Talk() {
+  return (
+    <Glass plain>
+      <TalkBody />
+    </Glass>
+  );
+}
+
+function TalkBody() {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
+  const { height } = useWindowDimensions();
   /*
-    Half the screen.
+    The field is the whole screen, and the words sit in it.
 
-    The horizon is the thing this app is, and at 280 on a tall phone it was a
-    band across the top of a page of cards. Half gives it the weight of a
-    view you are looking at rather than a header you are looking past, and
-    everything below it is still reachable with a thumb.
-
-    Half is where the waterline sits, not where the band ends: the band runs
-    on to 0.64 so the halftone sea has room to fade out under it.
+    The open space above the greeting is the button — "press the sky" — and
+    it is a little over a third of the screen, which puts the greeting where
+    the lab had it and leaves the reply most of the room below.
   */
-  const sky = Math.round(height * 0.64);
+  const sky = Math.round(height * 0.36);
 
-  const scrollY = useSharedValue(0);
-  const onScroll = useAnimatedScrollHandler((event) => {
-    scrollY.value = event.contentOffset.y;
-  });
-  // Fully there by the time you have scrolled a third of the sky away.
-  const recent = useAnimatedStyle(() => ({
-    opacity: Math.min(1, Math.max(0, scrollY.value / (sky * 0.33))),
-  }));
   const { notice, dismissNotice } = useSession();
-  const { state, caption, heard, level, armed, ringSeen, route, problem, activity, next, due, press, say, persona } =
+  const { state, caption, heard, armed, ringSeen, route, problem, next, due, press, say } =
     useAgent();
 
   // Recomputed on every render, and `next` is refreshed each minute, so the
   // count of minutes stays true without a timer of its own.
   const resting = state === 'idle' || state === 'asleep';
   const hello = greeting(next, due);
+
+  /*
+    One screen: the field and everything you talk through — the greeting,
+    the reply and the composer. The record of what happened is not here at
+    all; it is Settings → Logs, somewhere you go to check, because nothing in
+    it is something you need while talking.
+
+    The screen is measured, not taken from the window, so that when the
+    keyboard shortens the view the composer stays on it.
+  */
+  const [viewport, setViewport] = useState(0);
+  const page = viewport || height;
+  const replyRef = useRef<ScrollView>(null);
 
   const [draft, setDraft] = useState('');
   const canListen = capabilities().speech;
@@ -99,204 +108,177 @@ export default function Talk() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: palette.paper }}
+      // Transparent: the field is drawn once behind every tab, by the layout.
+      style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <Animated.ScrollView
+      <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{
-          paddingHorizontal: Space.screenX,
-          paddingBottom: 24,
-        }}
         keyboardShouldPersistTaps="handled"
-        onScroll={onScroll}
-        scrollEventThrottle={16}
+        onLayout={(event) => setViewport(event.nativeEvent.layout.height)}
+        // One page. It only scrolls so the keyboard can push the composer up.
+        scrollEnabled={false}
+        showsVerticalScrollIndicator={false}
       >
-        {/*
-          The sky, full width and starting at the very top of the screen —
-          behind the status bar, not below it. A horizon with a margin either
-          side, or a strip of page above it, is a picture of a horizon.
-          Everything else on this screen keeps its gutter.
-        */}
-        <View style={{ marginHorizontal: -Space.screenX }}>
-          <Horizon
-            state={state}
-            width={width}
-            height={sky}
+        <View style={{ height: page, overflow: 'hidden' }}>
+
+          <Pressable
             onPress={press}
-            sky={persona.sky}
-            level={level}
+            accessibilityRole="button"
+            accessibilityLabel="Talk to Grove"
+            // The whole open field is the button. On a screen you reach for
+            // while walking, a small target in the middle of it would be wrong.
+            style={{ height: sky }}
           />
-        </View>
 
-        {notice ? <Notice text={notice} onDismiss={dismissNotice} /> : null}
-        {problem ? <Notice text={problem} /> : null}
-        {reduced && !notice && !problem ? <Notice text={reduced} tone="info" /> : null}
+          {/*
+            The reply never runs under the composer: this column takes what is
+            left of the page and the reply card shrinks into it, scrolling
+            inside itself past that.
+          */}
+          <View style={{ flex: 1, minHeight: 0, paddingHorizontal: Space.screenX }}>
+            {notice ? <Notice text={notice} onDismiss={dismissNotice} /> : null}
+            {problem ? <Notice text={problem} /> : null}
+            {reduced && !notice && !problem ? <Notice text={reduced} tone="info" /> : null}
 
+            {/*
+              A greeting, not a status word.
 
-        {/*
-          A greeting, not a status word.
-
-          "Ready" is a machine telling you it is available, which is both
-          obvious — it is on your screen — and the least interesting thing it
-          could say. The sky already carries the state: it is flat when
-          nothing is happening and rough when something is. So the word under
-          it is a hello while Grove is idle, and only becomes the state when
-          the state is worth naming.
-        */}
-        <Text
-          style={[
-            Type.state,
-            { color: palette.ink, textAlign: 'center', marginTop: 2, maxWidth: 320, alignSelf: 'center' },
-            // A sentence about your day is read, not glanced at: a size down
-            // from the one-word hello, so two lines still clear the composer.
-            resting && !hello.plain ? { fontSize: 19, lineHeight: 25, letterSpacing: -0.4 } : null,
-          ]}
-        >
-          {resting ? hello.line : STATE_WORD[state]}
-        </Text>
-
-        {resting && hello.plain ? (
-          <Text style={[Type.bodySm, { color: palette.muted, textAlign: 'center', marginTop: 6 }]}>
-            {armed ? 'Press your ring, or the sky.' : 'Press the sky to talk.'}
-          </Text>
-        ) : null}
-
-        {/*
-          What was heard, and what came back, in the body of the page rather
-          than tucked under the horizon.
-
-          Under the wave it was a caption on a picture: small, centred, and
-          competing with the one thing on the screen that is supposed to hold
-          your eye. Down here it is the content, and it can be as long as it
-          needs to be without pushing the sky around.
-        */}
-        {shown ? (
-          <Card style={{ marginTop: 18 }}>
+              "Ready" is a machine telling you it is available, which is both
+              obvious — it is on your screen — and the least interesting thing
+              it could say. The field already carries the state in how fast it
+              moves. So the word under it is a hello while Grove is idle, and
+              only becomes the state when the state is worth naming.
+            */}
             <Text
               style={[
-                Type.body,
-                { color: state === 'listening' || state === 'noting' ? palette.inkSoft : palette.ink },
+                Type.state,
+                { color: ON_FIELD, textAlign: 'center', marginTop: 2, maxWidth: 320, alignSelf: 'center' },
+                // A sentence about your day is read, not glanced at: a size
+                // down from the one-word hello, so two lines still fit.
+                resting && !hello.plain ? { fontSize: 19, lineHeight: 25, letterSpacing: -0.4 } : null,
               ]}
             >
-              {shown}
+              {resting ? hello.line : STATE_WORD[state]}
             </Text>
-          </Card>
-        ) : null}
 
-        {resting && hello.covers ? null : <Now next={next} />}
+            {resting && hello.plain ? (
+              <Text style={[Type.bodySm, { color: ON_FIELD_SOFT, textAlign: 'center', marginTop: 6 }]}>
+                {armed ? 'Press your ring, or the sky.' : 'Press the sky to talk.'}
+              </Text>
+            ) : null}
 
-        {/*
-          The log arrives as you go looking for it.
+            {shown ? (
+              <Card style={{ marginTop: 18, flexShrink: 1, minHeight: 0 }}>
+                <ScrollView
+                  ref={replyRef}
+                  style={{ flexGrow: 0, flexShrink: 1 }}
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator={false}
+                  // While you are talking the newest words are the point, so it
+                  // follows them; a reply is read from its first line.
+                  onContentSizeChange={() => {
+                    if (state === 'listening' || state === 'noting') {
+                      replyRef.current?.scrollToEnd({ animated: false });
+                    }
+                  }}
+                >
+                  <Text
+                    style={[
+                      Type.body,
+                      { color: state === 'listening' || state === 'noting' ? palette.inkSoft : palette.ink },
+                    ]}
+                  >
+                    {shown}
+                  </Text>
+                </ScrollView>
+              </Card>
+            ) : null}
 
-          Nothing on this screen is urgent and the log is the least urgent
-          thing on it — a record you read when you want to check something,
-          not when you open the app. Hidden at rest it keeps the first screen
-          to a sky and a sentence; tied to the scroll it is already there by
-          the time you have travelled far enough to want it, rather than
-          appearing suddenly once you cross a line.
-        */}
-        {activity.length > 0 ? (
-          <Animated.View style={[recent, { marginTop: 32 }]}>
-            <Mono style={{ marginBottom: 10 }}>Recent</Mono>
-            {activity.map((entry) => (
-              <LogRow key={entry.id} entry={entry} />
-            ))}
-          </Animated.View>
-        ) : null}
-      </Animated.ScrollView>
+            {resting && hello.covers ? null : <Now next={next} />}
+          </View>
 
-      {/*
-        The hardware strip rides on the sky rather than pushing it down the
-        page. "Are my glasses on" is a glance, and the answer belongs in the
-        corner you are already looking at, not in a row that costs the horizon
-        forty pixels of height.
-      */}
-      <View
-        pointerEvents="box-none"
-        style={{
-          position: 'absolute',
-          top: insets.top + 6,
-          left: Space.screenX,
-          right: Space.screenX,
-        }}
-      >
-        <Hardware
-          armed={armed}
-          ringSeen={ringSeen}
-          routeName={route.name}
-          external={route.isExternal}
-          mic={route.hasExternalMic}
-        />
-      </View>
+          {/*
+            Shown whenever speech is unavailable, and also when it is — typing
+            is occasionally the right input even on a working build, in a
+            meeting or on a train. It belongs to this page and leaves with it.
+          */}
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'flex-end',
+              gap: 8,
+              paddingTop: 12,
+              paddingHorizontal: Space.screenX,
+              paddingBottom: Math.max(insets.bottom, 12) + 76,
+            }}
+          >
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder={canListen ? 'Or type it' : 'Type to Grove'}
+              placeholderTextColor={palette.muted}
+              multiline
+              onSubmitEditing={send}
+              style={{
+                flex: 1,
+                maxHeight: 110,
+                minHeight: 46,
+                paddingHorizontal: 15,
+                paddingTop: 13,
+                paddingBottom: 13,
+                borderRadius: Radius.control,
+                backgroundColor: palette.raised,
+                borderWidth: 1,
+                borderColor: palette.line,
+                fontFamily: Type.body.fontFamily,
+                fontSize: 14.5,
+                color: palette.ink,
+              }}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Send"
+              onPress={send}
+              disabled={!draft.trim()}
+              style={({ pressed }) => ({
+                width: 46,
+                height: 46,
+                borderRadius: Radius.control,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: palette.mark,
+                opacity: !draft.trim() ? 0.3 : pressed ? 0.8 : 1,
+              })}
+            >
+              <Icon name="send" size={18} color={palette.onMark} />
+            </Pressable>
+          </View>
 
-      {/*
-        Shown whenever speech is unavailable, and also when it is — typing is
-        occasionally the right input even on a working build, in a meeting or
-        on a train.
-      */}
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'flex-end',
-          gap: 8,
-          paddingHorizontal: Space.screenX,
-          paddingBottom: Math.max(insets.bottom, 12) + 76,
-        }}
-      >
-        <TextInput
-          value={draft}
-          onChangeText={setDraft}
-          placeholder={canListen ? 'Or type it' : 'Type to Grove'}
-          placeholderTextColor={palette.muted}
-          multiline
-          onSubmitEditing={send}
-          style={{
-            flex: 1,
-            maxHeight: 110,
-            minHeight: 46,
-            paddingHorizontal: 15,
-            paddingTop: 13,
-            paddingBottom: 13,
-            borderRadius: Radius.control,
-            backgroundColor: palette.raised,
-            borderWidth: 1,
-            borderColor: palette.line,
-            fontFamily: Type.body.fontFamily,
-            fontSize: 14.5,
-            color: palette.ink,
-          }}
-        />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Send"
-          onPress={send}
-          disabled={!draft.trim()}
-          style={({ pressed }) => ({
-            width: 46,
-            height: 46,
-            borderRadius: Radius.control,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: palette.mark,
-            opacity: !draft.trim() ? 0.3 : pressed ? 0.8 : 1,
-          })}
-        >
-          <Icon name="send" size={18} color={palette.raised} />
-        </Pressable>
-      </View>
+          {/*
+            The hardware strip rides on the field rather than pushing it down.
+            "Are my glasses on" is a glance, and the answer belongs in the
+            corner you are already looking at.
+          */}
+          <View
+            pointerEvents="box-none"
+            style={{ position: 'absolute', top: insets.top + 6, left: Space.screenX, right: Space.screenX }}
+          >
+            <Hardware
+              armed={armed}
+              ringSeen={ringSeen}
+              routeName={route.name}
+              external={route.isExternal}
+              mic={route.hasExternalMic}
+            />
+          </View>
+        </View>
+
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-/**
- * One exchange, and what came of it.
- *
- * Collapsed to the two lines that matter — what you said, what happened — and
- * expanding to the rest. This is the only record that anything happened at all:
- * it all took place while you were looking somewhere else, so "did that
- * reminder actually get set" is a question with no other way to answer it.
- */
 /**
  * The only thing on this screen that is there before you speak.
  *
@@ -396,97 +378,6 @@ function Now({ next }: { next: NextUp }) {
 
 function clock(date: Date): string {
   return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-}
-
-function LogRow({ entry }: { entry: ReturnType<typeof useAgent>['activity'][number] }) {
-  const palette = usePalette();
-  const [open, setOpen] = useState(false);
-
-  const tool = entry.tool;
-  const icon = tool ? iconForKey(tool.name) : null;
-  const failed = tool?.state === 'failed' || tool?.state === 'blocked';
-
-  return (
-    <Card style={{ marginBottom: 8, paddingHorizontal: 0, paddingVertical: 0 }}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        accessibilityLabel={`${entry.said}. Tap for detail.`}
-        onPress={() => setOpen((was) => !was)}
-        style={({ pressed }) => ({ padding: 13, opacity: pressed ? 0.7 : 1 })}
-      >
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
-          {icon ? <AppIcon name={icon} size={30} /> : null}
-          <View style={{ flex: 1, gap: 3 }}>
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <Text style={[Type.bodySm, { color: palette.muted, flex: 1 }]} numberOfLines={1}>
-                {entry.said}
-              </Text>
-              <Mono>{when(entry.at)}</Mono>
-            </View>
-            <Text style={[Type.body, { color: palette.ink }]} numberOfLines={open ? undefined : 2}>
-              {tool?.detail ?? entry.replied}
-            </Text>
-          </View>
-        </View>
-
-        {/* A run that failed is the thing you most need to see, so it is on the
-            collapsed card rather than hidden one tap away. */}
-        {tool ? (
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 7,
-              marginTop: 10,
-              paddingTop: 10,
-              borderTopWidth: 1,
-              borderTopColor: palette.line,
-            }}
-          >
-            <Dot tone={failed ? 'alert' : tool.state === 'done' ? 'live' : 'off'} />
-            <Text style={[Type.bodySm, { color: palette.inkSoft, flex: 1 }]}>
-              {tool.name}
-              {tool.state === 'done' ? ' ran' : tool.state === 'running' ? ' running' : ` ${tool.state}`}
-            </Text>
-            <Icon name={open ? 'down' : 'chevron'} size={13} color={palette.muted} />
-          </View>
-        ) : null}
-      </Pressable>
-
-      {open ? (
-        <View
-          style={{
-            paddingHorizontal: 13,
-            paddingBottom: 13,
-            borderTopWidth: 1,
-            borderTopColor: palette.line,
-          }}
-        >
-          <LogLine label="You said">{entry.said}</LogLine>
-          <LogLine label="Grove said">{entry.replied}</LogLine>
-          {tool ? <LogLine label="Ability">{`${tool.name} — ${tool.state}`}</LogLine> : null}
-          {tool?.detail ? <LogLine label="Result">{tool.detail}</LogLine> : null}
-          {tool?.needs?.length ? (
-            <LogLine label="Needed">
-              {tool.needs.join(', ').replace(/-permission/g, ' access')}
-            </LogLine>
-          ) : null}
-          <LogLine label="When">{new Date(entry.at).toLocaleString()}</LogLine>
-        </View>
-      ) : null}
-    </Card>
-  );
-}
-
-function LogLine({ label, children }: { label: string; children: string }) {
-  const palette = usePalette();
-  return (
-    <View style={{ marginTop: 12 }}>
-      <Mono style={{ marginBottom: 3 }}>{label}</Mono>
-      <Text style={[Type.bodySm, { color: palette.ink, lineHeight: 19 }]}>{children}</Text>
-    </View>
-  );
 }
 
 /**
