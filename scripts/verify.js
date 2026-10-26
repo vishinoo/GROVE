@@ -427,6 +427,7 @@ section('Everything about someone\'s life is stored sealed');
     'docs',
     'rapport',    // how they talk
     'rhythms',
+    'troubles',  // what has failed, which quotes what was being done
   ];
   for (const name of SEALED) {
     const source = fs.readFileSync(path.join(ROOT, `src/lib/${name}.ts`), 'utf8');

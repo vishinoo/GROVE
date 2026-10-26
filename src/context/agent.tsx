@@ -57,6 +57,7 @@ import { dueToday, whatMatters, nextUp, type Attention, type NextUp } from '@/li
 import { noteAnswered } from '@/lib/interrupt';
 import { learnWeek, noteTurn } from '@/lib/rhythms';
 import { forgetRapport, notice as noticeRapport } from '@/lib/rapport';
+import { noteTrouble } from '@/lib/troubles';
 import * as struggles from '@/lib/struggles';
 import { afterTurn, consolidateNow } from '@/lib/consolidate';
 import * as transcript from '@/lib/transcript';
@@ -858,6 +859,13 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       needs: ability.needs,
     };
 
+    // An ability that could not do its job is the kind of failure worth
+    // keeping: the spoken line is already gone by the time anyone wonders
+    // whether the calendar has been refusing all week.
+    if (!outcome.ok && outcome.spoken) {
+      void noteTrouble(live.current.uid, outcome.spoken, ability.id);
+    }
+
     if (entryId) {
       const updated = await transcript.attachTool(account, entryId, record);
       if (mounted.current) setActivity(updated);
@@ -1298,6 +1306,9 @@ function shortFailure(text: string): string {
             console.log('[grove:listen] ERROR', message);
             if (!mounted.current) return;
             setProblem(message);
+            // Filed as well as shown. The banner is gone from Talk; this is
+            // what makes "is this happening a lot" answerable later.
+            void noteTrouble(live.current.uid, message, 'listening');
             setCaption(message);
           },
           onEnd: () => {

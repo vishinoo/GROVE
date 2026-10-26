@@ -26,11 +26,17 @@ import * as Updates from 'expo-updates';
 
 import { ConnectionsPanel } from '@/components/connections-panel';
 import { Icon } from '@/components/icon';
-import { Button, Card, Dot, Mono, Notice, Row, Screen, Section } from '@/components/ui';
+import { Button, Card, Dot, Mono, Notice, Peek, Row, Screen, Section } from '@/components/ui';
 import { FIELD_COLOURS, fieldColour } from '@/components/field-shader';
 import { Glass } from '@/components/glass';
 import { Radius, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
+import {
+  forgetTroubles,
+  loadTroubles,
+  whenTrouble,
+  type Trouble,
+} from '@/lib/troubles';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
 import { capabilities, reducedModeReason } from '@/lib/capabilities';
@@ -55,7 +61,23 @@ export default function Settings() {
 
 function SettingsBody() {
   const palette = usePalette();
-  const { user, signOut } = useSession();
+  const { user, uid, signOut } = useSession();
+
+  /*
+    Read once when the screen opens.
+
+    Not live: a list of past failures that rearranged itself while you were
+    reading it would be worse than one a few seconds stale, and the only thing
+    that writes to it is a turn you are not having right now.
+  */
+  const [troubles, setTroubles] = useState<Trouble[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void loadTroubles(uid).then((list) => alive && setTroubles(list));
+    return () => {
+      alive = false;
+    };
+  }, [uid]);
   // Memory moved to Sparks, where the standing instructions already live: a
   // spark and a fact are the same idea from different ends, and keeping the
   // list somewhere you pass anyway beats burying it in Settings.
@@ -455,6 +477,41 @@ function SettingsBody() {
           />
         </Card>
       </Section>
+
+      {/*
+        Five at a time, dated, newest first.
+
+        This sits above the self-check on purpose: the self-check tells you
+        whether a thing works right now, and this tells you what has already
+        failed. Read together they answer "is it me or is it broken", which
+        is the question anyone opens this screen with.
+      */}
+      {troubles.length > 0 ? (
+        <Section label="What has gone wrong">
+          <Peek show={5}>
+            {troubles.map((trouble) => (
+              <Card key={trouble.id} style={{ marginBottom: 8 }}>
+                <Text style={[Type.body, { color: palette.ink }]}>{trouble.what}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                  <Mono style={{ color: palette.muted }}>{whenTrouble(trouble.lastAt)}</Mono>
+                  {trouble.count > 1 ? (
+                    <Mono style={{ color: palette.muted }}>{trouble.count} times</Mono>
+                  ) : null}
+                  {trouble.where ? (
+                    <Mono style={{ color: palette.lineStrong }}>{trouble.where}</Mono>
+                  ) : null}
+                </View>
+              </Card>
+            ))}
+          </Peek>
+          <Button
+            label="Clear these"
+            onPress={() => {
+              void forgetTroubles(uid).then(() => setTroubles([]));
+            }}
+          />
+        </Section>
+      ) : null}
 
       <Section label="Does it all work?">
         <Card>

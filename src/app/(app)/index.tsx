@@ -27,7 +27,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/components/icon';
 import { STATE_WORD } from '@/components/field';
 import { Glass } from '@/components/glass';
-import { Card, Mono, Notice } from '@/components/ui';
+import { Mono, Notice } from '@/components/ui';
 import { Radius, Space, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
@@ -63,7 +63,7 @@ function TalkBody() {
   const sky = Math.round(height * 0.36);
 
   const { notice, dismissNotice } = useSession();
-  const { state, caption, heard, armed, ringSeen, route, problem, next, due, press, say } =
+  const { state, caption, heard, armed, ringSeen, route, next, due, press, say } =
     useAgent();
 
   // Recomputed on every render, and `next` is refreshed each minute, so the
@@ -137,9 +137,21 @@ function TalkBody() {
             inside itself past that.
           */}
           <View style={{ flex: 1, minHeight: 0, paddingHorizontal: Space.screenX }}>
+            {/*
+              No errors here.
+
+              Grove already says what went wrong, out loud, at the moment it
+              matters. A banner repeating it on a screen built to be glanced
+              at was the same news twice, and then it vanished with the next
+              turn — so the one useful question, "is this happening a lot",
+              had no answer anywhere. They are filed with a date now and read
+              in Settings. What stays is the notice about a connection you
+              just changed, and the one explaining why speech is off on this
+              build: neither is a failure, and both are about the screen you
+              are looking at.
+            */}
             {notice ? <Notice text={notice} onDismiss={dismissNotice} /> : null}
-            {problem ? <Notice text={problem} /> : null}
-            {reduced && !notice && !problem ? <Notice text={reduced} tone="info" /> : null}
+            {reduced && !notice ? <Notice text={reduced} tone="info" /> : null}
 
             {/*
               A greeting, not a status word.
@@ -168,8 +180,17 @@ function TalkBody() {
               </Text>
             ) : null}
 
+            {/*
+              Straight on the field, with nothing behind it.
+
+              A card here was a white slab halfway up the sky, and it fought
+              the one thing the screen is: the sentence is the subject, not an
+              object sitting on the subject. Without the box it reads as part
+              of the same surface as the state word above it — which is what
+              it is, the same voice a moment later.
+            */}
             {shown ? (
-              <Card style={{ marginTop: 18, flexShrink: 1, minHeight: 0 }}>
+              <View style={{ marginTop: 16, flexShrink: 1, minHeight: 0 }}>
                 <ScrollView
                   ref={replyRef}
                   style={{ flexGrow: 0, flexShrink: 1 }}
@@ -186,13 +207,23 @@ function TalkBody() {
                   <Text
                     style={[
                       Type.body,
-                      { color: state === 'listening' || state === 'noting' ? palette.inkSoft : palette.ink },
+                      {
+                        // Dimmer while it is still your words being caught,
+                        // full white once it is Grove's answer.
+                        color:
+                          state === 'listening' || state === 'noting'
+                            ? ON_FIELD_SOFT
+                            : ON_FIELD,
+                        textAlign: 'center',
+                        maxWidth: 320,
+                        alignSelf: 'center',
+                      },
                     ]}
                   >
                     {shown}
                   </Text>
                 </ScrollView>
-              </Card>
+              </View>
             ) : null}
 
             {resting && hello.covers ? null : <Now next={next} />}
