@@ -126,6 +126,7 @@ const grove = require(path.join(OUT, 'lib/grove.js'));
 const connections = require(path.join(OUT, 'lib/connections.js'));
 const googleAuth = require(path.join(OUT, 'lib/googleAuth.js'));
 const devicePermissions = require(path.join(OUT, 'lib/devicePermissions.js'));
+const persona = require(path.join(OUT, 'lib/persona.js'));
 
 const ALL = abilities.ABILITIES;
 const byId = new Map(ALL.map((a) => [a.id, a]));
@@ -721,7 +722,9 @@ section('A launch is quiet unless you are about to be late');
 
   // Nothing anywhere reads the memory back as a greeting.
   const screen = fs.readFileSync(path.join(ROOT, 'src/app/(app)/index.tsx'), 'utf8');
-  const hello = screen.slice(screen.indexOf('function greeting('), screen.indexOf('function Now('));
+  // Just the greeting: from its signature to whichever function follows it.
+  const helloAt = screen.indexOf('function greeting(');
+  const hello = screen.slice(helloAt, screen.indexOf('\nfunction ', helloAt + 1));
   check(!/life|entit|memor|fact/i.test(hello), 'the greeting names nothing it remembers');
   check(!/persona|name/i.test(hello), 'and nobody by name');
 }
@@ -822,6 +825,48 @@ section('What it did, and what it still owes');
 
   const brain = fs.readFileSync(path.join(ROOT, 'src/lib/brain.ts'), 'utf8');
   check(/rapportDirective/.test(brain), 'but it still reaches the prompt');
+}
+
+/*
+ * N. A preset reaches the model whole.
+ *
+ * Every built-in manner is written the same way — the character first, the
+ * restraint last — and mannerDirective used to slice them to MANNER_LIMIT,
+ * which is the cap on what someone may TYPE, not on what Grove ships. The cut
+ * landed inside the final sentence of all three, so each preset went to the
+ * model with its own brake removed:
+ *
+ *   jarvis  lost "if they are having a bad day, drop the act entirely"
+ *   alfred  lost "never fawning, never a caricature"
+ *   hal     lost "rudeness is noise; you are simply exact"
+ *
+ * The visible symptom was a serious question answered with a joke, which reads
+ * as a personality problem and was a substring.
+ */
+section('Every preset reaches the model whole');
+{
+  for (const preset of persona.PRESETS) {
+    check(
+      preset.manner.length <= persona.PROMPT_MANNER_MAX,
+      `${preset.key} is not truncated on its way to the prompt`,
+      `${preset.manner.length} characters against a ceiling of ${persona.PROMPT_MANNER_MAX}; ` +
+        'the tail of these is always the restraint, so cutting it ships the character without its brake'
+    );
+    // The directive is what the model actually sees, so assert on that rather
+    // than on the constant feeding it.
+    const said = persona.mannerDirective({ ...persona.DEFAULT_PERSONA, manner: preset.manner });
+    check(
+      said.includes(preset.manner.slice(-40)),
+      `and ${preset.key} keeps its last sentence`
+    );
+  }
+
+  // The one rule that does not come from the user, and must survive any manner.
+  const any = persona.mannerDirective({ ...persona.DEFAULT_PERSONA, manner: 'Be funny.' });
+  check(
+    /how seriously to take/.test(any),
+    'a manner never decides what deserves a straight answer'
+  );
 }
 
 /* ------------------------------------------------------------- verdict */
