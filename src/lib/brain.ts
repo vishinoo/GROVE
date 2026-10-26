@@ -223,9 +223,15 @@ function fedInto(read: RanTool, args: Record<string, string>): boolean {
  * change, and a model answering them from training is guessing with
  * confidence. Personal data is not here — the calendar and inbox have their
  * own tools, and a question about them has already called one.
+ *
+ * Timetables were the gap. "When's the next bus" matched nothing here — the
+ * list had `next game` and not `next bus` — so it never reached a search, and
+ * the model answered a question about this afternoon from training. Transit,
+ * flights, departures, "near me" and "in stock" are all the same shape: an
+ * answer that was true once and is being asked about now.
  */
 const FRESH =
-  /\b(?:today|tonight|yesterday|last night|this (?:week|weekend|morning|evening)|latest|recent(?:ly)?|currently|right now|at the moment|score|scores|won|win|beat|lose|lost|last game|next game|game|match|playoffs?|standings|markets?|stocks?|shares|price|prices|how much (?:is|are|does)|cost|open|opens|close|closes|opening hours|hours|news|headlines?|happened|release date|come out|coming out|election|results?)\b/i;
+  /\b(?:today|tonight|yesterday|last night|this (?:week|weekend|morning|evening)|latest|recent(?:ly)?|currently|right now|at the moment|score|scores|won|win|beat|lose|lost|last game|next game|game|match|playoffs?|standings|markets?|stocks?|shares|price|prices|how much (?:is|are|does)|cost|open|opens|close|closes|opening hours|hours|news|headlines?|happened|release date|come out|coming out|election|results?|bus|buses|train|trains|subway|metro|tram|ferry|flights?|transit|timetable|departures?|arrivals?|delayed|delays|near me|nearby|around here|in stock|availability|showtimes?|tickets?)\b/i;
 
 const PERSONAL = /\b(?:my (?:calendar|schedule|inbox|email|emails|mail|reminders|notes|contacts|day|week)|remind me|what(?:'s| is) on)\b/i;
 

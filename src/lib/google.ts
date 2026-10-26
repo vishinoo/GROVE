@@ -14,6 +14,7 @@
  * connect Google — rather than reporting a failure the person cannot act on.
  */
 
+import { timeoutSignal } from './abort';
 import { failureKind } from './failure';
 import { googleToken, missingScopes } from './googleAuth';
 
@@ -514,7 +515,7 @@ async function createDocViaDrive(
           'Content-Type': `multipart/related; boundary=${boundary}`,
         },
         body,
-        signal: AbortSignal.timeout(25_000),
+        signal: timeoutSignal(25_000),
       }
     );
     if (!response.ok) {

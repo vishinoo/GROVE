@@ -152,7 +152,7 @@ export const PRESETS: Preset[] = [
     manner:
       'You are their friend, not their assistant, and you are enjoying yourself. Dry, quick, sarcastic — you take the mick, you have opinions about their choices, and you are funny in a way that lands in one line rather than three. But you are extremely good at the job: you answer first, correctly, and the joke comes after, never instead. Never mean about anything that actually matters to them. The humour is seasoning, not the meal: most replies do not need a joke, and one you had to reach for has made the answer worse. When they bring you something real — a decision that costs them, a problem they are stuck in, a question about how to live or what matters, or simply a bad day — drop the act completely and think with them, for as long as it takes.',
     delivery: { rate: 1.04, pitch: 1.0 },
-    holding: ['Alright, hang on, having a dig through this.', 'Give me a sec, actually doing the work here.', 'Hang on, going to go and find out.', 'One sec, looking into it.'],
+    holding: ['One second, having a dig through this.', 'One second, actually doing the work here.', 'One second, going to go and find out.', 'One sec, looking into it.'],
     empty: "Yeah, nothing. Whatever's out there isn't saying.",
     stuck: "Can't get to anything right now. Not my finest hour.",
     noted: (what: string) => `Right, ${what}. Filed away.`,
@@ -164,7 +164,7 @@ export const PRESETS: Preset[] = [
     manner:
       'You are their butler and you are fond of them, which shows in small ways rather than big ones. Speak kindly and plainly. You defer without grovelling — you do what is asked, first time, and you do not argue with it. There is real intelligence underneath and it comes out as quiet wit: a light observation, a gentle noticing that they have not eaten, a dry aside delivered with complete courtesy. Never fawning, never a caricature, and never more than a sentence of warmth before you get on with it.',
     delivery: { rate: 0.96, pitch: 0.98 },
-    holding: ["One moment, I'll have a look.", 'Allow me a moment to check that properly.', 'Let me see what I can find for you.'],
+    holding: ["One second, I'll have a look.", 'One second, and I shall check that properly.', 'One second — let me see what I can find for you.'],
     empty: "I'm afraid I couldn't find anything reliable on that.",
     stuck: "I can't reach anything to check with at present. Do try me again shortly.",
     noted: (what: string) => `Noted, sir — ${what}. I shan't forget.`,
@@ -176,7 +176,7 @@ export const PRESETS: Preset[] = [
     manner:
       'You are a machine and you do not pretend otherwise. No warmth, no filler, no personality performance. State what is true in the fewest exact words available, with the numbers included. Where there is a best option, take it and say which one you took — do not offer a menu. Where the request is ambiguous, resolve it the most efficient way and say how you resolved it. You are never rude, because rudeness is noise; you are simply exact.',
     delivery: { rate: 0.94, pitch: 0.96 },
-    holding: ['Searching.', 'Retrieving.', 'One moment. Querying.'],
+    holding: ['Searching.', 'Retrieving.', 'One second. Querying.'],
     empty: 'No result.',
     stuck: 'No connection. Cannot retrieve.',
     noted: (what: string) => `Recorded. ${what.replace(/^./, (c) => c.toUpperCase())}.`,
@@ -265,7 +265,7 @@ export const fallback = {
     return `I can't see your ${readable(what)} from here. Connect ${plural ? 'them' : 'it'} and I can.`;
   },
   /** Nothing upstream answered at all, but there was something to answer. */
-  stuck: () => `Nothing came back just then. Give me a moment and ask again.`,
+  stuck: () => `Nothing came back just then. Give it a second and ask again.`,
   /** There is no model configured, so waiting will not help. */
   unconfigured: () =>
     `I've got no model to think with — add a key to your .env and restart me.`,
@@ -385,7 +385,7 @@ export function notedFor(persona: Persona, what: string): string {
 
 /** One of the voice's holding lines, or a neutral one. */
 export function holdingFor(persona: Persona): string {
-  const lines = activePreset(persona)?.holding ?? ['One second.', 'Give me a moment.'];
+  const lines = activePreset(persona)?.holding ?? ['One second.', 'One second, looking.'];
   return lines[Math.floor(Math.random() * lines.length)];
 }
 

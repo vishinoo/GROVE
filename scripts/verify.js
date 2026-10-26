@@ -429,6 +429,7 @@ section('Everything about someone\'s life is stored sealed');
     'rapport',    // how they talk
     'rhythms',
     'troubles',  // what has failed, which quotes what was being done
+    'offers',    // what they said yes and no to, which is a record of refusals
   ];
   for (const name of SEALED) {
     const source = fs.readFileSync(path.join(ROOT, `src/lib/${name}.ts`), 'utf8');
@@ -459,7 +460,7 @@ section('Everything about someone\'s life is stored sealed');
   // Start again has to mean it. It cleared three stores and left five.
   const agent = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
   const wipe = agent.slice(agent.indexOf('const startAgain'), agent.indexOf('const forgetFact'));
-  for (const gone of ['forgetAllLife', 'forgetAllStruggles', 'forgetRapport']) {
+  for (const gone of ['forgetAllLife', 'forgetAllStruggles', 'forgetRapport', 'forgetOffers']) {
     check(wipe.includes(gone), `starting again clears ${gone.replace(/^forget(All)?/, '').toLowerCase()}`);
   }
 }
@@ -901,6 +902,230 @@ section('A reply is finished before the microphone opens');
   check(
     /stopSpeaking\(\)/.test(barge) && !/SPEECH_TAIL_MS/.test(barge),
     'and a press interrupts without waiting'
+  );
+}
+
+/**
+ * Nothing calls a web API that React Native does not have.
+ *
+ * `AbortSignal.timeout(ms)` type-checks, works in node, works in the browser
+ * the web export builds for, and throws on a phone: React Native replaces the
+ * global `AbortSignal` with the `abort-controller` package's version, which
+ * has no static helpers. The throw happens inside the caller's `try`, so it
+ * wears the costume of a network failure — weather answered "the weather
+ * service is not answering" on every call, on full signal, for months, and no
+ * retry could help because the retry threw in the same place.
+ *
+ * This is the only check that can see it. Every other gate ran somewhere the
+ * call works. `src/lib/abort.ts` has the replacement, and the ban is on the
+ * call rather than on the file so that a new one cannot be added quietly.
+ */
+section('No web API React Native does not have');
+{
+  const BANNED = [
+    // Each: what is missing on a phone, and what to use instead.
+    { call: 'AbortSignal.timeout(', use: 'timeoutSignal() from lib/abort' },
+    { call: 'AbortSignal.any(', use: 'an AbortController of your own' },
+  ];
+  const files = [];
+  (function walk(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.tsx?$/.test(entry.name)) files.push(full);
+    }
+  })(path.join(ROOT, 'src'));
+
+  for (const { call, use } of BANNED) {
+    const guilty = files.filter((file) => {
+      // Comments talk about it on purpose — abort.ts is the explanation.
+      return fs
+        .readFileSync(file, 'utf8')
+        .split('\n')
+        .some((line) => line.includes(call) && !/^\s*(?:\/\/|\*|\/\*)/.test(line));
+    });
+    check(
+      guilty.length === 0,
+      `nothing calls ${call}) — use ${use}` +
+        (guilty.length ? ` (found in ${guilty.map((f) => path.relative(ROOT, f)).join(', ')})` : '')
+    );
+  }
+
+  // And the replacement does what it replaces: falls back where the native
+  // helper is missing, which is the whole point of it existing.
+  const abort = fs.readFileSync(path.join(ROOT, 'src/lib/abort.ts'), 'utf8');
+  check(/new AbortController\(\)/.test(abort), 'abort.ts falls back to an AbortController');
+  check(/setTimeout\(/.test(abort), 'and arms a timer of its own');
+}
+
+/*
+ * Offers, and the restraint that is the whole feature.
+ *
+ * Grove noticing it could do something next — pull a book up on Amazon, write
+ * the training plan being described — is one word away from the thing that
+ * ruins it, which is an assistant that ends every reply trying to sell you
+ * something. So the checks here are mostly about silence, and the first one
+ * is the one that matters: ordinary conversation must produce nothing at all.
+ *
+ * Run against the real module rather than a copy of its regexes, because a
+ * copy would drift and the only question anybody has about this feature is
+ * how often it actually fires.
+ */
+section('An offer is rare, named, and never a confirmation');
+{
+  const offers = require(path.join(OUT, 'lib/offers.js'));
+  const { abilityById } = require(path.join(OUT, 'lib/abilities.js'));
+
+  // Twenty-two turns of the app being used normally. Not one may fire.
+  const ORDINARY = [
+    ['how are you doing today', "Not bad. What's on?"],
+    ['what time is my lecture', 'MARK 312 at eleven, in Tory.'],
+    ["what's the weather like", "Four degrees, dry. You'll want a jacket."],
+    ['put some music on', 'Putting something on.'],
+    ['remind me to call mum at six', "Done, I'll nudge you at six."],
+    ['what do you think about moving to Toronto', 'Depends what you want out of the next two years.'],
+    ['i had a rough day honestly', "That's fair. What happened?"],
+    ['what is the capital of France', 'Paris.'],
+    ['do i have any emails from priya', 'One, about Thursday.'],
+    ['whats my first thing tomorrow', 'Gym at seven, then MARK 312 at eleven.'],
+    ['how did the oilers do last night', 'They beat Calgary four to two.'],
+    ['can you summarise my inbox', 'Three worth looking at.'],
+    ['what should i have for dinner', 'You said you had chicken in. Do that.'],
+    ['im feeling pretty anxious about the interview', "Understandable. What's the bit you're dreading?"],
+    ['whats the meaning of life', "Depends who's asking and why."],
+    ['email priya im running 3 minutes late', "Here's the email to Priya."],
+    ['move my 2 - 3 pm meeting to thursday', 'Moved to Thursday.'],
+    ['who is sarah again', 'Sarah Okonkwo, your project partner on the finance case.'],
+    ['set a timer for ten minutes', 'Ten minutes, starting now.'],
+    ['i think i want to switch majors', "That's a big one. What's pulling you?"],
+    ['whats on at the cinema tonight', 'Dune Part Two, and a couple of others.'],
+    ['tell me a joke about physics', 'A neutron walks into a bar.'],
+    // The near misses, which are the ones worth keeping forever. Each of
+    // these fired at some point while this was being written.
+    ['im running 3 minutes late', "I'll let them know."],
+    ['i need to run to the shop before it shuts', 'It closes at nine.'],
+    ['i went to the gym today actually', 'Good. How was it?'],
+    ['how did the market do today', 'The S&P finished up about half a percent.'],
+    ['whats the stock price of apple', 'Around 230 dollars.'],
+    ['i read a great book last year, already read it twice', 'Which one?'],
+    ['im on the train to Calgary', 'How long is that?'],
+    ['running out of time on this assignment', 'When is it due?'],
+  ];
+  const noisy = ORDINARY.filter(([said, replied]) => offers.offerFor({ said, replied, ran: [] }));
+  check(
+    noisy.length === 0,
+    `nothing is offered on ${ORDINARY.length} ordinary turns`,
+    noisy.length ? `fired on: ${noisy.map(([s]) => JSON.stringify(s)).join(', ')}` : ''
+  );
+
+  // And the cases it exists for, which must each produce the right kind.
+  const REAL = [
+    ['can you recommend a book on probability', 'Murphy’s Probabilistic Machine Learning is the standard one.', 'buy'],
+    ['ive been trying to get back into the gym three days a week', 'Three days is the right number to start on.', 'plan'],
+    ['im thinking about putting some money into energy stocks', 'Worth knowing what you are buying first.', 'research'],
+    ['i need to start studying for my midterm next week', 'How many chapters is it?', 'plan'],
+    ['should i put some of my savings into an index fund', 'Low cost and boring is the whole pitch.', 'research'],
+  ];
+  for (const [said, replied, kind] of REAL) {
+    const made = offers.offerFor({ said, replied, ran: [] });
+    check(Boolean(made) && made.kind === kind, `"${said.slice(0, 34)}..." offers a ${kind}`);
+  }
+
+  // Every offer names an ability that exists. A connection unlocking an id
+  // that had been renamed is a fault this file was written for.
+  for (const [said, replied] of REAL) {
+    const made = offers.offerFor({ said, replied, ran: [] });
+    if (!made) continue;
+    check(Boolean(abilityById(made.ability)), `the ${made.kind} offer names a real ability (${made.ability})`);
+    // It must also be able to say what it would do. An offer with no
+    // arguments is "shall I help with that?", which is the thing this is not.
+    check(
+      Object.values(made.args).some((value) => String(value).trim().length > 0),
+      `and the ${made.kind} offer carries arguments`
+    );
+  }
+
+  /*
+   * The money rule, applied to the one new way of reaching a paid app.
+   *
+   * An offer is a question Grove thought of by itself. If one could carry a
+   * confirmation, then a yes to Grove's own idea would be the thing that
+   * sends or buys — and the whole point of the confirmation is that only the
+   * person can supply it. So no offer may set `confirmed`, and the branch
+   * that runs an accepted offer may not set it either.
+   */
+  for (const [said, replied] of REAL) {
+    const made = offers.offerFor({ said, replied, ran: [] });
+    if (!made) continue;
+    check(!('confirmed' in made.args), `the ${made.kind} offer carries no confirmation`);
+  }
+  const agentSource = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
+  const accept = agentSource.slice(
+    agentSource.indexOf('An answer to something Grove offered to do'),
+    agentSource.indexOf("utter('Righto.')")
+  );
+  check(accept.length > 400, 'the accept branch is where it is expected to be');
+  check(
+    !/confirmed:/.test(accept),
+    'accepting an offer never supplies the confirmation itself',
+    'an ability that asks for a press must still ask for it'
+  );
+  check(
+    /needsConfirming/.test(accept),
+    'and an accepted offer re-arms the confirmation when the ability wants one'
+  );
+
+  // Never offered twice, and never what the turn just did.
+  const twice = offers.offerFor({ said: REAL[1][0], replied: REAL[1][1], ran: ['doc.create'] });
+  check(twice === null, 'nothing is offered for work the turn already did');
+
+  /*
+   * A kind you refuse stops being offered.
+   *
+   * The direct answer to "I don't want this on every message": saying no
+   * twice to one sort of offer switches that sort off and leaves the others
+   * alone. Checked on the real function, through the real counts.
+   */
+  check(offers.welcome({}, 'buy'), 'a kind never offered gets a go');
+  check(offers.welcome({ buy: { yes: 0, no: 1 } }, 'buy'), 'one no is not a verdict');
+  check(!offers.welcome({ buy: { yes: 0, no: 2 } }, 'buy'), 'two nos and that kind is done');
+  check(
+    offers.welcome({ plan: { yes: 0, no: 2 } }, 'buy'),
+    'and refusing one kind leaves the others alone'
+  );
+  check(
+    offers.welcome({ buy: { yes: 2, no: 3 } }, 'buy'),
+    'a kind that sometimes lands keeps being offered'
+  );
+  check(
+    !offers.welcome({ buy: { yes: 1, no: 9 } }, 'buy'),
+    'one that almost never lands does not'
+  );
+
+  /*
+   * And the caps are small.
+   *
+   * Read from the source rather than exercised, because exercising them needs
+   * the vault and this file does not stub a Keychain — the same reason the
+   * interruption budget above is checked through its pure half. Measured
+   * end to end at the time of writing: sixty turns with six offer-worthy
+   * moments in them produced two offers, one per thirty turns.
+   */
+  const source = fs.readFileSync(path.join(ROOT, 'src/lib/offers.ts'), 'utf8');
+  const perDay = Number(source.match(/const PER_DAY = (\d+);/)?.[1]);
+  check(perDay >= 1 && perDay <= 3, `at most ${perDay} offers in a day`);
+  const between = Number(source.match(/const TURNS_BETWEEN = (\d+);/)?.[1]);
+  check(between >= 4, `and ${between} turns of ordinary conversation between them`);
+  // Prose about it is the point — the file explains why it must not. Code
+  // that sets it is the fault.
+  const settles = source
+    .split('\n')
+    .filter((line) => !/^\s*(?:\/\/|\*|\/\*)/.test(line))
+    .some((line) => /\bconfirmed\s*:/.test(line));
+  check(
+    !settles,
+    'offers.ts never sets a confirmation',
+    'it may propose work; it may never be the thing that approves it'
   );
 }
 

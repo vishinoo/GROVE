@@ -55,6 +55,7 @@ import {
   updateLife,
 } from './life';
 import { localTime, shortDate, windowFor, within as inWindow } from './when';
+import { timeoutSignal } from './abort';
 import * as google from './google';
 import { isGoogleConnected } from './googleAuth';
 import {
@@ -279,7 +280,10 @@ const BRIEF: Ability = {
   run: async (args) => {
     const topic = (args.topic || '').trim();
     if (!topic) return { ok: false, spoken: "I need to know what to brief you on." };
-    const summary = (await lightBrief(topic))?.trim();
+    // The town rides along, because half of what people search for out loud is
+    // local — the next bus, what is open, what a ticket costs — and a search
+    // with no place in it answers about somewhere else entirely.
+    const summary = (await lightBrief(topic, await homeTown()))?.trim();
     return summary
       ? { ok: true, spoken: summary }
       : { ok: false, spoken: `Nothing came back for ${topic}.` };
@@ -799,6 +803,10 @@ const MAIL_SEND: Ability = {
   needs: ['email'],
   args: {
     to: { type: 'string', what: 'who it goes to — a name is fine, it will be looked up', required: true },
+    register: {
+      type: 'string',
+      what: '"casual" only if they said to keep it casual or chatty; leave empty otherwise and it is written professionally',
+    },
     confirmed: { type: 'string', what: 'never set this; the turn sets it after the person says yes' },
     subject: { type: 'string', what: 'the subject line' },
     body: {
@@ -813,10 +821,45 @@ const MAIL_SEND: Ability = {
     const body = (args.body || '').trim();
     if (!asked || !body) return { ok: false, spoken: 'Who to, and saying what?' };
 
+    /*
+      An answer is not a message.
+
+      "No" is a complete instruction for a reply, because the thread says what
+      is being refused. For an email that arrives on its own it is nothing at
+      all — and handed it, `lightEmail` wrote a whole plausible message around
+      it: a greeting, a reason, a sign-off, none of which anybody said. It may
+      polish and it may not invent, and out of one word the whole thing is
+      invention. The recipient cannot tell the difference, and the person who
+      dictated it is listening rather than reading.
+
+      The test is whether the body is *only* an answer — a yes, a no, a thanks
+      — and not whether it is short. Length was the first version of this and
+      it was wrong: "running late" is two words and says everything it needs
+      to, while "yeah definitely sounds good" is four and says nothing a
+      stranger could read. A bare acknowledgement is the shape that has
+      nothing in it.
+
+      Asked rather than guessed, and the answer arrives through `pending` as
+      the next sentence. One exchange against an email somebody else reads.
+
+      Only for a new email: `mail.reply` has the message in hand, which is
+      precisely what makes a short gist meaningful there.
+    */
+    const bare =
+      /^(?:(?:yes|yeah|yep|yup|no|nope|nah|ok|okay|sure|fine|right|great|thanks|thank you|ta|cheers|got it|sounds good|will do|agreed|definitely|absolutely|maybe|perhaps)\b[\s,.!-]*)+$/i;
+    if (bare.test(body)) {
+      return {
+        ok: false,
+        spoken: `"${body}" to what? Tell me what to say and I'll write it up.`,
+      };
+    }
+
     // A name is what people say; an address is what mail needs. Looked up in
     // your contacts rather than demanded, because you obviously know who Priya
     // is and being asked for her address is the friction this exists to remove.
     let to = asked;
+    /** The contact's own name, when it is not the word that was said. */
+    let matched = '';
     // "Send it to me" is the one address that needs no lookup and cannot be
     // guessed wrong. mail.summarise already understood it; sending did not, so
     // the same words worked in one place and failed in the other.
@@ -874,7 +917,22 @@ const MAIL_SEND: Ability = {
           detail: matches.map((m) => `${m.name} — ${m.email}`).join('\n'),
         };
       }
+      /*
+        Read back as the person it matched, not as the word that was said.
+
+        One contact matching is not the same as the right contact matching.
+        "Email Sam" against a contact book holding Samantha Okafor matched
+        once, cleanly, and the confirmation then said "here's the email to
+        Sam" — so the one detail that would have caught it, her actual name,
+        was the one thing left out of the sentence being agreed to.
+
+        Only when the match is not what they said. Saying "the email to Priya
+        Shah" when they said Priya is noise, and noise in a confirmation is
+        how people stop listening to confirmations.
+      */
       to = matches[0].email;
+      const full = (matches[0].name || '').trim();
+      if (full && full.toLowerCase() !== asked.toLowerCase()) matched = full;
     }
 
     // Dictated by voice, sent to a name Grove looked up, and unrecallable. One
@@ -896,9 +954,12 @@ const MAIL_SEND: Ability = {
     // Their words become an email here, in one call that does nothing else —
     // not in the turn's prompt, where the same instruction was followed one
     // time and ignored the next. A note to themselves is left as they said it.
+    const tone = await registerFor(`${body} ${args.register ?? ''}`, matched || asked);
     const draft =
       (args.draft || '').trim() ||
-      (toSelf ? body : ((await lightEmail({ gist: body, to: asked })) ?? body));
+      (toSelf
+        ? body
+        : ((await lightEmail({ gist: body, to: asked, register: tone.register })) ?? body));
 
     if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
       // Short mail is read out whole, because the words are what is being
@@ -909,7 +970,14 @@ const MAIL_SEND: Ability = {
       return {
         ok: false,
         needsConfirming: true,
-        spoken: `Here's the email to ${toSelf ? 'yourself' : asked}: ${readBack(draft)}`,
+        spoken: `Here's the ${tone.register === 'casual' ? 'casual ' : ''}email to ${
+          toSelf ? 'yourself' : matched ? `${asked} — ${matched}` : asked
+        }: ${readBack(draft)}${
+          // Named only when Grove picked it rather than being told, and only
+          // for a new recipient — a line offering to change the tone on every
+          // email is the nagging this is meant to avoid.
+          tone.guessed && !toSelf ? ` Press to send, or say casual and I'll loosen it.` : ''
+        }`,
         detail: `To ${to}\nSubject: ${subject}\n\n${toSelf ? draft : await signed(draft)}`,
         confirmArgs: { ...args, draft },
       };
@@ -1328,6 +1396,60 @@ const MAIL_DIGEST: Ability = {
   },
 };
 
+/**
+ * How an email to this person should read, and who decided.
+ *
+ * Professional is the default and stays the default, because it is the only
+ * one that is never actively wrong: a friend reading a composed sentence
+ * thinks nothing of it, where a professor reading "yeah no worries" notices.
+ * So casual is never guessed — it is either said in the sentence, or it was
+ * said once before about this person and remembered.
+ *
+ * Remembered per person, under `tone:<name>`, which is the same bargain the
+ * home town makes: tell Grove once and it stops asking. Being asked how
+ * formal to be with your own flatmate every single time is the friction this
+ * exists to remove, and asking nobody ever is how a stiff email goes to a
+ * mate.
+ */
+async function registerFor(
+  said: string,
+  who: string
+): Promise<{ register: 'professional' | 'casual'; guessed: boolean }> {
+  if (/\b(?:casual|chatty|informal|relaxed|friendly|loose|keep it light)\b/i.test(said)) {
+    return { register: 'casual', guessed: false };
+  }
+  if (/\b(?:formal|professional|proper)\b/i.test(said)) {
+    return { register: 'professional', guessed: false };
+  }
+  // A title is the one thing in a name that settles it outright.
+  if (/\b(?:prof|professor|dr|doctor|mr|mrs|ms|sir|madam|rev|hon)\b\.?/i.test(who)) {
+    return { register: 'professional', guessed: false };
+  }
+  try {
+    const facts = await loadFacts(CURRENT_UID);
+    const key = `tone:${who.trim().toLowerCase()}`;
+    const told = facts.find((f) => f.key === key);
+    if (told) {
+      return { register: /casual/i.test(told.value) ? 'casual' : 'professional', guessed: false };
+    }
+  } catch {
+    // No memory to read is not a reason to refuse to write an email.
+  }
+  return { register: 'professional', guessed: true };
+}
+
+/** Remembers how formal to be with someone, so it is settled once. */
+export async function rememberTone(who: string, register: 'professional' | 'casual'): Promise<void> {
+  const name = who.trim();
+  if (!name) return;
+  await remember(CURRENT_UID, {
+    key: `tone:${name.toLowerCase()}`,
+    value: `emails to ${name} should be ${register}`,
+    source: 'told',
+    subject: name,
+  });
+}
+
 const MAIL_REPLY: Ability = {
   id: 'mail.reply',
   name: 'Reply',
@@ -1342,6 +1464,10 @@ const MAIL_REPLY: Ability = {
       type: 'string',
       what: 'what they want to say back, in their own words — the app writes it up as a proper reply',
       required: true,
+    },
+    register: {
+      type: 'string',
+      what: '"casual" only if they said to keep it casual or chatty; leave empty otherwise and it is written professionally',
     },
     confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
   },
@@ -1419,12 +1545,14 @@ const MAIL_REPLY: Ability = {
     // A reply is sent mail, and sent mail is not taken back. mail.send always
     // asked; this did not, which was survivable while a keyword gate stood in
     // front of it and is not now that the model chooses what runs.
+    const tone = await registerFor(`${body} ${args.register ?? ''}`, saySender(target.from));
     const draft =
       (args.draft || '').trim() ||
       ((await lightEmail({
         gist: body,
         to: saySender(target.from),
         replyingTo: `${target.subject}: ${target.snippet}`,
+        register: tone.register,
       })) ?? body);
 
     if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
@@ -1870,7 +1998,7 @@ let guessedCity: string | null | undefined;
 async function cityFromNetwork(): Promise<string | null> {
   if (guessedCity !== undefined) return guessedCity;
   try {
-    const response = await fetch('https://ipwho.is/', { signal: AbortSignal.timeout(4000) });
+    const response = await fetch('https://ipwho.is/', { signal: timeoutSignal(4000) });
     const data = (await response.json()) as { success?: boolean; city?: string };
     guessedCity = data.success !== false && data.city ? data.city : null;
   } catch {
@@ -2107,7 +2235,7 @@ let lastWeather: { at: number; place: string; spoken: string; detail: string } |
 async function fetchTwice(url: string, timeoutMs = 8000): Promise<Response | null> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+      const response = await fetch(url, { signal: timeoutSignal(timeoutMs) });
       if (response.ok) return response;
     } catch {
       // Falls through to the retry, then to null.
@@ -2983,7 +3111,7 @@ const MAC_TASK: Ability = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${MAC_TOKEN}` },
         body: JSON.stringify({ task }),
-        signal: AbortSignal.timeout(240_000),
+        signal: timeoutSignal(240_000),
       });
       if (response.status === 401) {
         return { ok: false, spoken: 'The Mac refused my token. It needs setting up again.' };

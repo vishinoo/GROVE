@@ -695,13 +695,40 @@ TITLE: <two or three words, only for a standing job>`;
  * the direct path, the endpoint is no longer the missing piece — there is
  * nothing left to build it out of but a prompt.
  */
-export async function lightBrief(topic: string): Promise<string | null> {
+export async function lightBrief(topic: string, place?: string | null): Promise<string | null> {
+  /*
+    A search needs a where and a when, and had neither.
+  
+    "When's the next bus" is not a question anybody can answer without both,
+    and the model was being handed the five words on their own — so it
+    searched, found a timetable for somewhere, and read out a departure. The
+    same gap made "what's open", "is it busy" and "how much is a ticket"
+    unreliable in the same way: the search was fine, the question was
+    incomplete.
+  
+    Both are free. The clock is local arithmetic and the town is a fact
+    already in memory, so this costs nothing per turn and is the single
+    largest thing separating a consistent answer from a plausible one.
+  */
+  const now = new Date();
+  const today = now.toLocaleDateString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  });
+  const clock = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const where = (place ?? '').trim();
+
   const text = await complete(
     // A question, not only a briefing. Written for "what happened in the
     // markets", this prompt answered "where can I get this book, is it free"
     // with a summary of news about the book — the search was right and the
     // answer was to a different question.
-    'You answer a question out loud, using web search. Answer exactly what was asked, in one to three sentences, leading with the answer: the specific names, numbers, places, prices, dates, or where to get something and whether it is free. For news or markets, lead with what changed, with numbers. Spoken aloud, so no markdown, no URLs, no bullet points, no preamble. If search genuinely finds nothing, say so plainly rather than guessing.',
+    'You answer a question out loud, using web search. Answer exactly what was asked, in one to three sentences, leading with the answer: the specific names, numbers, places, prices, dates, or where to get something and whether it is free. For news or markets, lead with what changed, with numbers. Spoken aloud, so no markdown, no URLs, no bullet points, no preamble. If search genuinely finds nothing, say so plainly rather than guessing.\n\n' +
+      `It is ${clock} on ${today}, timezone ${zone}. That is the real current date and time — search as of now, and never answer a question about today from what you already knew.` +
+      (where
+        ? `\nThey are in ${where}. Anything local — transport, departures, opening times, shops, what is nearby, prices in a shop — means there unless they name somewhere else. Search for that place by name; do not answer about a different city with the same question.`
+        : '\nYou do not know where they are. If the answer depends on where they are standing, say which place you looked up rather than implying it is theirs.') +
+      '\nFor a timetable, a departure or an opening time, say the actual time and name the day. "Soon" is not an answer.',
     [{ role: 'user', content: topic }],
     false,
     false,
@@ -1120,14 +1147,32 @@ export async function lightEmail(input: {
   gist: string;
   to: string;
   replyingTo?: string;
+  /**
+   * How it should read.
+   *
+   * Professional is the default and the right one: it is what "write this up
+   * properly" means, and it is never actively wrong — a friend reading a
+   * composed sentence thinks nothing of it, where a professor reading "yeah
+   * no worries" notices. Casual is set when Grove actually knows the
+   * recipient is a friend, or when the person said so.
+   */
+  register?: 'professional' | 'casual';
 }): Promise<string | null> {
   const gist = input.gist.trim();
   if (!gist) return null;
+  const casual = input.register === 'casual';
   const text = await complete(
     `You turn what someone wants to say into the email they would send. Output only the email body.
+${
+  casual
+    ? '- This one goes to someone they know well. Keep it light and natural — how they would actually text them, tidied up into sentences. No formality, no "I hope this finds you well", no stiffness.'
+    : '- Keep it professional and clean: composed, courteous, the way a capable adult writes at work. Never stiff or padded.'
+}
 
 - Start with "Hi" and how the recipient is addressed: their first name, or title and surname for a professor, doctor or anyone formal ("Hi Professor Chen,").
-- Then their point in one to three short sentences: clear, polite, professional, warm but not gushing. Rephrase it the way a composed professional would write it — never copy their casual words as they are.
+- Then their point in one to three short sentences, clear and warm but not gushing.${
+  casual ? '' : ' Rephrase it the way a composed professional would write it — never copy their casual words as they are.'
+}
 - Answer what the other person actually asked. A one-word "no" to a request for work is "I won't be able to get that to you by Friday"; a "no" to an invitation is a polite decline; a "yes" to a question is an answer to that question. Read their message and reply to it.
 - Never add a refusal, an excuse or a "but" clause they did not say. "Thursday works better" is "Thursday would work better for me, if that suits" — not "I can't do Friday, but Thursday works".
 - A question becomes a proper sentence: "what time?" is "Could you let me know what time suits you?"

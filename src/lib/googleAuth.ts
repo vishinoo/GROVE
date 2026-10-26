@@ -29,6 +29,8 @@
 
 import * as SecureStore from 'expo-secure-store';
 
+import { timeoutSignal } from './abort';
+
 /* eslint-disable @typescript-eslint/no-require-imports */
 
 /**
@@ -227,7 +229,7 @@ export async function missingScopes(job: string): Promise<string[] | null> {
       if (!token) return null;
       const response = await fetch(
         `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`,
-        { signal: AbortSignal.timeout(8000) }
+        { signal: timeoutSignal(8000) }
       );
       if (!response.ok) return null;
       granted = ((await response.json()) as { scope?: string }).scope ?? '';

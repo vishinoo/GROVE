@@ -144,7 +144,9 @@ single user.
   only ever fired if Grove happened to be open, which is not a schedule. The
   gates stay because they are how the harness asks whether a sentence can reach
   a tool at all.
-- `src/lib/persona.ts` — the manner is user-authored and goes into a system
+- `src/lib/persona.ts` — holding lines all say "one second" rather than "give
+  me a moment", because the second one is a request and the first is an
+  estimate. The manner is user-authored and goes into a system
   prompt, so `mannerDirective` wraps it to quarantine it as style-only. It is a
   guard, not a guarantee; keep the framing when editing.
 - `src/lib/lightModel.ts` — every model call, and the only file that knows a
@@ -385,6 +387,59 @@ above the exempt line skips the cap, the spacing and the learned bar, and
 `npm run verify` proves the highest bar anyone could teach it still sits below
 what a leave-by scores.
 
+## What Grove offers to do next
+
+`src/lib/offers.ts`. Talking about a book and then having to say "order that on
+Amazon" is a sentence the conversation already contained. So Grove may add
+**one line** to the end of a reply offering the thing it could do next — pull
+the book up on Amazon, write the training plan being described, put a research
+note together on the shares being weighed up.
+
+This is one word away from the thing that ruins it, so the file is mostly
+restraint and **the restraint is the feature**. Same shape as `interrupt.ts`,
+for the same reason.
+
+- **Rules, not a model.** It runs on every finished turn; a call to decide
+  whether to make an offer would cost more than the answer it is attached to.
+  `offerFor` is pure and synchronous and says no to nearly every turn, so the
+  ledger is only read when there is something to weigh. An ordinary
+  conversation touches no storage and makes no model call.
+- **An offer must be able to name what it would do.** Every offer carries a
+  real ability id and the real arguments it would run with, assembled from
+  words that were actually said. No arguments, no offer — which is what stops
+  this becoming "shall I help with that?". It is also why a vague conversation
+  gets nothing: there is nothing to name.
+- **A keyword is not an intention.** "I'm running three minutes late" offered a
+  training plan, which is the whole feature discrediting itself in one
+  sentence. A plan now needs a practice *and* a design on it ("trying to",
+  "three times a week"); a research note needs the money to be theirs, so "how
+  did the market do today" gets its answer and nothing else. `run` is out of
+  the vocabulary altogether — a third of its uses are about being late, and
+  pairing it with an intention does not save it ("I need to run to the shop").
+  "I want to start running" is therefore missed, which is the right way round
+  to be wrong.
+- **A kind you refuse stops being offered.** Per kind, not globally: two nos to
+  research notes switches research notes off and leaves the rest alone. Nobody
+  should have to say no to the same sort of thing three times, or find a
+  setting for it. Only an outright yes or no teaches anything — answering with
+  a different sentence is moving on, not refusing.
+- **Caps over judgement.** One per turn, two a day, six turns apart, never the
+  same kind twice in a day, never the same subject twice at all. Measured end
+  to end: sixty turns with six offer-worthy moments in them produced **two
+  offers, one per thirty turns**.
+
+**An offer is not a confirmation**, and that is the whole safety argument. It
+cannot be answered with a press, and saying yes only ever *starts* the
+ability — `shop.order` then asks for its own press exactly as before. Nothing
+in `offers.ts` may set `confirmed`, nor may the branch that runs an accepted
+one, and `npm run verify` checks both: an offer that carried a confirmation
+would be a way to reach a paid app with one yes to a question Grove thought of
+by itself.
+
+The spacing count is held in memory rather than written down. It only has to
+hold within a conversation, and putting it on disk would have meant a read on
+every single turn.
+
 ## Constraints, in one read
 
 `src/lib/constraints.ts`. Money was never about money: the useful abstraction
@@ -576,6 +631,30 @@ model, which invents names. Texts are left in your own voice.
   carried to the confirmation in `confirmArgs`; a confirmation that re-drafted
   would send words nobody approved. `draft` is on the list the model can never
   set, alongside `confirmed`.
+- **It drafts; it asks only when asking is the shorter path.** "Email Priya I'm
+  running three minutes late" is a complete instruction and is written up and
+  read back, no questions. The one thing that is refused is a *bare answer* —
+  "no", "yeah", "thanks" — because a reply has a thread that says what is being
+  answered and a new email has nothing, and out of one word the whole message
+  is invention. The first version of this gate counted words and was wrong:
+  "running late" is two words and says everything, "yeah definitely sounds
+  good" is four and says nothing a stranger could read. It is about shape, not
+  length.
+- **Professional unless Grove actually knows otherwise.** `registerFor` never
+  guesses casual: a title in the name settles it, a `tone:<name>` fact settles
+  it, and otherwise it is written professionally — the only register that is
+  never actively wrong. When Grove picked it rather than being told, the
+  read-back says so and offers the alternative in the same breath, and
+  **"casual" is an answer to the confirmation in its own right**: it re-drafts,
+  reads the new one back, and remembers the choice for that person, so this is
+  a question asked once rather than a decision made every time. It re-drafts
+  rather than sending, because the press must always send the words that were
+  actually read out.
+- **A loose contact match is read back by the name it matched.** One contact
+  matching is not the same as the right one matching: "email Sam" against a
+  contact book holding Samantha Okafor matched once, cleanly, and the
+  confirmation said "here's the email to Sam" — leaving out the one detail
+  that would have caught it.
 - **Addresses come from the inbox too.** Someone who emailed you has an address
   even when they are not in contacts. And a reply with nothing to reply to
   becomes a new email to the person named, through the same read-back and press.
@@ -614,6 +693,29 @@ kind `tsc` and `npm run verify` cannot see:
 
 ## Failing honestly
 
+- **A web API React Native does not have is not a network failure, and looks
+  exactly like one.** `AbortSignal.timeout(ms)` type-checks, runs in node, runs
+  in the browser the web export builds for, and throws on a phone: React Native
+  replaces the global `AbortSignal` with the `abort-controller` package's
+  version (`setUpXHR.js`, `polyfillGlobal('AbortSignal', ...)`), which has no
+  static helpers. The throw lands inside the caller's own `try`, so the failure
+  is instant, total, and wears the costume of a connectivity problem. **The
+  weather answered "the weather service is not answering" on every call, on
+  full signal, with Open-Meteo up** — and no retry could help, because the
+  retry threw in the same place. It also silently disabled the Drive fallback
+  for documents and the scope check behind Connections. `src/lib/abort.ts` has
+  `timeoutSignal()`, which uses the native helper where it exists; `npm run
+  verify` bans the call outright, because that is the only gate that does not
+  run somewhere it works.
+- **Nothing framework-shaped reaches the Talk screen.** The recogniser reports
+  its failures as "The operation couldn't be completed. (OSStatus error
+  560557684.)", and that was going straight to the caption. `failure.ts` now
+  sorts machine text from a sentence — `isOpaque` tests for the shapes a
+  framework produces and a person never does — and `plainFailure` says what is
+  true of the kind instead. The raw text still goes to `troubles.ts`, where a
+  number *is* the useful part. A recogniser error is filed and **not** replaced
+  with a friendlier line, because `onEnd` already retries and the only honest
+  sentence is said by the path that has run out of retries.
 - **A thrown error is not "offline" unless it says so.** `failure.ts` sorts
   timeouts, real network failures and everything else. React Native rejects an
   abort with a DOMException that is not always an `Error`, and
@@ -639,6 +741,15 @@ kind `tsc` and `npm run verify` cannot see:
   still answered "how did the Oilers do" from training. `needsFreshFacts` sends
   a question about scores, markets, prices, hours or news through web search
   when the model tried to answer without it.
+- **A search needs a where and a when, and had neither.** "When's the next bus"
+  matched nothing in `needsFreshFacts` — the list had `next game` and not
+  `next bus` — so it never reached a search at all, and the model answered a
+  question about this afternoon out of training. Transit, flights, departures,
+  "near me" and "in stock" are the same shape and are in the gate now. And
+  `lightBrief` is handed the clock, the timezone and the town: a timetable, an
+  opening time or a price is not answerable without both, and both are free —
+  local arithmetic and a fact already in memory. That one line is the largest
+  thing separating a consistent answer from a plausible one.
 - **Sums are done in `calc.ts`**, not by the model, which said 15% of 240 was
   thirty. The exact answer is handed over as a fact.
 - **The phrasing step is bounded.** Once a tool has answered, the model gets

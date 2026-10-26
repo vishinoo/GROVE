@@ -38,6 +38,8 @@ import { capabilities } from '@/lib/capabilities';
 import {
   runAbility,
   setCurrentAccount,
+  rememberTone,
+  abilityById,
   type Ability,
 } from '@/lib/abilities';
 import { askGrove, detectActIntent, newTurn, type Turn, type TurnTool } from '@/lib/grove';
@@ -59,6 +61,16 @@ import { noteAnswered } from '@/lib/interrupt';
 import { learnWeek, noteTurn } from '@/lib/rhythms';
 import { forgetRapport, notice as noticeRapport } from '@/lib/rapport';
 import { noteTrouble } from '@/lib/troubles';
+import {
+  answered as answeredOffer,
+  forgetOffers,
+  made as offerMade,
+  offerFor,
+  worthOffering,
+  TURNS_BETWEEN,
+  type Offer,
+} from '@/lib/offers';
+import { plainFailure } from '@/lib/failure';
 import * as struggles from '@/lib/struggles';
 import { afterTurn, consolidateNow } from '@/lib/consolidate';
 import * as transcript from '@/lib/transcript';
@@ -422,11 +434,43 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     at: number;
   } | null>(null);
 
+  /**
+   * An offer Grove made at the end of the last reply, waiting on a yes.
+   *
+   * Kept apart from `awaitingYes` on purpose, and the difference is the whole
+   * safety argument for the feature. A confirmation is the last gate in front
+   * of something irreversible, and a press answers it. An offer is a question
+   * Grove thought of by itself, and saying yes to one only ever *starts* the
+   * ability — which then asks for its own confirmation if it has one. So an
+   * offer cannot be answered with a press, and nothing here ever sets
+   * `confirmed`. See offers.ts.
+   */
+  const offered = useRef<(Offer & { at: number }) | null>(null);
+
+  /**
+   * Turns of plain conversation since the last offer.
+   *
+   * Starts full, so the first one Grove notices is allowed. Held here rather
+   * than written down because spacing only has to hold inside a conversation,
+   * and reading it off disk would have put a storage read on every turn.
+   */
+  const turnsSinceOffer = useRef(TURNS_BETWEEN);
+
   /** Set while a first press is waiting to see whether a second follows. */
   const yesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** How long a confirmation stays live. Long enough to think, short enough to forget. */
   const CONFIRM_WINDOW_MS = 25_000;
+
+  /**
+   * How long an offer stays answerable.
+   *
+   * Longer than a confirmation, because there is nothing armed: a confirmation
+   * left live is a booby trap, since the next press is meant for something
+   * else, and an offer cannot be answered by a press at all. Short enough
+   * that "yeah" two minutes later is a reply to whatever was said since.
+   */
+  const OFFER_WINDOW_MS = 90_000;
   /** How long to wait for a second press before treating the first as a yes. */
   const SECOND_PRESS_MS = 700;
   /**
@@ -548,6 +592,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     history.current = [];
     lastVolunteered.current = null;
     attention.current = { said: new Set<string>() };
+    offered.current = null;
+    turnsSinceOffer.current = TURNS_BETWEEN;
     turnSeq.current += 1;
     setCaption('');
     setHeard('');
@@ -557,6 +603,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       life.forgetAllLife(account),
       struggles.forgetAllStruggles(account),
       forgetRapport(account),
+      // Including what it has learned about which offers are welcome. That is
+      // a record of someone's refusals, and starting again means it goes too.
+      forgetOffers(account),
     ]);
     if (!mounted.current) return;
     setActivity(entries);
@@ -674,9 +723,99 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         utter('Cancelled.');
         return;
       }
+      // Changing the tone, which is neither a yes nor a no — see redraftTone.
+      // Only mail has a tone, and only mail accepts this.
+      const toned =
+        /^\s*(?:(?:make|keep) it |more |be |a bit )?(casual|chatty|informal|friendly|relaxed|formal|professional|proper)\b/i.exec(
+          asked
+        );
+      if (toned && holding.ability.id.startsWith('mail.')) {
+        clearTimeout(holdTimer);
+        awaitingYes.current = null;
+        if (!fresh) {
+          utter('That one timed out. Ask me again.');
+          return;
+        }
+        await redraftTone(
+          holding,
+          /casual|chatty|informal|friendly|relaxed/i.test(toned[1]) ? 'casual' : 'professional'
+        );
+        return;
+      }
       // Anything else means they moved on, and a confirmation nobody answered
       // must not survive into a later turn.
       awaitingYes.current = null;
+    }
+
+    /*
+      An answer to something Grove offered to do.
+
+      Cleared whatever the answer is, so an offer captures exactly one reply
+      and never lingers into a later turn — the same rule as a confirmation
+      and for the same reason.
+
+      Only an outright yes or no teaches anything. Someone who answers an
+      offer with a different sentence has not refused it, they have moved on,
+      and counting that as a refusal would switch a whole kind off for a
+      conversation that simply went somewhere else.
+    */
+    const proposed = offered.current;
+    offered.current = null;
+    if (proposed && Date.now() - proposed.at <= OFFER_WINDOW_MS) {
+      const yes =
+        /^\s*(?:yes|yeah|yep|yup|sure|ok(?:ay)?|go on|go ahead|do it|please(?: do)?|sounds good|that would be good|why not|definitely|alright)\s*[.!]?\s*$/i.test(
+          asked
+        );
+      const no =
+        /^\s*(?:no|nope|nah|no thanks|no thank you|not now|not right now|later|maybe later|don'?t|i'?m good|it'?s fine|leave it)\s*[.!]?\s*$/i.test(
+          asked
+        );
+      if (yes) {
+        clearTimeout(holdTimer);
+        void answeredOffer(account, proposed.kind, true);
+        const doing = abilityById(proposed.ability);
+        if (!doing) {
+          // An offer naming an ability that no longer exists. verify checks
+          // for this, so it should be unreachable — and saying so is better
+          // than a press that does nothing.
+          utter("I offered that and now I can't find it. Ask me directly?");
+          return;
+        }
+        running.current = true;
+        setState('working');
+        /*
+          Run from the beginning, with nothing filled in that the person did
+          not give. In particular never `confirmed` — an ability that asks for
+          a press still asks for it, so a yes to Grove's own question can
+          never be the thing that sends, books or buys. That is the rule the
+          whole feature is built around.
+        */
+        const slow = doing.slow === true;
+        if (slow) utter(holdingFor(voice), false, true);
+        const outcome = await runAbility(doing, proposed.args);
+        running.current = false;
+        if (!mine()) return;
+        if (outcome.needsConfirming) {
+          awaitingYes.current = { ability: doing, args: outcome.confirmArgs ?? proposed.args, at: Date.now() };
+        }
+        if (outcome.ok && !doing.reads) doneChime();
+        history.current = [...history.current, newTurn('user', text), newTurn('assistant', outcome.spoken)].slice(-24);
+        setCaption(outcome.spoken);
+        await whenQuiet();
+        if (!mine()) return;
+        utter(outcome.ok ? outcome.spoken : shortFailure(outcome.spoken), false, false, () => {
+          if (awaitingYes.current) awaitingYes.current.at = Date.now();
+        });
+        return;
+      }
+      if (no) {
+        clearTimeout(holdTimer);
+        // Counted, and this is the count that switches the kind off. Nobody
+        // should have to say no to the same sort of offer three times.
+        void answeredOffer(account, proposed.kind, false);
+        utter('Righto.');
+        return;
+      }
     }
 
     // An answer to Grove's own question runs the ability that asked it.
@@ -717,7 +856,15 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       reply = await askGrove(history.current, asked, { persona: voice, facts: known });
     } catch (error) {
       clearTimeout(holdTimer);
-      const message = error instanceof Error ? error.message : fallback.stuck();
+      // Through plainFailure, because `error.message` here is whatever threw —
+      // and a thrown message is as likely to be a framework code as a
+      // sentence. The raw text is filed; what is said is in words.
+      const message = plainFailure(error, fallback.stuck());
+      void noteTrouble(
+        live.current.uid,
+        error instanceof Error ? error.message : String(error),
+        'thinking'
+      );
       if (!mounted.current) return;
       setCaption(message);
       utter(message);
@@ -771,7 +918,24 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
      *     shape of failure this app can least afford.
      */
     const holdsReply = Boolean(reply.ability) && !reply.ability?.slow;
-    if (!reply.holdForTool && !holdsReply) utter(reply.text, Boolean(reply.expectsReply));
+    if (!reply.holdForTool && !holdsReply) {
+      /*
+        One sentence added to the end, sometimes.
+
+        The microphone has to open after it, because an offer is a question
+        with something waiting on the answer — which is the only thing that
+        has ever been allowed to open it (see `utter`). That is also the
+        honest version of the cost: an offer spends a listening window, and
+        the window shuts itself in silence.
+      */
+      const offer = await considerOffer(text, reply.text, []);
+      if (!mine()) return;
+      utter(
+        offer ? `${reply.text} ${offer.say}` : reply.text,
+        offer ? true : Boolean(reply.expectsReply)
+      );
+      if (offer) offerSpoken(offer);
+    }
 
     // Anything worth remembering was pulled locally, by keyword, from what was
     // said — never inferred by a model and stored where you cannot see it.
@@ -1017,8 +1181,21 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // to settle, and anything queued behind the turn — a song waiting for the
     // last word — still has to happen, so this does not return early.
     if (!mine()) return;
-    if (heard) utter(heard, pending.current !== null || outcome.listenAfter === true);
-    else setState(restingState());
+    if (heard) {
+      // Not after a failure, and not after something that is still waiting on
+      // an answer. A thing that just went wrong followed by Grove proposing a
+      // different piece of work is the worst version of this feature.
+      const offer =
+        outcome.ok && pending.current === null && outcome.listenAfter !== true
+          ? await considerOffer(text, heard, [ability.id])
+          : null;
+      if (!mine()) return;
+      utter(
+        offer ? `${heard} ${offer.say}` : heard,
+        offer ? true : pending.current !== null || outcome.listenAfter === true
+      );
+      if (offer) offerSpoken(offer);
+    } else setState(restingState());
 
     // The song starts when the sentence ends. Anything else means a few seconds
     // of music, an interruption, and a track that has lost its opening.
@@ -1351,10 +1528,23 @@ function shortFailure(text: string): string {
             console.log('[grove:listen] ERROR', message);
             if (!mounted.current) return;
             setProblem(message);
-            // Filed as well as shown. The banner is gone from Talk; this is
-            // what makes "is this happening a lot" answerable later.
+            /*
+              Filed, never shown.
+
+              The recogniser reports its failures as framework text — "The
+              operation couldn't be completed. (OSStatus error 560557684.)" —
+              and that was going straight to the caption, so a code appeared
+              on the one screen in the app with no room for anything that is
+              not a sentence Grove would say.
+
+              It is not replaced with a friendlier sentence either, because
+              there is nothing worth saying: `onEnd` below already hands the
+              audio graph back and tries again, and the only honest line —
+              "I couldn't open the microphone" — is said by the path that has
+              actually run out of retries. Until then the last reply stays on
+              screen, which is true, and the chimes say what happened.
+            */
             void noteTrouble(live.current.uid, message, 'listening');
-            setCaption(message);
           },
           onEnd: () => {
             clearSilence();
@@ -1466,6 +1656,102 @@ function shortFailure(text: string): string {
    * rather than by three implementations agreeing with each other.
    */
   /** Do the thing that was waiting on a yes. */
+  /**
+   * A tone, said instead of a yes.
+   *
+   * The confirmation reads the draft out and then waits, and the one thing
+   * people want to change at that moment is how it sounds — a mate getting a
+   * composed three-sentence paragraph, or a professor getting something too
+   * loose. Having to cancel, re-dictate the whole request and listen to a
+   * second draft is a lot of work for a word.
+   *
+   * So "casual" is an answer to the confirmation in its own right. It
+   * re-drafts and reads the new one back, rather than sending: the press
+   * always sends the words that were actually read out, which is the rule the
+   * whole confirmation exists to keep.
+   *
+   * And it is remembered for that person, so this is a question asked once
+   * rather than a decision made every time — the same bargain as the home
+   * town. See `registerFor` in abilities.ts.
+   */
+  const redraftTone = useCallback(
+    async (
+      waiting: { ability: Ability; args: Record<string, string> },
+      register: 'professional' | 'casual'
+    ) => {
+      setState('working');
+      // `draft` cleared, so it is actually written again rather than re-read.
+      const args = { ...waiting.args, draft: '', register };
+      const outcome = await runAbility(waiting.ability, args);
+      if (!mounted.current) return;
+
+      const who = (waiting.args.to ?? '').trim();
+      if (who) void rememberTone(who, register);
+
+      if (outcome.needsConfirming) {
+        awaitingYes.current = {
+          ability: waiting.ability,
+          args: outcome.confirmArgs ?? args,
+          at: Date.now(),
+        };
+      }
+      history.current = [...history.current, newTurn('assistant', outcome.spoken)].slice(-24);
+      setCaption(outcome.spoken);
+      await whenQuiet();
+      if (!mounted.current) return;
+      // The clock starts when the reading stops, not when it starts: a long
+      // draft takes most of the window to read out, and a confirmation that
+      // expired while being read is a press that does nothing.
+      utter(outcome.ok ? outcome.spoken : shortFailure(outcome.spoken), false, false, () => {
+        if (awaitingYes.current) awaitingYes.current.at = Date.now();
+      });
+    },
+    // setState, utter and whenQuiet are all stable — useCallback with no deps
+    // of their own — so listing them would change nothing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
+  /**
+   * Whether this finished turn ends with something Grove offers to do.
+   *
+   * Cheap by construction: `offerFor` is pure and synchronous and says no to
+   * nearly every turn, so the ledger is only read when there is actually
+   * something to weigh. An ordinary conversation touches no storage and makes
+   * no model call, which is what lets this run on every single reply.
+   */
+  const considerOffer = useCallback(
+    async (said: string, replied: string, ran: string[]): Promise<Offer | null> => {
+      // Never stacked on something already waiting on the person. A question
+      // and an offer in the same breath are two things to answer at once, and
+      // an offer on top of an armed confirmation is worse than that — the
+      // next yes would be ambiguous about which one it meant.
+      if (pending.current || awaitingYes.current) return null;
+      const candidate = offerFor({ said, replied, ran });
+      if (!candidate) {
+        turnsSinceOffer.current += 1;
+        return null;
+      }
+      const verdict = await worthOffering(live.current.uid, candidate, turnsSinceOffer.current);
+      if (!verdict.offer) {
+        turnsSinceOffer.current += 1;
+        return null;
+      }
+      return verdict.chosen;
+    },
+    []
+  );
+
+  /** Charged once the words are actually out, never before. */
+  const offerSpoken = useCallback((offer: Offer) => {
+    // The clock starts when Grove stops talking, for the same reason the
+    // confirmation's does: a window that began while the sentence was still
+    // being read is shorter than it says it is.
+    offered.current = { ...offer, at: Date.now() };
+    turnsSinceOffer.current = 0;
+    void offerMade(live.current.uid, offer);
+  }, []);
+
   const confirmNow = useCallback(async () => {
     const waiting = awaitingYes.current;
     awaitingYes.current = null;
