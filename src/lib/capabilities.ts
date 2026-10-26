@@ -15,7 +15,7 @@
 
 import { Platform } from 'react-native';
 
-export type Capability = 'speech' | 'remote' | 'haptics' | 'calendar' | 'canvas';
+export type Capability = 'speech' | 'remote' | 'haptics' | 'calendar' | 'canvas' | 'awake';
 
 export type CapabilityReport = {
   /** On-device speech recognition — the ear. */
@@ -31,6 +31,12 @@ export type CapabilityReport = {
    * as missing. The web draws the field with WebGL and does not need it.
    */
   canvas: boolean;
+  /**
+   * Keeping the screen on while Grove is open. Without it the phone locks a
+   * minute into a conversation, since talking is not touching. Never listed
+   * as missing: the phone locking is the ordinary behaviour, not a fault.
+   */
+  awake: boolean;
   /**
    * True only when every part of the always-on story is present. When false,
    * Grove still works — you type instead of talking, and the phone speaks the
@@ -82,11 +88,13 @@ export function capabilities(): CapabilityReport {
   const canvas =
     Platform.OS === 'web' || probe(() => require('@shopify/react-native-skia').Skia.RuntimeEffect);
 
+  const awake = probe(() => require('expo-keep-awake').activateKeepAwakeAsync);
+
   const missing: string[] = [];
   if (!speech) missing.push('speech recognition');
   if (!remote && Platform.OS === 'ios') missing.push('the ring trigger');
 
-  cached = { speech, remote, haptics, calendar, canvas, full: speech && remote, missing };
+  cached = { speech, remote, haptics, calendar, canvas, awake, full: speech && remote, missing };
   return cached;
 }
 /* eslint-enable @typescript-eslint/no-require-imports */

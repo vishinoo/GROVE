@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Field, useField } from '@/components/field';
 import { Icon, type IconName } from '@/components/icon';
 import { useAgent } from '@/context/agent';
+import { capabilities } from '@/lib/capabilities';
 import { rememberIntro } from '@/lib/consolidate';
 import { takeIntro } from '@/lib/firstRun';
 import { Elevation, Fonts, Radius } from '@/constants/theme';
@@ -67,6 +68,23 @@ function OnTheField() {
   const { uid } = useSession();
   const { width, height } = useWindowDimensions();
   const field = useField(state, persona, level);
+
+  /*
+    The screen stays on while Grove is open.
+
+    iOS locks the phone after a minute without a touch, and talking to Grove
+    is not touching it — so the screen went dark mid-conversation, as if the
+    app had stopped. Held only while this layout is mounted and the app is in
+    front: iOS drops it by itself when Grove goes to the background, and the
+    ring keeps working on a locked phone regardless (see AGENTS.md).
+  */
+  useEffect(() => {
+    if (!capabilities().awake) return;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const keep = require('expo-keep-awake') as typeof import('expo-keep-awake');
+    void keep.activateKeepAwakeAsync('grove').catch(() => undefined);
+    return () => void keep.deactivateKeepAwake('grove').catch(() => undefined);
+  }, []);
 
   // What someone wrote in the intro before there was an account to keep it in.
   useEffect(() => {
