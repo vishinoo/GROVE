@@ -9,6 +9,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Field, useField } from '@/components/field';
 import { Icon, type IconName } from '@/components/icon';
 import { useAgent } from '@/context/agent';
+import { rememberIntro } from '@/lib/consolidate';
+import { takeIntro } from '@/lib/firstRun';
 import { Elevation, Fonts, Radius } from '@/constants/theme';
 import { useSession } from '@/context/session';
 import { usePalette } from '@/hooks/use-palette';
@@ -47,7 +49,8 @@ const TABS: { name: string; label: string; icon: IconName }[] = [
 
 export default function AppLayout() {
   const { status } = useSession();
-  if (status === 'signed-out') return <Redirect href="/login" />;
+  // Signing out goes back through the intro, which ends on the login screen.
+  if (status === 'signed-out') return <Redirect href="/onboarding" />;
   return <OnTheField />;
 }
 
@@ -61,8 +64,16 @@ export default function AppLayout() {
  */
 function OnTheField() {
   const { state, persona, level } = useAgent();
+  const { uid } = useSession();
   const { width, height } = useWindowDimensions();
   const field = useField(state, persona, level);
+
+  // What someone wrote in the intro before there was an account to keep it in.
+  useEffect(() => {
+    if (!uid || uid === 'anon') return;
+    const intro = takeIntro();
+    if (intro) void rememberIntro(uid, intro).catch(() => undefined);
+  }, [uid]);
 
   return (
     <View style={{ flex: 1, backgroundColor: '#0B0C12' }}>

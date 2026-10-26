@@ -869,6 +869,41 @@ section('Every preset reaches the model whole');
   );
 }
 
+/*
+ * N. The reply finishes before the microphone opens.
+ *
+ * `Speech.speak`'s onDone reports that the last buffer is queued, not that the
+ * sound has left the speaker, and starting the recogniser takes the audio
+ * route. Opening the microphone the instant speech "ended" clipped the last
+ * word of every reply with the thing listening for the next one.
+ *
+ * The distinction this guards is the interesting half: a reply that ends on
+ * its own waits for the tail, and a press does not. A press means "stop
+ * talking and listen to me now", and making that wait would be a button that
+ * does nothing for half a second.
+ */
+section('A reply is finished before the microphone opens');
+{
+  const agent = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
+
+  const tail = agent.match(/const SPEECH_TAIL_MS = (\d+);/);
+  check(Boolean(tail) && Number(tail[1]) > 0, 'there is a gap between speaking and listening');
+
+  // The automatic window, opened when a reply ended by itself.
+  const after = agent.slice(agent.indexOf('The tail has to finish'), agent.indexOf('The tail has to finish') + 1600);
+  check(
+    /SPEECH_TAIL_MS/.test(after) && /beginListening/.test(after),
+    'a reply that ends on its own waits for the tail'
+  );
+
+  // Barge-in, which must not.
+  const barge = agent.slice(agent.indexOf('// Barge-in.'), agent.indexOf('// Barge-in.') + 260);
+  check(
+    /stopSpeaking\(\)/.test(barge) && !/SPEECH_TAIL_MS/.test(barge),
+    'and a press interrupts without waiting'
+  );
+}
+
 /* ------------------------------------------------------------- verdict */
 
 console.log(

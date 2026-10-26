@@ -29,6 +29,7 @@
  *   spoken when it arrives.
  */
 
+import { fillDemoMemory } from '@/lib/demoMemory';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
@@ -99,6 +100,20 @@ const SILENCE_TIMEOUT_MS = 5000;
  * stingy is the thing it was built to fix, which is reaching for the ring
  * again to say one more sentence.
  */
+/**
+ * The gap between a sentence being finished and the microphone opening.
+ *
+ * `Speech.speak`'s onDone fires when the synthesiser has queued its last
+ * buffer, which on iOS is before the sound has actually left the speaker.
+ * Starting the recogniser takes the audio route, so without this pause the
+ * end of every reply was clipped by the thing listening for the next one.
+ *
+ * Tunable, and worth tuning on a device: too short and words are lost, too
+ * long and the reply feels like it ends twice. It is spent inside a window
+ * measured in seconds, so erring long is cheap.
+ */
+const SPEECH_TAIL_MS = 500;
+
 const GRACE_MS = 4500;
 const ANSWER_MS = 12_000;
 
@@ -170,6 +185,8 @@ type AgentValue = {
   next: NextUp;
   /** A reminder due today, read only when access was already granted. */
   due: string | null;
+  /** Demo only: fills memory with what is known about the author. See demoMemory.ts. */
+  fillDemo: () => Promise<void>;
 
   /** Things they said they did not understand, hardest first. */
   struggles: struggles.Struggle[];
@@ -548,6 +565,16 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     setStuck([]);
     setNext(null);
     setDue(null);
+  }, []);
+
+  const fillDemo = useCallback(async () => {
+    const account = live.current.uid;
+    if (!account || account === 'anon') return;
+    await fillDemoMemory(account);
+    const [f, l] = await Promise.all([memory.loadFacts(account), life.loadLife(account)]);
+    if (!mounted.current) return;
+    setFacts(f);
+    setLifeMemory(l);
   }, []);
 
   const forgetFact = useCallback(async (id: string) => {
@@ -1144,16 +1171,34 @@ function shortFailure(text: string): string {
           because Grove has just asked for something and thinking takes longer
           than breathing.
         */
-        if (!running.current) {
-          void beginListening(false, false, {
-            window: listenAfter ? ANSWER_MS : GRACE_MS,
-            quiet: !listenAfter,
-          });
-          return;
-        }
-        // And even within the same turn, only speaking becomes resting. If
-        // anything downstream has already moved on, it keeps its state.
-        setState((current) => (current === 'speaking' ? restingState() : current));
+        /*
+          The tail has to finish before the microphone opens.
+
+          `onDone` is the synthesiser saying it has queued its last buffer,
+          not the sound saying it has left the speaker, and opening the
+          recogniser takes the audio route — so the last word of every reply
+          was being cut off by the thing listening for the next one. The gap
+          costs nothing: the window that follows is seconds long, and a reply
+          you can actually hear the end of is the point of saying it.
+
+          Still "speaking" while it drains, because it audibly is. Dropping to
+          Ready and then opening the mic a moment later would flicker through
+          a state that was never true.
+        */
+        const window = listenAfter ? ANSWER_MS : GRACE_MS;
+        setTimeout(() => {
+          if (!mounted.current) return;
+          // A newer press or a newer line owns the app now, and owns the
+          // state with it.
+          if (turn !== turnSeq.current || isSpeaking()) return;
+          if (!running.current) {
+            void beginListening(false, false, { window, quiet: !listenAfter });
+            return;
+          }
+          // And even within the same turn, only speaking becomes resting. If
+          // anything downstream has already moved on, it keeps its state.
+          setState((current) => (current === 'speaking' ? restingState() : current));
+        }, SPEECH_TAIL_MS);
       },
     });
     // beginListening is declared below and is stable: its own deps are exchange
@@ -1708,6 +1753,7 @@ function shortFailure(text: string): string {
       forgetEverything,
       next,
       due,
+      fillDemo,
       struggles: stuck,
       gotStruggle,
       forgetStruggle,
@@ -1737,6 +1783,7 @@ function shortFailure(text: string): string {
       forgetEverything,
       next,
       due,
+      fillDemo,
       stuck,
       gotStruggle,
       forgetStruggle,

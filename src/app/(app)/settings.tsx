@@ -81,7 +81,8 @@ function SettingsBody() {
   // Memory moved to Sparks, where the standing instructions already live: a
   // spark and a fact are the same idea from different ends, and keeping the
   // list somewhere you pass anyway beats burying it in Settings.
-  const { persona, updatePersona, armed, route, activity } = useAgent();
+  const { persona, updatePersona, armed, route, activity, fillDemo } = useAgent();
+  const [demo, setDemo] = useState<'idle' | 'filling' | 'done'>('idle');
   const colour = fieldColour(persona.sky);
   const gradientId = `grove-name-${colour.key}`;
   /** Not one of the presets, so the box is theirs and worth showing. */
@@ -512,6 +513,32 @@ function SettingsBody() {
           />
         </Section>
       ) : null}
+
+      {/* Demo only, like signing out into the intro: take it out before
+          Grove is in anyone else's hands. See demoMemory.ts. */}
+      <Section label="Demo">
+        <Card style={{ paddingVertical: 2 }}>
+          <Row
+            label="Fill memory for a demo"
+            hint={
+              demo === 'done'
+                ? 'Done. Open Memory to see it.'
+                : 'What Grove knows about you, so the map is not empty.'
+            }
+            value={demo === 'filling' ? '…' : demo === 'done' ? 'Filled' : undefined}
+            onPress={
+              demo === 'filling'
+                ? undefined
+                : () => {
+                    setDemo('filling');
+                    void fillDemo()
+                      .then(() => setDemo('done'))
+                      .catch(() => setDemo('idle'));
+                  }
+            }
+          />
+        </Card>
+      </Section>
 
       <Section label="Does it all work?">
         <Card>

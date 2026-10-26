@@ -41,3 +41,37 @@ export async function hasSeenOnboarding(): Promise<boolean> {
 export async function markOnboardingSeen(): Promise<void> {
   await AsyncStorage.setItem(SEEN_KEY, '1').catch(() => {});
 }
+
+/**
+ * For now, signing out shows the intro again, every time.
+ *
+ * Grove is being demoed and iterated on, and the intro is the part being
+ * shown and changed most — clearing storage to see it again was the whole
+ * workflow. Signing out is a deliberate act with a button, so it is a fair
+ * place to hang this until the intro settles; take it out before Grove is
+ * in anyone else's hands, where signing out should not mean starting over.
+ */
+export async function forgetOnboardingSeen(): Promise<void> {
+  await AsyncStorage.removeItem(SEEN_KEY).catch(() => {});
+}
+
+/**
+ * What someone wrote about themselves during the intro, waiting for an account.
+ *
+ * Signing out now leads back through the intro, which runs before signing in,
+ * when there is no account yet for the memory to belong to. So the words are
+ * held here, in memory only, and read in by the tab layout as soon as there
+ * is one. Never written to storage: it is a paragraph about someone's life,
+ * and everything like that lives in the encrypted stores or nowhere.
+ */
+let pendingIntro: string | null = null;
+
+export function holdIntro(text: string): void {
+  pendingIntro = text.trim() || null;
+}
+
+export function takeIntro(): string | null {
+  const text = pendingIntro;
+  pendingIntro = null;
+  return text;
+}

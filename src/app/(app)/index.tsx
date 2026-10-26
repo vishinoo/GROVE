@@ -11,8 +11,9 @@
  * and it is the reason this app is developable without a device build at all.
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -27,7 +28,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/components/icon';
 import { STATE_WORD } from '@/components/field';
 import { Glass } from '@/components/glass';
-import { Mono, Notice } from '@/components/ui';
+import { Notice } from '@/components/ui';
 import { Radius, Space, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
@@ -54,13 +55,23 @@ function TalkBody() {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   /*
-    The field is the whole screen, and the words sit in it.
-
-    The open space above the greeting is the button — "press the sky" — and
-    it is a little over a third of the screen, which puts the greeting where
-    the lab had it and leaves the reply most of the room below.
+    The field is the whole screen, the words sit in the middle of it, and
+    anywhere on it is the button. A strip above the greeting was the target
+    once; on a screen you reach for while walking, the whole glass is easier
+    to hit than any part of it. Anything that takes touches of its own — the
+    composer, a notice, a long reply you scroll — still gets them first.
   */
-  const sky = Math.round(height * 0.36);
+  const [typing, setTyping] = useState(false);
+  useEffect(() => {
+    const shown = Keyboard.addListener('keyboardWillShow', () => setTyping(true));
+    const hidden = Keyboard.addListener('keyboardWillHide', () => setTyping(false));
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, []);
+  // With the keyboard up, a tap on the field means "put that away", not "talk".
+  const tapField = () => (typing ? Keyboard.dismiss() : press());
 
   const { notice, dismissNotice } = useSession();
   const { state, caption, heard, armed, ringSeen, route, next, due, press, say } =
@@ -120,23 +131,27 @@ function TalkBody() {
         scrollEnabled={false}
         showsVerticalScrollIndicator={false}
       >
-        <View style={{ height: page, overflow: 'hidden' }}>
-
-          <Pressable
-            onPress={press}
-            accessibilityRole="button"
-            accessibilityLabel="Talk to Grove"
-            // The whole open field is the button. On a screen you reach for
-            // while walking, a small target in the middle of it would be wrong.
-            style={{ height: sky }}
-          />
+        <Pressable
+          onPress={tapField}
+          accessibilityRole="button"
+          accessibilityLabel="Talk to Grove"
+          style={{ height: page, overflow: 'hidden' }}
+        >
 
           {/*
             The reply never runs under the composer: this column takes what is
             left of the page and the reply card shrinks into it, scrolling
             inside itself past that.
           */}
-          <View style={{ flex: 1, minHeight: 0, paddingHorizontal: Space.screenX }}>
+          <View
+            style={{
+              flex: 1,
+              minHeight: 0,
+              justifyContent: 'center',
+              paddingHorizontal: Space.screenX,
+              paddingTop: insets.top + 40,
+            }}
+          >
             {/*
               No errors here.
 
@@ -226,7 +241,6 @@ function TalkBody() {
               </View>
             ) : null}
 
-            {resting && hello.covers ? null : <Now next={next} />}
           </View>
 
           {/*
@@ -241,15 +255,20 @@ function TalkBody() {
               gap: 8,
               paddingTop: 12,
               paddingHorizontal: Space.screenX,
-              paddingBottom: Math.max(insets.bottom, 12) + 76,
+              // Room for the tab bar, which the keyboard covers anyway: kept while
+              // typing, it floated the box a tab bar's height above the keys.
+              paddingBottom: typing ? 10 : Math.max(insets.bottom, 12) + 76,
             }}
           >
             <TextInput
               value={draft}
               onChangeText={setDraft}
               placeholder={canListen ? 'Or type it' : 'Type to Grove'}
-              placeholderTextColor={palette.muted}
+              placeholderTextColor={ON_FIELD_SOFT}
               multiline
+              // One line until there is more to show; the web otherwise draws
+              // a two-row box, taller than the send button beside it.
+              numberOfLines={1}
               onSubmitEditing={send}
               style={{
                 flex: 1,
@@ -259,12 +278,14 @@ function TalkBody() {
                 paddingTop: 13,
                 paddingBottom: 13,
                 borderRadius: Radius.control,
-                backgroundColor: palette.raised,
+                // Dark glass: the field shows through it. A solid black slab
+                // was the heaviest thing on a screen that is mostly light.
+                backgroundColor: 'rgba(8,10,16,0.42)',
                 borderWidth: 1,
-                borderColor: palette.line,
+                borderColor: 'rgba(255,255,255,0.16)',
                 fontFamily: Type.body.fontFamily,
                 fontSize: 14.5,
-                color: palette.ink,
+                color: ON_FIELD,
               }}
             />
             <Pressable
@@ -303,26 +324,13 @@ function TalkBody() {
               mic={route.hasExternalMic}
             />
           </View>
-        </View>
+        </Pressable>
 
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-/**
- * The only thing on this screen that is there before you speak.
- *
- * Two lines at most, and both of them answer "what am I supposed to be doing" —
- * which is the question someone has when they take the phone out, and the one
- * thing a lock screen cannot answer. A focus session goes above the diary
- * because it is what they chose over everything in it, and a leave-by time
- * earns its place by being a fact nothing else on the phone will tell them.
- *
- * Nothing here is a dashboard. If there is no session and nothing coming, it is
- * not there at all — an empty "Nothing standing yet" panel was on the Sparks
- * screen once and was the ugliest thing in the app.
- */
 /**
  * What the screen says when nothing is happening.
  *
@@ -333,9 +341,7 @@ function TalkBody() {
  * What counts is the same short list attention.ts speaks up for, read with a
  * wider window, because a line on a screen you chose to look at costs far
  * less than a voice in your ear. Nothing here is ever said aloud.
- *
- * `covers` says whether the line already names the next event, so the card
- * underneath does not say it a second time. `plain` is the hour alone, the
+ * `plain` is the hour alone, the
  * only time the "press the sky" hint is worth its line: next to a sentence
  * that is actually about your day it is clutter, and it fell under the
  * composer whenever that sentence ran to two lines.
@@ -344,67 +350,30 @@ function greeting(
   next: NextUp,
   due: string | null,
   now = new Date()
-): { line: string; covers: boolean; plain?: boolean } {
+): { line: string; plain?: boolean } {
   if (next?.leaveBy) {
     const leaveIn = minutesUntil(next.leaveBy, now);
-    if (leaveIn <= 0) return { line: `Time to leave for ${next.title}.`, covers: true };
-    if (leaveIn <= 30) return { line: `Leave by ${clock(next.leaveBy)} for ${next.title}.`, covers: true };
+    if (leaveIn <= 0) return { line: `Time to leave for ${next.title}.` };
+    if (leaveIn <= 30) return { line: `Leave by ${clock(next.leaveBy)} for ${next.title}.` };
   }
   if (next) {
     const m = minutesUntil(next.at, now);
     if (m > 0 && m <= 60) {
       return {
         line: `You have ${m === 1 ? 'a minute' : `${m} minutes`} before ${next.title}.`,
-        covers: true,
       };
     }
   }
-  if (due) return { line: `You asked me to remind you about ${due} today.`, covers: false };
+  if (due) return { line: `You asked me to remind you about ${due} today.` };
 
   const h = now.getHours();
   const line =
     h < 5 ? 'Still up?' : h < 12 ? 'Morning.' : h < 18 ? 'Afternoon.' : h < 22 ? 'Evening.' : 'Late one.';
-  return { line, covers: false, plain: true };
+  return { line, plain: true };
 }
 
 function minutesUntil(at: Date, now: Date): number {
   return Math.round((at.getTime() - now.getTime()) / 60_000);
-}
-
-function Now({ next }: { next: NextUp }) {
-  const palette = usePalette();
-  if (!next) return null;
-
-  return (
-    <View
-      style={{
-        marginTop: 26,
-        alignSelf: 'center',
-        maxWidth: 420,
-        width: '100%',
-        paddingVertical: 13,
-        paddingHorizontal: 16,
-        borderRadius: Radius.well,
-        backgroundColor: palette.raised,
-        borderWidth: 1,
-        borderColor: palette.line,
-      }}
-    >
-      <Mono>Next</Mono>
-      <Text style={[Type.body, { color: palette.ink, marginTop: 3 }]}>
-        {next.title}
-        <Text style={{ color: palette.muted }}>{`  ${clock(next.at)}`}</Text>
-      </Text>
-      {next.leaveBy ? (
-        <Text style={[Type.bodySm, { color: palette.ink, marginTop: 4 }]}>
-          Leave by {clock(next.leaveBy)}
-          {next.where ? ` — ${next.where}` : ''}
-        </Text>
-      ) : next.where ? (
-        <Text style={[Type.bodySm, { color: palette.muted, marginTop: 4 }]}>{next.where}</Text>
-      ) : null}
-    </View>
-  );
 }
 
 function clock(date: Date): string {
