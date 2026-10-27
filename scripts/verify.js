@@ -1592,7 +1592,7 @@ section('An answer that was not searched does not pretend to be');
 section('What bears on this, and what stays out of it');
 {
   const { bearingOn, contentWords } = require(path.join(OUT, 'lib/bearing.js'));
-  const { asPromptBlock, goalDirective } = require(path.join(OUT, 'lib/memory.js'));
+  const { memoryData, MEMORY_RULES } = require(path.join(OUT, 'lib/memory.js'));
 
   const ent = (kind, name, summary, facts = []) => ({
     id: name.toLowerCase().replace(/\W+/g, '-'),
@@ -1734,34 +1734,197 @@ section('What bears on this, and what stays out of it');
 
   /*
    * Goals are out from under the instruction to ignore background.
+   *
+   * The rules and the data are separate now, for caching — so the property
+   * splits in two: the data must label the goals apart from the background,
+   * and the rules must say the two are to be treated differently.
    */
-  const background = asPromptBlock(facts);
+  const data = memoryData(facts);
+  const beforeGoals = data.split('WHAT THEY ARE TRYING TO DO')[0];
+  check(!/lose 10 kg/.test(beforeGoals), 'goals are labelled apart from the background');
+  check(/BACKGROUND:/.test(data), 'and the background is labelled as background');
+
+  check(/ONLY when it is directly relevant/.test(MEMORY_RULES), 'background keeps its restraint');
   check(
-    !/lose 10 kg/.test(background.split('WHAT THEY ARE TRYING TO DO')[0]),
-    'goals are not inside the background block',
-    'that block is framed as context to leave alone unless asked'
+    /is the opposite/.test(MEMORY_RULES) && /not background/i.test(MEMORY_RULES),
+    'and the rules say outright that goals are not background',
+    'they used to be under one heading and one instruction, written for the first'
   );
-  check(/ONLY when it is directly relevant/.test(background), 'background keeps its restraint');
-  const goals = goalDirective(facts.filter((f) => f.kind === 'goal'));
-  check(/lose 10 kg/.test(goals), 'and the goals get a block of their own');
-  check(/not background/i.test(goals), 'which says outright that they are not background');
   check(
-    /ONE sentence/.test(goals) && /never a lecture/.test(goals),
+    /ONE sentence/.test(MEMORY_RULES) && /never a lecture/.test(MEMORY_RULES),
     'with the restraint that keeps it from becoming a diet app',
     'the failure of fixing this is an assistant that nags about your weight'
   );
   check(
-    /get them the burger/.test(goals),
+    /get them the burger/.test(MEMORY_RULES),
     'and does what was asked regardless',
     'Grove is not in charge of them'
   );
-  check(goalDirective([]) === '', 'nothing at all when there are no goals');
+  check(memoryData([]) === '', 'nothing at all when there is no memory');
 
   // Wired in, not merely written.
   const brainSource = fs.readFileSync(path.join(ROOT, 'src/lib/brain.ts'), 'utf8');
   check(/bearingOn\(userText/.test(brainSource), 'the turn asks what bears on what was said');
-  const memorySource = fs.readFileSync(path.join(ROOT, 'src/lib/memory.ts'), 'utf8');
-  check(/goalDirective\(goals\)/.test(memorySource), 'and the goal block rides with the facts');
+  check(/MEMORY_RULES/.test(brainSource), 'the rules ride in the system prompt');
+  check(/memoryData\(context\.facts\)/.test(brainSource), 'and the memory itself rides with the question');
+}
+
+/*
+ * The expensive half of a request has to be identical to the last one.
+ *
+ * Gemini serves a repeated request prefix from its implicit cache at a
+ * quarter of the input price, and the match is a *prefix* — so one line that
+ * changes near the top makes the whole thing uncacheable. Measured before
+ * this was fixed: the clock was the second line of the system prompt, so the
+ * cacheable prefix was 29 tokens out of 9,727, and every single request paid
+ * full price for ~3,000 tokens of rules and ~4,000 of tool declarations that
+ * were byte-for-byte the same as the previous one.
+ *
+ * The fix is a discipline rather than a flag, which is exactly why it needs a
+ * check: nothing breaks when somebody puts a timestamp back in the system
+ * prompt. It just quietly costs four times as much.
+ */
+section('Nothing that changes every turn is in the system prompt');
+{
+  const brain = fs.readFileSync(path.join(ROOT, 'src/lib/brain.ts'), 'utf8');
+
+  const stable = between(brain, 'function systemFor(', '\n}\n', { min: 100, max: 3000 });
+  check(stable !== null, 'the system prompt builder is where it is expected to be');
+
+  /*
+   * The volatile things, by name. Each of these was in the system prompt at
+   * some point and each would cost the whole cache.
+   */
+  for (const [what, pattern] of [
+    ['the clock', /toLocaleTimeString|clock/],
+    ['the date', /toLocaleDateString|today/],
+    ['the memory', /memoryData|asPromptBlock|facts\b/],
+    ['what bears on the question', /bearingOn/],
+  ]) {
+    check(
+      stable !== null && !pattern.test(stable),
+      `${what} is not in the system prompt`,
+      'it changes every turn, so it would cost the entire cached prefix'
+    );
+  }
+
+  // And they are all in the part that rides with the question instead.
+  const perTurn = between(brain, 'function contextFor(', '\n}\n', { min: 100, max: 3000 });
+  check(perTurn !== null, 'the per-turn context builder exists');
+  check(
+    perTurn !== null && /toLocaleTimeString/.test(perTurn) && /memoryData/.test(perTurn),
+    'the clock and the memory ride with the question'
+  );
+  const call = between(brain, 'const system = [systemFor(', 'const ran: RanTool[]', { min: 100, max: 2500 });
+  check(call !== null, 'the request assembly is where it is expected to be');
+  check(
+    call !== null && /contextFor\(context, \[roster, usual, friction\]/.test(call),
+    'and so do the roster, the rhythms and the frictions'
+  );
+  check(
+    call !== null && !/systemFor\(context, available\)/.test(call),
+    'the system prompt no longer takes the ability list',
+    'the declarations already carry it, and they are sent separately'
+  );
+
+  /*
+   * The stable part has to be big enough to be worth caching at all.
+   *
+   * Gemini's implicit cache has a minimum prefix — around a thousand tokens
+   * for the lite models — below which nothing is cached however often it
+   * repeats. Counted in characters at four to a token, which is close enough
+   * to tell a thousand from a hundred.
+   */
+  const persona = require(path.join(OUT, 'lib/persona.js'));
+  const { MEMORY_RULES } = require(path.join(OUT, 'lib/memory.js'));
+  const rules = between(brain, 'const TOOL_RULES = `', '`;', { min: 500, max: 20_000 });
+  check(rules !== null, 'the tool rules are where they are expected to be');
+  const stableChars =
+    (rules?.length ?? 0) + MEMORY_RULES.length + persona.mannerDirective(persona.DEFAULT_PERSONA).length;
+  check(
+    stableChars / 4 > 1200,
+    `the stable prefix is about ${Math.round(stableChars / 4)} tokens, over any cache minimum`
+  );
+
+  // The one deliberate exception, stated so it is a decision and not a leak.
+  check(
+    call !== null && /\[systemFor\(context\), talks\]/.test(call),
+    'the register is the one slow-changing thing kept in the rules',
+    'it is an instruction about how to speak, and it shifts over ~30 turns'
+  );
+}
+
+
+
+/*
+ * What is actually billed per request, as opposed to per token.
+ *
+ * Grounding with Google Search is charged **per search query**, not per
+ * token: $14 per thousand on the current lite model after a free monthly
+ * allowance, and one request can trigger several queries. At this app's
+ * volume that is inside the free allowance and the token bill is about a
+ * pound a month — which is only true because the turn that runs on every
+ * single sentence does not ground.
+ *
+ * Nothing stops someone adding `google_search` to the tool turn. It would
+ * look like an improvement, it would pass every other check here, and it
+ * would turn a free line item into a per-sentence charge. So the separation
+ * is asserted: the tool loop declares functions, and searching is something
+ * an ability does on purpose.
+ */
+section('The per-sentence path never pays for a search');
+{
+  const light = fs.readFileSync(path.join(ROOT, 'src/lib/lightModel.ts'), 'utf8');
+
+  const toolBody = between(light, 'async function toolTurnOnce(', '\n}\n', { min: 500, max: 8000 });
+  check(toolBody !== null, 'the tool turn is where it is expected to be');
+  check(
+    toolBody !== null && /functionDeclarations/.test(toolBody),
+    'the tool turn declares the abilities'
+  );
+  check(
+    toolBody !== null && !/google_search/.test(toolBody),
+    'and never asks for grounding',
+    'grounding is billed per query; this path runs on every sentence'
+  );
+
+  // Searching is something an ability does, deliberately, and there is one
+  // switch for it.
+  const grounders = light
+    .split('\n')
+    .filter((line) => /google_search/.test(line) && !/^\s*(?:\/\/|\*|\/\*)/.test(line));
+  check(
+    grounders.length === 1,
+    `grounding is requested from exactly one place (${grounders.length} found)`
+  );
+  check(
+    grounders.length === 1 && /json \|\| !search \? \{\} :/.test(grounders[0]),
+    'and only when the caller asked for it'
+  );
+
+  /*
+   * A research report fans out into one grounded query per subject, in
+   * parallel. That is the one place a single request becomes several billed
+   * ones, so the fan-out is bounded.
+   */
+  const plan = between(light, 'export async function lightPlan(', '\n}\n', { min: 200, max: 3000 });
+  check(plan !== null, 'the research planner is where it is expected to be');
+  // The cap on the subject list, not the cap on the brief that is fed in —
+  // both are `.slice(0, n)` and the first one in the function is the brief.
+  const fan = Number(plan?.match(/parsed\.subjects[\s\S]*?\.slice\(0,\s*(\d+)\)/)?.[1]);
+  check(
+    Number.isFinite(fan) && fan <= 5,
+    `a researched document fans out to at most ${fan} grounded queries`,
+    'each subject is a separate billed search'
+  );
+
+  // The cheapest tier, by floating alias: a pinned version is worse, because
+  // Google retires them and every turn then 404s — which this file's own
+  // history records.
+  check(
+    /'gemini-flash-lite-latest'/.test(light),
+    'the default model is the cheapest tier, by floating alias'
+  );
 }
 
 /* ------------------------------------------------------------- verdict */

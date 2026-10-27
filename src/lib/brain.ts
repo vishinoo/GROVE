@@ -30,7 +30,7 @@
 import { abilityById, currentAccount, runAbility, type Ability } from './abilities';
 import type { GroveContext, GroveReply, Turn } from './grove';
 import { asToolResults, asUserTurn, lastModelTrouble, lightAfterAction, lightFallback, toolTurn, type ToolHistory } from './lightModel';
-import { asPromptBlock, factFrom } from './memory';
+import { factFrom, memoryData, MEMORY_RULES } from './memory';
 import { lately, loadLife, whoIsWho } from './life';
 import { rhythmLines, rhythms } from './rhythms';
 import { frictionBlock, loadStruggles } from './struggles';
@@ -179,9 +179,49 @@ How to answer once tools return:
 - Never say you cannot see or do not have access to something — their calendar, mail, contacts, music — unless a tool just said exactly that. A tool that timed out or came back empty is not the same as one you are not allowed to use.
 - Try twice before giving up. A tool that fails or comes back empty gets one more go this turn: the same tool with a better argument (a wider date range, a simpler search, the town they live in), or a different tool that could answer it. Say it did not work only after the second attempt.`;
 
-function systemFor(context: GroveContext, available: Ability[]): string {
-  const { persona, facts } = context;
+/**
+ * The instructions, which do not change from turn to turn.
+ *
+ * Nothing volatile may appear here, and that is a cost decision as much as a
+ * tidiness one. Gemini serves an identical request prefix from its implicit
+ * cache at a quarter of the token price, and the match is a *prefix* — so one
+ * line that changes near the top makes the entire request uncacheable. The
+ * clock used to be the second line of this function, which left a cacheable
+ * prefix of twenty-nine tokens out of nine thousand seven hundred: every
+ * request paid full price for the three thousand tokens of rules and four
+ * thousand of tool declarations that were byte-identical to the last one.
+ *
+ * Everything that changes — the time, the memory, the roster, what bears on
+ * the question — is built by `contextFor` and rides with the question in
+ * `contents`, which is after this in the request either way.
+ *
+ * Ordered least-volatile first within itself, so that even the things which
+ * do change occasionally (the manner, when it is edited; the register, as it
+ * is learned) only invalidate what follows them.
+ */
+function systemFor(context: GroveContext): string {
+  const { persona } = context;
+  return [
+    `You are ${persona.name || 'Grove'}, the one assistant this person talks to, usually through glasses while they are doing something else.`,
+    TOOL_RULES,
+    MEMORY_RULES,
+    mannerDirective(persona),
+  ]
+    .filter((part) => part && part.trim())
+    .join('\n\n');
+}
 
+/**
+ * Everything true only of this turn, as one block that rides with the question.
+ *
+ * The counterpart to `systemFor`. Kept separate so that the expensive half of
+ * a request is identical every time and the cheap half is the only thing the
+ * model has to be sent afresh.
+ */
+function contextFor(
+  context: GroveContext,
+  extra: string[]
+): string {
   const now = new Date();
   const today = now.toLocaleDateString('en-GB', {
     weekday: 'long',
@@ -192,15 +232,10 @@ function systemFor(context: GroveContext, available: Ability[]): string {
   const clock = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  // A tool the mode has switched off is invisible to the model, so without this
-  // it improvises a reason it cannot help — "I can't read your emails yet" —
-  // when the truth is a setting the person turned on five minutes ago.
   return [
-    `You are ${persona.name || 'Grove'}, the one assistant this person talks to, usually through glasses while they are doing something else.`,
-    `It is ${clock} on ${today}, timezone ${zone}. That is the real current date and time.`,
-    asPromptBlock(facts),
-    mannerDirective(persona),
-    TOOL_RULES,
+    `Now: ${clock} on ${today}, timezone ${zone}. That is the real current date and time; never guess at what day it is.`,
+    memoryData(context.facts),
+    ...extra,
   ]
     .filter((part) => part && part.trim())
     .join('\n\n');
@@ -568,16 +603,35 @@ async function runTurn(
       .then((r) => rapportDirective(r))
       .catch(() => ''),
   ]);
-  const system = [systemFor(context, available), talks, roster, usual, friction]
-    .filter(Boolean)
-    .join('\n\n');
+  /*
+    The expensive half is identical every turn; the cheap half is not.
+
+    `system` is rules and nothing else — about seven and a half thousand
+    tokens with the tool declarations, byte-for-byte the same as last turn, so
+    Gemini serves it from its implicit cache at a quarter of the price.
+    Everything that changes is a few hundred tokens riding with the question.
+
+    `talks` is the exception and it is deliberate: the register is an
+    instruction about how to speak, so it belongs in the rules, and it shifts
+    slowly enough (counted over about thirty turns) that re-caching when it
+    does is nothing.
+  */
+  const system = [systemFor(context), talks].filter(Boolean).join('\n\n');
   const fact = factFrom(userText) ?? undefined;
 
   // Sums are worked out exactly and handed over as a fact; see calc.ts.
   const sum = calculate(userText);
+  const situation = contextFor(context, [roster, usual, friction].filter(Boolean));
   const contents: unknown[] = [
     ...(historyFor(history) as unknown[]),
-    asUserTurn(sum ? `${userText}\n\n[Worked out exactly: ${sum}. Use this number.]` : userText),
+    asUserTurn(
+      [
+        situation ? `[Context for this turn]\n${situation}\n[End of context]` : '',
+        sum ? `${userText}\n\n[Worked out exactly: ${sum}. Use this number.]` : userText,
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+    ),
   ];
   const ran: RanTool[] = [];
 

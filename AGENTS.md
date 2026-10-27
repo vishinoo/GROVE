@@ -1171,6 +1171,93 @@ looking for and a button that reports nothing is a button you press twice.
 are different ids and `eas update:list` only prints the group, so the two are
 easy to compare and conclude wrongly from.
 
+## What it costs, and the two things that decide that
+
+Measured, not estimated, at 60 turns a day on `gemini-flash-lite-latest`:
+
+```
+cacheable (byte-identical every turn)
+   3031 tok  TOOL_RULES
+   4470 tok  functionDeclarations (34 tools)
+    401 tok  manner directive
+    288 tok  MEMORY_RULES
+   8259 tok  TOTAL
+
+rebuilt every turn
+    658 tok  memory data
+    320 tok  roster + bearing + rhythms + frictions
+    600 tok  history
+     45 tok  clock + question
+   1623 tok  TOTAL
+
+9882 tok per round, of which 84% is cacheable
+-> $2.86/month before, $1.19 after
+```
+
+### Tokens: the prompt is rules plus data, and only the data changes
+
+Gemini serves a repeated request **prefix** from its implicit cache at a
+quarter of the input price. The match is a prefix, so one line that changes
+near the top makes the whole request uncacheable — and the clock used to be
+**the second line** of the system prompt. The cacheable prefix was 29 tokens
+out of 9,882, so every request paid full price for three thousand tokens of
+rules and four thousand of tool declarations that were byte-for-byte
+identical to the previous one.
+
+So `systemFor` now holds nothing but rules, `contextFor` builds everything
+that changes, and the volatile half rides with the question in `contents`,
+which is after the system instruction either way. `MEMORY_RULES` keeps the
+instructions about memory at system level — which matters most for the goals,
+since the sentence saying they are not background is what stopped Grove
+helping someone lose ten kilos find a burger — while the facts themselves are
+data and move. The register is the one slow-changing thing deliberately left
+in the rules: it is an instruction about how to speak, and it shifts over
+about thirty turns.
+
+**Nothing breaks when somebody puts a timestamp back in the system prompt. It
+just quietly costs four times as much**, which is exactly why `npm run verify`
+asserts that the clock, the date, the memory and the bearing are all absent
+from it, and that the stable prefix stays above any cache minimum.
+
+### Grounding: billed per search, not per token
+
+This is the line item that can dwarf everything else. Grounding with Google
+Search is **$14 per 1,000 queries** on the current lite tier after a free
+monthly allowance, and one request can trigger several queries. At this
+volume it is inside the allowance and free.
+
+It is free **only because the turn that runs on every single sentence does not
+ground.** `toolTurnOnce` sends `functionDeclarations` and nothing else;
+searching is something `brief.web` does on purpose. Adding `google_search` to
+the tool turn would look like an improvement, would pass every other check,
+and would turn a free line item into a per-sentence charge — so verify asserts
+the tool turn never asks for grounding, that there is exactly one place in the
+codebase that does, and that a researched document fans out to at most five
+subjects, since each subject is a separate billed query.
+
+Output tokens are a rounding error: about 0.5M a month, twenty pence.
+
+### Removed rather than optimised
+
+`lightTurn`, `lightSummarise`, `lightAdvice` and `lightNotes` were exported
+and called from nowhere — the tool loop replaced the first and the other three
+were never wired up. **453 lines**, with `HOUSE_RULES`, `parseReply` and the
+types that only they used, and with `LOOKUP_SIGNALS` and `DEEP_SIGNALS` — the
+last two keyword gates of the kind this project has been removing. No API
+saving, but four prompt builders that would have drifted.
+
+Worth knowing how that goes wrong, because it ate live code twice before it
+worked: taking each dead declaration together with the doc comment above it
+produces **overlapping** spans, since every walkback reaches into the
+declaration before it. Delete those one at a time and the later offsets have
+already shifted. Merge the spans first, assert that nothing live falls inside
+a merged region, then delete bottom-up.
+
+`phraseAction` was the one I expected to find wasteful and it is not: it is
+gated on `holdForTool`, which is only set when the model returned a tool call
+with no words, so the second call is never made when the first already wrote
+the line.
+
 ## Checks
 
 Two kinds, and the difference matters. `npm run verify` and the live harness
