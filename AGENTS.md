@@ -429,17 +429,52 @@ with:
   is being agreeable rather than useful.
 - **It must be answerable out loud** — one line, ending in a question. A
   statement is not an offer; there would be nothing to say yes to.
-- **A kind you refuse stops being offered**, keyed by ability. Two nos to being
-  sent links switches links off and leaves documents alone. Nobody should have
-  to refuse the same sort of thing three times, or find a setting for it. Only
-  an outright yes or no teaches anything — answering with a different sentence
-  is moving on, not refusing.
+- **Declining is not disagreeing**, and conflating them was the first
+  version's second mistake. Two nos used to switch a kind off for good, which
+  reads a verdict on two badly-chosen offers as an instruction about a whole
+  ability — say no to two bad link offers and links are gone. That makes
+  something useful look broken, which is worse than never shipping it, because
+  now the person has watched it stop.
+
+  So a decline buys **rest**: `REST_DAYS = [0, 0, 1, 3, 7]`, indexed by the
+  run of declines since the last accept. The first no costs nothing extra —
+  the generic spacing covers it, and one no is a verdict on one offer. The
+  second buys a day. It climbs to a week and stops, because **seven days is
+  the ceiling on what Grove may conclude from being turned down**; a fortnight
+  of silence is indistinguishable from being switched off, which is the
+  outcome the table exists to avoid. An accept clears the run outright, so a
+  kind that works never accumulates a sentence out of the odd miss. A decline
+  older than thirty days restarts the run rather than adding to it — otherwise
+  two nos in January and two in June add up to a week of silence from evidence
+  five months apart.
+
+  **Only a sentence switches something off.** `vetoed` is the single permanent
+  state and nothing but an explicit "stop offering that" sets it. Deliberately
+  a phrase, not a word: nothing a bare "no" can reach may set it, so Grove can
+  never infer a veto from two shrugs — they should be able to stop a kind in
+  one sentence, and Grove should not be able to decide the same thing by
+  counting. A later yes lifts it, and `allowAgain` takes it back from the
+  Memory screen. Keyed by ability throughout, so resting links leaves
+  documents alone.
+
+  Answering with a different sentence is moving on, not refusing, and teaches
+  nothing.
+- **The ledger is written through a queue.** Every write was a bare
+  load-then-save, which is a lost update waiting to happen: charging the cap
+  and recording the answer are two writes a second apart, and whichever one
+  loses is the interesting part — losing the decline means Grove never learns,
+  losing the charge means it offers again immediately. Same shape as the queue
+  in `troubles.ts`.
+- **Reason codes are stable and distinct.** `resting` and `vetoed` are
+  different sentences to show somebody: one recovers on its own and the other
+  needs them to change their mind.
 - **Caps as a backstop**, not as the decision: four a day, two turns apart,
   never the same subject twice. They bound a model having an enthusiastic
   afternoon. Measured end to end: forty turns, eight proposals, **four
-  offers** — then two nos to links, and the next day a link offer is refused
-  `unwelcome`, the same doc offer `repeat`, and a different doc offer goes
-  through.
+  offers**. And the suppression, measured: two nos in one afternoon cost one
+  quiet day and the kind is offered again the next morning; an accept after
+  that makes the following no free; an explicit "stop offering that" is
+  refused `vetoed` a month later and comes straight back after `allowAgain`.
 - **Never alongside `ask_back`.** Two questions and one microphone is a reply
   whose answer goes to whichever one Grove felt like, so the offer is dropped —
   it is the one of the two that can wait.
@@ -1020,6 +1055,19 @@ activation link.
 ```bash
 npm run verify      # does Grove actually reach its own abilities?
 ```
+
+It also **checks itself**. Several sections read a stretch of source between
+two landmarks, and the most expensive failure a harness can have is not a
+check that breaks — you see those — but one that silently stops checking and
+keeps printing `ok`. That happened here: a slice lost its end landmark to an
+unrelated edit, `indexOf` returned -1, and `slice(start, -1)` returned most of
+the file. That was the *lucky* direction; lose the start landmark instead and
+the slice is empty, every "this region does not contain X" passes against
+nothing, and the guard between an offer and a payment reports success while
+guarding air. So every such read goes through `between()`, which asserts both
+ends and an expected size and returns null rather than guessing, every caller
+is written `region !== null && …`, and a section feeds `between()` a missing
+landmark to prove it fails rather than passes.
 
 Runs the real modules — not a copy of their regexes — with the native halves
 stubbed as present, and asserts the wiring: every ability is reachable from the

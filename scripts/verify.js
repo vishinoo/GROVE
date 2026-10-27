@@ -118,6 +118,37 @@ function check(ok, label, detail) {
   console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${label}${ok || !detail ? '' : `\n         ${detail}`}`);
 }
 
+/**
+ * The region of a file between two landmarks, or null if it cannot be found.
+ *
+ * Several checks here read a stretch of source by locating two comments and
+ * slicing between them. Done by hand that is a trap, and it caught me: the end
+ * landmark was a hardcoded line, the line was later rewritten, `indexOf`
+ * returned -1, and `slice(start, -1)` cheerfully handed back everything up to
+ * the last character of the file. The check then failed on a match three
+ * hundred lines from the thing it was guarding.
+ *
+ * The direction it broke was luck. Had the *start* landmark gone instead,
+ * `slice(-1, …)` returns an empty string, and a check of the form "this
+ * region does not contain X" **passes** against nothing at all — a green tick
+ * on a guard that had stopped guarding, which here would have been the one
+ * rule between an offer and a payment.
+ *
+ * So: both ends asserted, a size expected, and null rather than a guess. The
+ * section below tests this function against a missing landmark, because a
+ * harness that cannot catch its own blind spot has no business asserting
+ * anything about the app.
+ */
+function between(source, from, to, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const start = source.indexOf(from);
+  if (start < 0) return null;
+  const end = source.indexOf(to, start + from.length);
+  if (end <= start) return null;
+  const slice = source.slice(start, end);
+  if (slice.length < min || slice.length > max) return null;
+  return slice;
+}
+
 /* ---------------------------------------------------------------- run */
 
 compile();
@@ -1066,6 +1097,7 @@ section('An offer must survive its own schema');
   }
 
   const offersSource = fs.readFileSync(path.join(ROOT, 'src/lib/offers.ts'), 'utf8');
+  const agentSourceFull = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
   const settles = offersSource
     .split('\n')
     .filter((line) => !/^\s*(?:\/\/|\*|\/\*)/.test(line))
@@ -1082,52 +1114,130 @@ section('An offer must survive its own schema');
    * the same fault as the unguarded `.replace` that once left a whole pane
    * without its class.
    */
-  const agentSource = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
-  const acceptFrom = agentSource.indexOf('An answer to something Grove offered to do');
-  const acceptTo = agentSource.indexOf("An answer to Grove's own question", acceptFrom);
-  check(acceptFrom > 0, 'the accept branch is where it is expected to be');
-  check(acceptTo > acceptFrom, 'and the slice around it has both of its ends');
-  const accept = acceptFrom > 0 && acceptTo > acceptFrom ? agentSource.slice(acceptFrom, acceptTo) : '';
-  check(accept.length > 400 && accept.length < 6000, 'and is the size of a branch, not of a file');
+  const accept = between(
+    agentSourceFull,
+    'An answer to something Grove offered to do',
+    "An answer to Grove's own question",
+    { min: 400, max: 8000 }
+  );
+  check(accept !== null, 'the accept branch is found, both ends, at a branch\'s size');
   check(
-    !/confirmed:/.test(accept),
+    accept !== null && !/confirmed:/.test(accept),
     'accepting an offer never supplies the confirmation itself',
     'an ability that asks for a press must still ask for it'
   );
   check(
-    /needsConfirming/.test(accept),
+    accept !== null && /needsConfirming/.test(accept),
     'and an accepted offer re-arms the confirmation when the ability wants one'
   );
 
   /*
-   * A kind you refuse stops being offered.
+   * Declining is not disagreeing, and this is the check that says so.
    *
-   * The direct answer to "I don't want this on every message", and now keyed
-   * by ability — refusing to be sent links is a different decision from
-   * refusing research notes, so refusing one must not quiet the other.
+   * The first version switched a kind off for good after two nos. That read a
+   * verdict on two badly-chosen offers as an instruction about a whole
+   * ability — say no to two bad link offers and links were gone, which makes
+   * something useful look broken. Worse than never shipping it, because the
+   * person has now watched it stop.
+   *
+   * So a decline buys **rest** and only an explicit "stop offering that" is
+   * permanent. Nothing a count can reach may take a kind to zero, and the
+   * ceiling on what Grove may conclude from being turned down is a week.
    */
-  check(offers.welcome({}, 'shop.order'), 'a kind never offered gets a go');
-  check(offers.welcome({ 'shop.order': { yes: 0, no: 1 } }, 'shop.order'), 'one no is not a verdict');
-  check(!offers.welcome({ 'shop.order': { yes: 0, no: 2 } }, 'shop.order'), 'two nos and that kind is done');
+  const DAY = 86400000;
+  const now = new Date('2026-06-15T12:00:00Z');
+  const ago = (ms) => new Date(now.getTime() - ms).toISOString();
+
+  check(offers.welcome({}, 'shop.order', now), 'a kind never offered gets a go');
   check(
-    offers.welcome({ 'doc.create': { yes: 0, no: 2 } }, 'shop.order'),
-    'and refusing one kind leaves the others alone'
+    offers.welcome({ 'shop.order': { yes: 0, no: 1, run: 1, lastNo: ago(60_000) } }, 'shop.order', now),
+    'one no costs nothing extra',
+    'a no is a verdict on one offer, not on the ability'
   );
   check(
-    offers.welcome({ 'shop.order': { yes: 2, no: 3 } }, 'shop.order'),
-    'a kind that sometimes lands keeps being offered'
+    !offers.welcome({ 'shop.order': { yes: 0, no: 2, run: 2, lastNo: ago(60_000) } }, 'shop.order', now),
+    'two nos buy a day of quiet'
   );
   check(
-    !offers.welcome({ 'shop.order': { yes: 1, no: 9 } }, 'shop.order'),
-    'one that almost never lands does not'
+    offers.welcome({ 'shop.order': { yes: 0, no: 2, run: 2, lastNo: ago(2 * DAY) } }, 'shop.order', now),
+    'and the kind comes back on its own the next day',
+    'this is the whole difference from the rule it replaced'
   );
+  check(
+    !offers.welcome({ 'shop.order': { yes: 0, no: 9, run: 9, lastNo: ago(6 * DAY) } }, 'shop.order', now),
+    'a long run of nos rests for longer'
+  );
+  check(
+    offers.welcome({ 'shop.order': { yes: 0, no: 9, run: 9, lastNo: ago(8 * DAY) } }, 'shop.order', now),
+    'but never for more than a week',
+    'a fortnight of silence is indistinguishable from being switched off'
+  );
+  // The ceiling, read from the table rather than inferred from the cases.
+  const rests = offersSource.match(/const REST_DAYS = \[([^\]]+)\]/);
+  check(Boolean(rests), 'the rest table is where it is expected to be');
+  if (rests) {
+    const days = rests[1].split(',').map((n) => Number(n.trim()));
+    check(days[0] === 0 && days[1] === 0, 'the first no rests for no days at all');
+    check(Math.max(...days) <= 7, `and the longest rest is ${Math.max(...days)} days`);
+  }
+  check(
+    offers.welcome({ 'shop.order': { yes: 0, no: 2, run: 2, lastNo: ago(60_000) } }, 'doc.create', now),
+    'resting one kind leaves the others alone'
+  );
+  check(
+    offers.welcome({ 'shop.order': { yes: 4, no: 9, run: 0, lastNo: ago(60_000) } }, 'shop.order', now),
+    'and an accept clears the run, however many nos came before it'
+  );
+
+  /*
+   * Only a sentence switches something off.
+   *
+   * The asymmetry is deliberate: they should be able to stop a kind of offer
+   * in one sentence, and Grove should never be able to infer the same thing
+   * from two shrugs. So `vetoed` is the only permanent state, nothing but an
+   * explicit answer sets it, and a later yes lifts it.
+   */
+  check(
+    !offers.welcome({ 'shop.order': { yes: 3, no: 1, run: 0, vetoed: true } }, 'shop.order', now),
+    'a veto outranks every count'
+  );
+  const vetoSource = agentSourceFull;
+  const vetoLine = /const veto =\s*\n?\s*\/(.+)\/i\.test\(/.exec(vetoSource);
+  check(/const veto =/.test(vetoSource), 'the turn tells a veto apart from a no');
+  check(
+    /answeredOffer\(account, proposed\.kind, 'vetoed'\)/.test(vetoSource) &&
+      /answeredOffer\(account, proposed\.kind, 'declined'\)/.test(vetoSource) &&
+      /answeredOffer\(account, proposed\.kind, 'accepted'\)/.test(vetoSource),
+    'and records all three answers distinctly'
+  );
+  // A bare no must not be able to reach the veto branch. Checked by running
+  // the real patterns out of the real source rather than retyping them.
+  {
+    const src = vetoSource.slice(vetoSource.indexOf('const veto ='));
+    const pats = [...src.slice(0, src.indexOf(';')).matchAll(/\/((?:\\.|[^/\\])+)\/i/g)].map(
+      (m) => new RegExp(m[1], 'i')
+    );
+    check(pats.length >= 1, 'the veto patterns can be read out of the source');
+    const vetoes = (text) => pats.some((p) => p.test(text));
+    for (const bare of ['no', 'nope', 'nah', 'not now', 'later', 'leave it', "don't"]) {
+      check(!vetoes(bare), `"${bare}" cannot switch a kind off`);
+    }
+    for (const said of ['stop offering that', "don't offer that again", 'never ask me that again']) {
+      check(vetoes(said), `"${said}" can`);
+    }
+    // And it must not fire on an unrelated sentence that happens to say stop.
+    for (const other of ['stop the music', 'never mind, what is the weather']) {
+      check(!vetoes(other), `"${other}" is not a veto`);
+    }
+  }
+  check(/export async function allowAgain/.test(offersSource), 'and a veto can be taken back');
 
   // Caps as a backstop, not as the decision. Read from the source, because
   // exercising them needs the vault and this file stubs no Keychain.
   const perDay = Number(offersSource.match(/const PER_DAY = (\d+);/)?.[1]);
   check(perDay >= 1 && perDay <= 6, `at most ${perDay} offers in a day`);
-  const between = Number(offersSource.match(/const TURNS_BETWEEN = (\d+);/)?.[1]);
-  check(between >= 1, `and ${between} turns of ordinary conversation between them`);
+  const gap = Number(offersSource.match(/const TURNS_BETWEEN = (\d+);/)?.[1]);
+  check(gap >= 1, `and ${gap} turns of ordinary conversation between them`);
 
   /*
    * The model is actually asked, and told what makes an offer real.
@@ -1207,6 +1317,73 @@ section('An offer must survive its own schema');
   check(
     /detail: found\.detail/.test(briefRun.slice(0, briefRun.indexOf('\n};'))),
     'and the search ability passes that detail on to the model'
+  );
+}
+
+/*
+ * The harness checks itself.
+ *
+ * Every other section here asserts something about the app. This one asserts
+ * something about this file, because the most expensive failure a harness can
+ * have is not a check that breaks — you see those — it is a check that
+ * silently stops checking and keeps printing "ok".
+ *
+ * That happened: a slice between two landmarks lost its end landmark to an
+ * unrelated edit, `indexOf` returned -1, and `slice(start, -1)` returned most
+ * of the file. The *lucky* direction. Lose the start landmark instead and the
+ * slice is empty, every "this region does not contain X" passes against
+ * nothing, and the guard between an offer and a payment reports success while
+ * guarding air.
+ *
+ * So `between()` returns null rather than guessing, and the cases below are a
+ * missing landmark, a reversed pair and a region the wrong size — the three
+ * ways that function can be asked for something that is not there.
+ */
+section('A check that stops checking must fail, not pass');
+{
+  const sample = ['alpha', 'START', 'the middle of it', 'END', 'omega'].join('\n');
+
+  check(between(sample, 'START', 'END') !== null, 'a region with both landmarks is found');
+  check(
+    (between(sample, 'START', 'END') ?? '').includes('the middle of it'),
+    'and contains what sits between them'
+  );
+
+  // The fault that shipped: the end landmark is gone.
+  check(
+    between(sample, 'START', 'GONE') === null,
+    'a missing end landmark gives nothing, not the rest of the file',
+    'slice(start, -1) returns everything up to the last character'
+  );
+  // The fault that would have passed silently.
+  check(
+    between(sample, 'GONE', 'END') === null,
+    'a missing start landmark gives nothing, not an empty string',
+    'an empty region makes every "does not contain" check pass'
+  );
+  check(between(sample, 'END', 'START') === null, 'landmarks in the wrong order give nothing');
+  check(
+    between(sample, 'START', 'END', { min: 10_000 }) === null,
+    'and a region smaller than expected gives nothing'
+  );
+  check(
+    between(sample, 'START', 'END', { max: 4 }) === null,
+    'as does one larger than expected'
+  );
+
+  /*
+   * And a null region can never be mistaken for a clean one.
+   *
+   * This is the actual property that matters: a check written as "the region
+   * does not contain the forbidden thing" has to fail when the region could
+   * not be read. Written the obvious way — `!/x/.test(region)` — it passes.
+   */
+  const missing = between(sample, 'GONE', 'END');
+  check(missing !== null === false, 'a region that could not be read is null');
+  check(
+    !(missing !== null && !/forbidden/.test(missing)),
+    'so a guard on an unreadable region reports failure',
+    'every such check in this file is written `region !== null && ...`'
   );
 }
 

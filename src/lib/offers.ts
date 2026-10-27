@@ -187,7 +187,44 @@ type Ledger = {
   /** Every subject offered, for as long as it is kept. Never offered twice. */
   subjects: string[];
   /** What each kind has earned. This is the whole of the learning. */
-  learned: Record<string, { yes: number; no: number }>;
+  learned: Record<string, Score>;
+};
+
+/**
+ * What one kind of offer has earned, and why that is four fields.
+ *
+ * It used to be two — `yes` and `no` — with a rule that two nos and no yes
+ * switched a kind off for good. That rule mistook **declining a bad call for
+ * disagreeing with the idea**, and the two are not the same thing at all.
+ * Saying no to two badly-chosen links is a verdict on those two links; it is
+ * not an instruction to stop sending links, and treating it as one made a
+ * genuinely useful ability look broken. Which is worse than never having
+ * built it, because now the person knows it exists and has watched it stop.
+ *
+ * So declining and vetoing are recorded separately:
+ *
+ *   - `run` is declines since the last accept, and it buys **rest**, not
+ *     death. A kind that has just been turned down twice waits a day before
+ *     it tries again, and the wait grows if it keeps missing. Nothing here
+ *     can take a kind to zero.
+ *   - `vetoed` is only ever set by the person saying so out loud — "stop
+ *     offering that". An explicit instruction outranks every count, which is
+ *     the right way round: they should be able to switch something off in one
+ *     sentence, and Grove should not be able to infer the same thing from two
+ *     shrugs.
+ *
+ * `yes` and `no` are kept as running totals because the Memory screen shows
+ * them. They no longer decide anything by themselves.
+ */
+type Score = {
+  yes: number;
+  no: number;
+  /** Declines since the last accept. An accept resets it to nothing. */
+  run: number;
+  /** When the last decline landed, so the rest can expire on its own. */
+  lastNo?: string;
+  /** They said to stop. Only ever set by them saying so. */
+  vetoed?: boolean;
 };
 
 const KEY = 'grove:offers:v1';
@@ -212,16 +249,28 @@ const PER_DAY = 4;
 export const TURNS_BETWEEN = 2;
 
 /**
- * Chances a kind gets before it has to have earned one.
+ * How long a kind rests after being turned down, by how many times in a row.
  *
- * Something never offered has no evidence either way, and refusing to try is
- * how a feature never gets used. Two is enough to tell the difference between
- * "not now" and "not this".
+ * Indexed by the run of declines since the last accept, in days. The first no
+ * costs nothing extra — the generic spacing already covers it, and one no is
+ * a verdict on one offer. The second buys a day. After that it climbs, and
+ * stops climbing at a week, because a fortnight of silence is indistinguishable
+ * from being switched off and that is the outcome this table exists to avoid.
+ *
+ * Seven days is the ceiling on what Grove may conclude from being ignored.
+ * Anything longer has to be asked for.
  */
-const FREE_GOES = 2;
+const REST_DAYS = [0, 0, 1, 3, 7];
 
-/** Said no this many times with nothing to show for it, and it is done. */
-const ENOUGH_NO = 2;
+/**
+ * A decline older than this says nothing about today.
+ *
+ * Without it, two nos in January and two in June add up to a run of four and
+ * a week of silence, which is a conclusion drawn from evidence five months
+ * apart. Applied when the next decline is recorded, so the run restarts
+ * rather than accumulating across a gap.
+ */
+const FORGETS_A_NO_AFTER_MS = 30 * 86_400_000;
 
 /** Long enough that a subject is not offered again; short enough to forget. */
 const SUBJECTS_KEPT = 80;
@@ -263,6 +312,36 @@ async function save(uid: string, ledger: Ledger): Promise<void> {
   }
 }
 
+let queue: Promise<unknown> = Promise.resolve();
+
+/**
+ * Read, change, write — one at a time.
+ *
+ * Every write here was a bare load-then-save, which is a lost update waiting
+ * to happen: two of them landing in the same tick each read the ledger before
+ * the other wrote it, and one is thrown away. The cases are real if rare —
+ * charging the cap and recording the answer are two writes a second apart,
+ * and a decline arriving while the previous offer is still being filed would
+ * drop one of them. Which one gets dropped is the interesting part: losing
+ * the decline means Grove never learns, and losing the charge means it offers
+ * again immediately.
+ *
+ * The same shape as the queue in troubles.ts, and for the same reason.
+ */
+async function write(
+  uid: string,
+  change: (ledger: Ledger) => Ledger,
+  now: Date
+): Promise<void> {
+  const run = queue.then(async () => {
+    const ledger = await load(uid, now);
+    const next = change(ledger);
+    if (next !== ledger) await save(uid, next);
+  });
+  queue = run.catch(() => undefined);
+  return run;
+}
+
 /**
  * Whether a kind has earned the right to be offered.
  *
@@ -270,18 +349,39 @@ async function save(uid: string, ledger: Ledger): Promise<void> {
  * making is a decision about someone's experience of the app, and a decision
  * they cannot see is one they cannot overrule.
  */
-export function welcome(learned: Ledger['learned'], kind: string): boolean {
-  const score = learned[kind] ?? { yes: 0, no: 0 };
-  if (score.yes === 0 && score.no >= ENOUGH_NO) return false;
-  if (score.yes + score.no < FREE_GOES) return true;
-  // One in three is a low bar on purpose. These are useful rarely and worth a
-  // lot when they land, so the thing to avoid is nagging, not a miss.
-  return score.yes / (score.yes + score.no) >= 1 / 3;
+export function welcome(
+  learned: Ledger['learned'],
+  kind: string,
+  now: Date = new Date()
+): boolean {
+  const score = learned[kind];
+  if (!score) return true;
+  // Said outright. The only thing here that is permanent, and the only thing
+  // the person has to ask for rather than Grove inferring it.
+  if (score.vetoed) return false;
+
+  const since = score.lastNo ? now.getTime() - Date.parse(score.lastNo) : Number.POSITIVE_INFINITY;
+  if (!Number.isFinite(since) || Number.isNaN(since)) return true;
+  // Long enough ago that it is history rather than a signal.
+  if (since > FORGETS_A_NO_AFTER_MS) return true;
+
+  const rest = REST_DAYS[Math.min(score.run, REST_DAYS.length - 1)] * 86_400_000;
+  return since >= rest;
 }
 
 export type OfferVerdict =
   | { offer: true; chosen: Offer }
-  | { offer: false; why: 'nothing' | 'unwelcome' | 'spent' | 'too-soon' | 'repeat' };
+  | {
+      offer: false;
+      /*
+        Stable reason codes, because these are read by something other than a
+        person: the Memory screen says why a kind is quiet, and "resting" and
+        "switched off" are different sentences to show somebody. Collapsing
+        them was lazy — one of them recovers on its own and the other needs
+        them to change their mind.
+      */
+      why: 'nothing' | 'resting' | 'vetoed' | 'spent' | 'too-soon' | 'repeat';
+    };
 
 /**
  * Whether to actually make it.
@@ -303,7 +403,12 @@ export async function worthOffering(
   if (turnsSinceLast < TURNS_BETWEEN) return { offer: false, why: 'too-soon' };
 
   const ledger = await load(uid, now);
-  if (!welcome(ledger.learned, candidate.kind)) return { offer: false, why: 'unwelcome' };
+  if (!welcome(ledger.learned, candidate.kind, now)) {
+    return {
+      offer: false,
+      why: ledger.learned[candidate.kind]?.vetoed === true ? 'vetoed' : 'resting',
+    };
+  }
   if (ledger.subjects.includes(candidate.subject)) return { offer: false, why: 'repeat' };
   if (ledger.today.length >= PER_DAY) return { offer: false, why: 'spent' };
   return { offer: true, chosen: candidate };
@@ -312,12 +417,11 @@ export async function worthOffering(
 /** Charges the caps, once the offer has actually been spoken. */
 export async function made(uid: string, offer: Offer, now = new Date()): Promise<void> {
   if (!uid || uid === 'anon') return;
-  const ledger = await load(uid, now);
-  await save(uid, {
+  await write(uid, (ledger) => ({
     ...ledger,
     today: [{ kind: offer.kind, subject: offer.subject, at: now.toISOString() }, ...ledger.today],
     subjects: [...ledger.subjects, offer.subject].slice(-SUBJECTS_KEPT),
-  });
+  }), now);
 }
 
 /**
@@ -327,38 +431,91 @@ export async function made(uid: string, offer: Offer, now = new Date()): Promise
  * direct question — far better evidence than interrupt.ts gets, where silence
  * has to stand in for a verdict.
  */
+export type Answer =
+  /** Yes. The strongest signal there is, and it clears the slate. */
+  | 'accepted'
+  /** No to this one. Buys the kind some rest; never switches it off. */
+  | 'declined'
+  /** "Stop offering that." Said, not inferred. Permanent until undone. */
+  | 'vetoed';
+
 export async function answered(
   uid: string,
   kind: string,
-  yes: boolean,
+  answer: Answer,
   now = new Date()
 ): Promise<void> {
   if (!uid || uid === 'anon') return;
-  const ledger = await load(uid, now);
-  const score = ledger.learned[kind] ?? { yes: 0, no: 0 };
-  await save(uid, {
-    ...ledger,
-    learned: {
-      ...ledger.learned,
-      [kind]: { yes: score.yes + (yes ? 1 : 0), no: score.no + (yes ? 0 : 1) },
-    },
-  });
+  await write(uid, (ledger) => {
+    const score: Score = ledger.learned[kind] ?? { yes: 0, no: 0, run: 0 };
+    let next: Score;
+    if (answer === 'accepted') {
+      /*
+        An accept clears the run and lifts a veto.
+
+        Clearing the run is the point: it is what stops a kind that works
+        from accumulating a sentence of its own out of the odd miss. And
+        lifting the veto is how someone undoes one without finding a
+        setting — they said stop, then later said yes, and the second is
+        more recent and more specific than the first.
+      */
+      next = { yes: score.yes + 1, no: score.no, run: 0 };
+    } else if (answer === 'vetoed') {
+      next = { ...score, no: score.no + 1, run: score.run + 1, lastNo: now.toISOString(), vetoed: true };
+    } else {
+      // A gap long enough that the old declines are history restarts the run
+      // rather than adding to it. See FORGETS_A_NO_AFTER_MS.
+      const since = score.lastNo ? now.getTime() - Date.parse(score.lastNo) : Number.POSITIVE_INFINITY;
+      const stale = !Number.isFinite(since) || since > FORGETS_A_NO_AFTER_MS;
+      next = {
+        yes: score.yes,
+        no: score.no + 1,
+        run: stale ? 1 : score.run + 1,
+        lastNo: now.toISOString(),
+        ...(score.vetoed ? { vetoed: true } : {}),
+      };
+    }
+    return { ...ledger, learned: { ...ledger.learned, [kind]: next } };
+  }, now);
+}
+
+/** Lets someone take a veto back from the Memory screen. */
+export async function allowAgain(uid: string, kind: string, now = new Date()): Promise<void> {
+  if (!uid || uid === 'anon') return;
+  await write(uid, (ledger) => {
+    const score = ledger.learned[kind];
+    if (!score) return ledger;
+    const { vetoed: _dropped, ...rest } = score;
+    return { ...ledger, learned: { ...ledger.learned, [kind]: { ...rest, run: 0 } } };
+  }, now);
 }
 
 /** For the Memory screen: what Grove has been told to stop offering. */
 export async function offerStanding(
   uid: string,
   now = new Date()
-): Promise<{ kind: string; yes: number; no: number; welcome: boolean }[]> {
+): Promise<
+  { kind: string; yes: number; no: number; welcome: boolean; vetoed: boolean; restingUntil?: string }[]
+> {
   const ledger = await load(uid, now);
   return Object.keys(ledger.learned)
-    .map((kind) => ({
-      kind,
-      yes: ledger.learned[kind]?.yes ?? 0,
-      no: ledger.learned[kind]?.no ?? 0,
-      welcome: welcome(ledger.learned, kind),
-    }))
-    .sort((a, b) => b.no - a.no || a.kind.localeCompare(b.kind));
+    .map((kind) => {
+      const score = ledger.learned[kind];
+      const rest = REST_DAYS[Math.min(score?.run ?? 0, REST_DAYS.length - 1)] * 86_400_000;
+      // Shown rather than implied: "resting until Thursday" is a thing
+      // somebody can disagree with, and "quietly off" is not.
+      const until =
+        score?.lastNo && rest > 0 ? new Date(Date.parse(score.lastNo) + rest) : null;
+      return {
+        kind,
+        yes: score?.yes ?? 0,
+        no: score?.no ?? 0,
+        welcome: welcome(ledger.learned, kind, now),
+        vetoed: score?.vetoed === true,
+        ...(until && until.getTime() > now.getTime() ? { restingUntil: until.toISOString() } : {}),
+      };
+    })
+    .sort((a, b) => Number(a.welcome) - Number(b.welcome) || b.no - a.no || a.kind.localeCompare(b.kind));
 }
 
 export async function forgetOffers(uid: string): Promise<void> {

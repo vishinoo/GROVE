@@ -773,9 +773,30 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         /^\s*(?:no|nope|nah|no thanks|no thank you|not now|not right now|later|maybe later|don'?t|i'?m good|it'?s fine|leave it)\s*[.!]?\s*$/i.test(
           asked
         );
+      /*
+        "Stop offering that" is a different sentence from "no".
+
+        This is the distinction the first version did not have, and not having
+        it was the bug. Two nos to two badly-chosen links used to switch links
+        off for good — which read a verdict on two offers as an instruction
+        about a whole ability, and made something genuinely useful look
+        broken. Declining is now rest, and only this pattern is permanent.
+
+        Deliberately a phrase and not a word. Nothing in here can be reached
+        by a bare "no", so Grove can never infer a veto; it has to be asked
+        for, in a sentence, which is the right asymmetry for a switch that
+        stays off.
+      */
+      const veto =
+        /\b(?:stop|quit|never|don'?t|do not)\b[^.?!]{0,30}\b(?:offer|offering|offers|ask|asking|suggest|suggesting|prompt|prompting|bring(?:ing)? (?:that|this) up)\b/i.test(
+          asked
+        ) || /\b(?:stop|quit)\s+(?:that|it|doing that)\b/i.test(asked);
       if (yes) {
         clearTimeout(holdTimer);
-        void answeredOffer(account, proposed.kind, true);
+        // An accept clears the run of declines and lifts any veto: they said
+        // stop once and have now said yes, and the second is more recent and
+        // more specific than the first.
+        void answeredOffer(account, proposed.kind, 'accepted');
         const doing = abilityById(proposed.ability);
         if (!doing) {
           // An offer naming an ability that no longer exists. verify checks
@@ -811,11 +832,22 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         });
         return;
       }
+      if (veto) {
+        clearTimeout(holdTimer);
+        void answeredOffer(account, proposed.kind, 'vetoed');
+        // Said back plainly rather than in character, because this is the one
+        // answer here that changes something lasting and they should hear
+        // that it landed. It can be taken back from the Memory screen, or by
+        // ever saying yes to one again.
+        utter("Right — I'll stop offering that.");
+        return;
+      }
       if (no) {
         clearTimeout(holdTimer);
-        // Counted, and this is the count that switches the kind off. Nobody
-        // should have to say no to the same sort of offer three times.
-        void answeredOffer(account, proposed.kind, false);
+        // Rest, not an off switch. A no is a verdict on this offer; it buys
+        // the kind a quiet day or two and nothing more. See the Score note in
+        // offers.ts for why those are different things.
+        void answeredOffer(account, proposed.kind, 'declined');
         // Said, not silent: falling quiet after a no is indistinguishable
         // from the app not having heard it. In the voice, because this is one
         // of the lines said most often.
