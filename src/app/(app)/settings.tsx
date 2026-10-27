@@ -45,6 +45,7 @@ import { checkNow, runningLabel, type Caught } from '@/lib/updates';
 import { MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona } from '@/lib/persona';
 import { hasOwnKey, setOwnKey } from '@/lib/lightModel';
 import { availableVoices, bestVoiceId, characterVoice, hasEnhancedVoice, speak } from '@/lib/speak';
+import { setDevMode, useDevMode } from '@/lib/devMode';
 import * as trigger from '@/lib/trigger';
 import { LIMIT } from '@/lib/transcript';
 import type * as SpeechTypes from 'expo-speech';
@@ -83,6 +84,7 @@ function SettingsBody() {
   // list somewhere you pass anyway beats burying it in Settings.
   const { persona, updatePersona, armed, route, activity, fillDemo } = useAgent();
   const [demo, setDemo] = useState<'idle' | 'filling' | 'done'>('idle');
+  const dev = useDevMode();
   const colour = fieldColour(persona.sky);
   const gradientId = `grove-name-${colour.key}`;
   /** Not one of the presets, so the box is theirs and worth showing. */
@@ -379,7 +381,7 @@ function SettingsBody() {
               <Switch
                 value={persona.speaksUp !== false}
                 onValueChange={(speaksUp) => set({ speaksUp })}
-                trackColor={{ true: palette.mark, false: palette.sunken }}
+                trackColor={{ true: palette.signal, false: palette.sunken }}
                 thumbColor="#FFFFFF"
               />
             }
@@ -448,7 +450,7 @@ function SettingsBody() {
               <Switch
                 value={persona.preferOnDevice}
                 onValueChange={(preferOnDevice) => set({ preferOnDevice })}
-                trackColor={{ true: palette.mark, false: palette.sunken }}
+                trackColor={{ true: palette.signal, false: palette.sunken }}
                 thumbColor="#FFFFFF"
               />
             }
@@ -514,10 +516,15 @@ function SettingsBody() {
         </Section>
       ) : null}
 
-      {/* Demo only, like signing out into the intro: take it out before
-          Grove is in anyone else's hands. See demoMemory.ts. */}
+      {/* Developer mode only; see devMode.ts. */}
+      {dev ? (
       <Section label="Demo">
         <Card style={{ paddingVertical: 2 }}>
+          <Row
+            label="Replay the intro"
+            hint="Signing out replays it too, while developer mode is on."
+            onPress={() => router.push('/onboarding')}
+          />
           <Row
             label="Fill memory for a demo"
             hint={
@@ -539,6 +546,7 @@ function SettingsBody() {
           />
         </Card>
       </Section>
+      ) : null}
 
       <Section label="Does it all work?">
         <Card>
@@ -574,7 +582,7 @@ function SettingsBody() {
                 value={persona.volumeTrigger}
                 onValueChange={(volumeTrigger) => set({ volumeTrigger })}
                 disabled={!report.remote}
-                trackColor={{ true: palette.mark, false: palette.sunken }}
+                trackColor={{ true: palette.signal, false: palette.sunken }}
                 thumbColor={palette.paper}
               />
             }
@@ -616,6 +624,23 @@ function SettingsBody() {
           onPress={() => void signOut()}
           style={{ marginTop: 14 }}
         />
+      </Section>
+
+      <Section label="Developer">
+        <Card style={{ paddingVertical: 2 }}>
+          <Row
+            label="Developer mode"
+            hint={dev ? 'Demo tools are showing, above.' : 'Shows the demo tools.'}
+            right={
+              <Switch
+                value={dev}
+                onValueChange={setDevMode}
+                trackColor={{ true: palette.signal, false: palette.sunken }}
+                thumbColor="#FFFFFF"
+              />
+            }
+          />
+        </Card>
       </Section>
     </Screen>
   );

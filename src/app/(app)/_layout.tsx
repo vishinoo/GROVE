@@ -10,6 +10,7 @@ import { Field, useField } from '@/components/field';
 import { Icon, type IconName } from '@/components/icon';
 import { useAgent } from '@/context/agent';
 import { capabilities } from '@/lib/capabilities';
+import { useDevMode } from '@/lib/devMode';
 import { rememberIntro } from '@/lib/consolidate';
 import { takeIntro } from '@/lib/firstRun';
 import { Elevation, Fonts, Radius } from '@/constants/theme';
@@ -50,8 +51,9 @@ const TABS: { name: string; label: string; icon: IconName }[] = [
 
 export default function AppLayout() {
   const { status } = useSession();
-  // Signing out goes back through the intro, which ends on the login screen.
-  if (status === 'signed-out') return <Redirect href="/onboarding" />;
+  const dev = useDevMode();
+  // In developer mode signing out replays the intro, which ends on login.
+  if (status === 'signed-out') return <Redirect href={dev ? '/onboarding' : '/login'} />;
   return <OnTheField />;
 }
 

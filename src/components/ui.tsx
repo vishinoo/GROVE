@@ -331,7 +331,9 @@ export function Button({
   const background =
     tone === 'primary' ? palette.mark : tone === 'danger' ? 'transparent' : palette.raised;
   const foreground =
-    tone === 'primary' ? palette.paper : tone === 'danger' ? palette.alert : palette.ink;
+    // onMark, not paper: on glass the paper is transparent, and a white
+    // button with see-through text is a white button with nothing on it.
+    tone === 'primary' ? palette.onMark : tone === 'danger' ? palette.alert : palette.ink;
   const border = tone === 'primary' ? palette.mark : tone === 'danger' ? palette.alert : palette.line;
 
   return (

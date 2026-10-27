@@ -87,6 +87,31 @@ const LIVE = '#5EE08A';
 const INTRO_LIMIT = 1200;
 
 /**
+ * What goes in the boxes, shown by example and turning over every few
+ * seconds.
+ *
+ * Several strangers' lives, not one, and never the author's: a single
+ * example reads as the shape the answer must take, and an example naming the
+ * person holding the phone reads as an app that already knows them. Ordinary,
+ * happy, specific lives, so the point lands — names, places, plans — without
+ * anyone feeling they have to have a marathon to mention.
+ */
+const ABOUT_EXAMPLES = [
+  'I’m a nurse on night shifts in Halifax. I love cooking for friends, and I’m learning to surf.',
+  'Second-year engineering student. I play bass in a band on weekends and I’m always halfway through a book.',
+  'I run a small coffee shop with my partner. Two kids, one dog, and a garden that’s getting away from us.',
+  'Designer in Toronto. I swim most mornings and I’m trying to cook more and order in less.',
+  'Just moved to Vancouver for work. I hike on weekends and call my mum every Sunday.',
+];
+const WORK_EXAMPLES = [
+  'Training for my first marathon in April, and saving for a trip to Japan.',
+  'Launching my own design studio. Getting back to the gym three times a week.',
+  'Finishing my thesis by June, and learning Spanish before a summer in Mexico.',
+  'Opening a second shop. Reading one book a month this year.',
+  'Going for team lead this year, and finally learning the piano.',
+];
+
+/**
  * Whether the person has asked the system to stop things moving. Read once:
  * nobody changes it halfway through a two-minute intro.
  */
@@ -209,20 +234,10 @@ export default function Onboarding() {
                 <ColourStep value={persona.sky} onChange={(sky) => void updatePersona({ ...persona, sky })} />
               ) : null}
               {step === 'you' ? (
-                <Writing
-                  title="Tell it about you."
-                  value={about}
-                  onChange={setAbout}
-                  placeholder="I study finance at university. I’m up late most nights. Big fan of Lego."
-                />
+                <Writing title="Tell it about you." value={about} onChange={setAbout} examples={ABOUT_EXAMPLES} />
               ) : null}
               {step === 'work' ? (
-                <Writing
-                  title="What are you working on?"
-                  value={work}
-                  onChange={setWork}
-                  placeholder="Getting a summer internship. Training for a half marathon."
-                />
+                <Writing title="What are you working on?" value={work} onChange={setWork} examples={WORK_EXAMPLES} />
               ) : null}
               {step === 'ready' ? (
                 <Ready name={persona.name.trim() || 'Grove'} glasses={glasses} ring={ringHeard} />
@@ -600,13 +615,23 @@ function Writing({
   title,
   value,
   onChange,
-  placeholder,
+  examples,
 }: {
   title: string;
   value: string;
   onChange: (text: string) => void;
-  placeholder: string;
+  examples: string[];
 }) {
+  // Turns over only while the box is empty; once someone is typing, the
+  // example has done its job.
+  const [shown, setShown] = useState(() => Math.floor(Math.random() * examples.length));
+  useEffect(() => {
+    if (value) return;
+    const timer = setInterval(() => setShown((n) => (n + 1) % examples.length), 3800);
+    return () => clearInterval(timer);
+  }, [value, examples.length]);
+  const placeholder = examples[shown];
+
   return (
     <View style={{ gap: 16 }}>
       <Text style={mid}>{title}</Text>

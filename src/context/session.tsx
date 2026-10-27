@@ -8,6 +8,7 @@
  * come with them.
  */
 
+import { isDevMode } from '@/lib/devMode';
 import { forgetOnboardingSeen } from '@/lib/firstRun';
 import type { Session } from '@supabase/supabase-js';
 import * as Linking from 'expo-linking';
@@ -260,8 +261,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     await api.setDevSession(false);
     await auth.signOut();
-    // Back through the intro next time; see forgetOnboardingSeen.
-    await forgetOnboardingSeen();
+    // In developer mode, back through the intro next time, for demos.
+    if (isDevMode()) await forgetOnboardingSeen();
     setStatus('signed-out');
     setUser(null);
     // Reset the storage namespace too, so nothing can be written against the
