@@ -36,6 +36,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { setThemeChoice, type ThemeChoice } from '@/hooks/use-palette';
 import { capabilities } from '@/lib/capabilities';
 import {
+  ABILITIES,
   runAbility,
   setCurrentAccount,
   rememberTone,
@@ -48,6 +49,7 @@ import { abortListening, isListening, startListening, stopListening } from '@/li
 import {
   DEFAULT_PERSONA,
   fallback,
+  fineFor,
   holdingFor,
   loadPersona,
   savePersona,
@@ -65,10 +67,11 @@ import {
   answered as answeredOffer,
   forgetOffers,
   made as offerMade,
-  offerFor,
+  offerFrom,
   worthOffering,
   TURNS_BETWEEN,
   type Offer,
+  type Proposal,
 } from '@/lib/offers';
 import { plainFailure } from '@/lib/failure';
 import * as struggles from '@/lib/struggles';
@@ -813,7 +816,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         // Counted, and this is the count that switches the kind off. Nobody
         // should have to say no to the same sort of offer three times.
         void answeredOffer(account, proposed.kind, false);
-        utter('Righto.');
+        // Said, not silent: falling quiet after a no is indistinguishable
+        // from the app not having heard it. In the voice, because this is one
+        // of the lines said most often.
+        utter(fineFor(voice));
         return;
       }
     }
@@ -928,7 +934,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         honest version of the cost: an offer spends a listening window, and
         the window shuts itself in silence.
       */
-      const offer = await considerOffer(text, reply.text, []);
+      const offer = await considerOffer(reply.offer);
       if (!mine()) return;
       utter(
         offer ? `${reply.text} ${offer.say}` : reply.text,
@@ -1187,7 +1193,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       // different piece of work is the worst version of this feature.
       const offer =
         outcome.ok && pending.current === null && outcome.listenAfter !== true
-          ? await considerOffer(text, heard, [ability.id])
+          ? await considerOffer(reply.offer)
           : null;
       if (!mine()) return;
       utter(
@@ -1720,27 +1726,30 @@ function shortFailure(text: string): string {
    * something to weigh. An ordinary conversation touches no storage and makes
    * no model call, which is what lets this run on every single reply.
    */
-  const considerOffer = useCallback(
-    async (said: string, replied: string, ran: string[]): Promise<Offer | null> => {
-      // Never stacked on something already waiting on the person. A question
-      // and an offer in the same breath are two things to answer at once, and
-      // an offer on top of an armed confirmation is worse than that — the
-      // next yes would be ambiguous about which one it meant.
-      if (pending.current || awaitingYes.current) return null;
-      const candidate = offerFor({ said, replied, ran });
-      if (!candidate) {
-        turnsSinceOffer.current += 1;
-        return null;
-      }
-      const verdict = await worthOffering(live.current.uid, candidate, turnsSinceOffer.current);
-      if (!verdict.offer) {
-        turnsSinceOffer.current += 1;
-        return null;
-      }
-      return verdict.chosen;
-    },
-    []
-  );
+  const considerOffer = useCallback(async (proposal?: Proposal): Promise<Offer | null> => {
+    // Never stacked on something already waiting on the person. A question
+    // and an offer in the same breath are two things to answer at once, and
+    // an offer on top of an armed confirmation is worse than that — the next
+    // yes would be ambiguous about which one it meant.
+    if (!proposal || pending.current || awaitingYes.current) {
+      turnsSinceOffer.current += 1;
+      return null;
+    }
+    // Checked against the real ability set, not taken on trust: the model
+    // proposes and this decides whether what it proposed is a thing Grove
+    // can actually do with the arguments it supplied. See offers.ts.
+    const candidate = offerFrom(proposal, ABILITIES.filter((a) => a.wired));
+    if (!candidate) {
+      turnsSinceOffer.current += 1;
+      return null;
+    }
+    const verdict = await worthOffering(live.current.uid, candidate, turnsSinceOffer.current);
+    if (!verdict.offer) {
+      turnsSinceOffer.current += 1;
+      return null;
+    }
+    return verdict.chosen;
+  }, []);
 
   /** Charged once the words are actually out, never before. */
   const offerSpoken = useCallback((offer: Offer) => {

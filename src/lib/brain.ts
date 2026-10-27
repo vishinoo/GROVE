@@ -38,6 +38,7 @@ import { rapport, rapportDirective } from './rapport';
 import { calculate } from './calc';
 import { ABILITIES } from './abilities';
 import { activePreset, fallback, mannerDirective } from './persona';
+import type { Proposal } from './offers';
 import { abilityIdFor, argsFromCall, declarationsFor } from './tools';
 
 /**
@@ -70,6 +71,41 @@ const ASK_BACK = {
   },
 };
 
+/**
+ * The other tool that is not an ability: offering to do one more thing.
+ *
+ * Called alongside the reply rather than instead of it, and it runs nothing —
+ * the turn collects it, checks it against the real ability set, and may add
+ * the one line to the end of what is said. See offers.ts for why the model
+ * decides this and code decides whether.
+ *
+ * The arguments arrive as a JSON string because a flat function schema has
+ * nowhere to put a nested object. `offerFrom` parses it tolerantly: a model
+ * that mangles the braces should cost the offer, not the reply.
+ */
+const OFFER_NEXT = {
+  name: 'offer_next',
+  description:
+    'Offer to do ONE more useful thing, as a short question at the end of your reply. Only when you can name exactly what you would do and fill in its arguments from this conversation — never a vague "want me to help with that?". The person answers yes or no out loud; nothing happens until they do.',
+  parameters: {
+    type: 'OBJECT',
+    properties: {
+      say: {
+        type: 'STRING',
+        description:
+          'The offer in one short line, in your own voice, ending in a question mark. "Want me to send you the Amazon link for it?"',
+      },
+      tool: { type: 'STRING', description: 'The name of the tool you would call.' },
+      arguments: {
+        type: 'STRING',
+        description:
+          'That tool\'s arguments as a JSON object, filled in properly. {"what":"Never Split The Difference book","store":"amazon"}',
+      },
+    },
+    required: ['say', 'tool', 'arguments'],
+  },
+};
+
 /** A tool that already ran inside the loop, for the card on the Talk screen. */
 export type RanTool = { ability: Ability; ok: boolean; spoken: string; detail?: string };
 
@@ -86,6 +122,13 @@ const TOOL_RULES = `How to use your tools:
   - advice on a decision: ask what matters most to them or what they are worried about.
   Example — "make me a workout plan" → ask_back: "Are we building muscle or just surviving the stairs — and how many days a week will you actually turn up?"
   Do not ask back on plain requests you can simply do or answer: a lookup, a message they dictated, music, directions, a document they described. And ask at most once per request — after they answer, do the thing.
+- Offer the obvious next step, sometimes, with offer_next. One short question at the end of your reply, naming something concrete you would do — "want me to send you the Amazon link for it?", "want that written up as a plan in your docs?", "shall I put the three of them in a doc with the numbers?". Rules:
+  - You must be able to NAME it and fill in the tool's arguments from this conversation. If you would have to ask what you were doing, do not offer.
+  - Use what you know about them, above. The useful offer fits their goals, their budget, what they said they were eating this month, the deadline they mentioned — not the generic version.
+  - It is the second-best thing in the reply, never the point of it. Answer first, properly. Most replies need no offer at all, and one you had to reach for has made the answer worse.
+  - Never alongside ask_back, never after something failed, never twice in a row, and never an offer to do what you have just done.
+  - Never an offer to simply tell them something — that is just answering, so answer.
+  The app asks them; they say yes or no out loud; nothing happens until they do. If the thing needs confirming it will still ask before doing it, so you never need to warn them.
 - ask_back is the ONLY way to wait for an answer. An ordinary reply never waits, so never end one on a question you want answered — and a joke or rhetorical question is fine, because nobody will be listening for a reply to it.
 - For calendar questions, pass what they are looking for and any day or position they named ("first", "last", "next", "tomorrow").
 - For email, write the search the way Gmail understands it when that helps: from:xbox, newer_than:7d, is:unread.
@@ -444,13 +487,42 @@ export async function phraseAction(
   return agreesOnTime(clean, happened) ? clean : null;
 }
 
+/**
+ * One turn, with the offer attached on the way out.
+ *
+ * A wrapper rather than a seventh thing threaded through every return in the
+ * loop below — there are seven of them, and the one that forgot would be a
+ * feature silently not happening on whichever path it was. `offer_next` never
+ * ends a turn, so collecting it in one place and attaching it here is both
+ * shorter and harder to get wrong.
+ */
 export async function askWithTools(
   history: Turn[],
   userText: string,
   context: GroveContext
 ): Promise<GroveReply> {
+  const proposed: { offer?: Proposal } = {};
+  const reply = await runTurn(history, userText, context, proposed);
+  /*
+    Dropped when the turn ended on a question of its own.
+
+    `ask_back` is already waiting on an answer, and a reply that asks two
+    questions and opens one microphone is a reply where the person's answer
+    goes to whichever one Grove feels like. The offer is the one of the two
+    that can wait.
+  */
+  if (!proposed.offer || reply.expectsReply) return reply;
+  return { ...reply, offer: proposed.offer };
+}
+
+async function runTurn(
+  history: Turn[],
+  userText: string,
+  context: GroveContext,
+  proposed: { offer?: Proposal }
+): Promise<GroveReply> {
   const available = ABILITIES.filter((a) => a.wired);
-  const declarations = [...declarationsFor(available), ASK_BACK];
+  const declarations = [...declarationsFor(available), ASK_BACK, OFFER_NEXT];
   // A line of names, not the archive: enough that "my cofounder" and "Jason"
   // are the same person without a lookup, and cheap enough to ride on every
   // turn. Everything else about them is a tool call away.
@@ -557,6 +629,34 @@ export async function askWithTools(
           return { text: plainSpeech(question), args: {}, fact, ran, expectsReply: true };
         }
         results.push({ name: call.name, result: { ok: false, result: 'Ask a question.' } });
+        continue;
+      }
+
+      /*
+        Offering ends nothing and runs nothing.
+
+        Collected and carried out of the turn, where offers.ts checks it
+        names a real ability with its required arguments filled, and the
+        budget decides whether it is worth a line. The model is told the
+        person answers out loud, so it gets a result back that says so —
+        without one the loop would call it again.
+      */
+      if (call.name.toLowerCase().replace(/[^a-z]/g, '') === 'offernext') {
+        const raw = (call.args ?? {}) as Record<string, unknown>;
+        const say = String(raw.say ?? '').trim();
+        const tool = String(raw.tool ?? '').trim();
+        if (say && tool) {
+          proposed.offer = { say: plainSpeech(say), tool, args: raw.arguments ?? raw.args ?? {} };
+          results.push({
+            name: call.name,
+            result: { ok: true, result: 'Offered. They will answer out loud; do not offer again.' },
+          });
+        } else {
+          results.push({
+            name: call.name,
+            result: { ok: false, result: 'Needs the line to say and the tool to call.' },
+          });
+        }
         continue;
       }
 

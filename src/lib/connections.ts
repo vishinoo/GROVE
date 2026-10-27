@@ -85,6 +85,7 @@ export const CONNECTIONS: Connection[] = [
     kind: 'account',
     unlocks: [
       'mail.send',
+      'link.send',
       'mail.search',
       'mail.reply',
       'mail.summarise',

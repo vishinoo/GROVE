@@ -389,56 +389,97 @@ what a leave-by scores.
 
 ## What Grove offers to do next
 
-`src/lib/offers.ts`. Talking about a book and then having to say "order that on
-Amazon" is a sentence the conversation already contained. So Grove may add
-**one line** to the end of a reply offering the thing it could do next — pull
-the book up on Amazon, write the training plan being described, put a research
-note together on the shares being weighed up.
+`src/lib/offers.ts`. Talking about a book and then having to say "send me the
+Amazon link" is a sentence the conversation already contained. So Grove may add
+**one line** to the end of a reply offering the obvious next thing — send you
+the link, write that up as a plan, put the three companies in a doc with
+current numbers.
 
-This is one word away from the thing that ruins it, so the file is mostly
-restraint and **the restraint is the feature**. Same shape as `interrupt.ts`,
-for the same reason.
+**The model decides what; code decides whether.** That split is the design, and
+the first version got it wrong.
 
-- **Rules, not a model.** It runs on every finished turn; a call to decide
-  whether to make an offer would cost more than the answer it is attached to.
-  `offerFor` is pure and synchronous and says no to nearly every turn, so the
-  ledger is only read when there is something to weigh. An ordinary
-  conversation touches no storage and makes no model call.
-- **An offer must be able to name what it would do.** Every offer carries a
-  real ability id and the real arguments it would run with, assembled from
-  words that were actually said. No arguments, no offer — which is what stops
-  this becoming "shall I help with that?". It is also why a vague conversation
-  gets nothing: there is nothing to name.
-- **A keyword is not an intention.** "I'm running three minutes late" offered a
-  training plan, which is the whole feature discrediting itself in one
-  sentence. A plan now needs a practice *and* a design on it ("trying to",
-  "three times a week"); a research note needs the money to be theirs, so "how
-  did the market do today" gets its answer and nothing else. `run` is out of
-  the vocabulary altogether — a third of its uses are about being late, and
-  pairing it with an intention does not save it ("I need to run to the shop").
-  "I want to start running" is therefore missed, which is the right way round
-  to be wrong.
-- **A kind you refuse stops being offered.** Per kind, not globally: two nos to
-  research notes switches research notes off and leaves the rest alone. Nobody
-  should have to say no to the same sort of thing three times, or find a
-  setting for it. Only an outright yes or no teaches anything — answering with
-  a different sentence is moving on, not refusing.
-- **Caps over judgement.** One per turn, two a day, six turns apart, never the
-  same kind twice in a day, never the same subject twice at all. Measured end
-  to end: sixty turns with six offer-worthy moments in them produced **two
-  offers, one per thirty turns**.
+### Why the keyword list had to go
 
-**An offer is not a confirmation**, and that is the whole safety argument. It
-cannot be answered with a press, and saying yes only ever *starts* the
-ability — `shop.order` then asks for its own press exactly as before. Nothing
-in `offers.ts` may set `confirmed`, nor may the branch that runs an accepted
-one, and `npm run verify` checks both: an offer that carried a confirmation
-would be a way to reach a paid app with one yes to a question Grove thought of
-by itself.
+Version one decided *what* here too, from a list: books, the gym, shares, each
+wired to one ability. It worked for exactly the three cases written into it,
+was useless everywhere else, and was wrong in the way a keyword list is always
+wrong — **"I'm running three minutes late" matched the gym rule and offered a
+training plan.** Tightening it ("a practice *and* a design on it") only moved
+the boundary; "I need to run to the shop" has both.
 
-The spacing count is held in memory rather than written down. It only has to
-hold within a conversation, and putting it on disk would have meant a read on
-every single turn.
+The model already sees the conversation, the long memory, the constraints and
+every ability as a typed function, on a call being made anyway. It is the only
+thing in the system that can tell a book worth owning from a book mentioned in
+passing, or know the restaurant should suit what someone said about eating this
+month. So `offer_next` is a declared tool alongside `ask_back`: the model
+proposes in the same breath as its reply, at **no extra model call**, and the
+turn collects it without running it.
+
+### What the gate checks
+
+`offerFrom` is the *whether*, and it is the half a model should not be trusted
+with:
+
+- **It must name a real ability and survive its schema.** The tool has to
+  exist, be allowed in this mode, and have its required arguments filled. This
+  is a better rule than any keyword list: an offer that cannot fill the
+  arguments of the thing it is offering has not worked out what it would do.
+  *"Want me to look that up for you?"* with no topic is the sentence this
+  feature exists never to say, and it is exactly what a model produces when it
+  is being agreeable rather than useful.
+- **It must be answerable out loud** — one line, ending in a question. A
+  statement is not an offer; there would be nothing to say yes to.
+- **A kind you refuse stops being offered**, keyed by ability. Two nos to being
+  sent links switches links off and leaves documents alone. Nobody should have
+  to refuse the same sort of thing three times, or find a setting for it. Only
+  an outright yes or no teaches anything — answering with a different sentence
+  is moving on, not refusing.
+- **Caps as a backstop**, not as the decision: four a day, two turns apart,
+  never the same subject twice. They bound a model having an enthusiastic
+  afternoon. Measured end to end: forty turns, eight proposals, **four
+  offers** — then two nos to links, and the next day a link offer is refused
+  `unwelcome`, the same doc offer `repeat`, and a different doc offer goes
+  through.
+- **Never alongside `ask_back`.** Two questions and one microphone is a reply
+  whose answer goes to whichever one Grove felt like, so the offer is dropped —
+  it is the one of the two that can wait.
+
+An offer costs nothing when nothing is proposed: `offerFrom` is pure and
+synchronous, and the ledger is only read once there is something to weigh.
+
+**An offer is not a confirmation.** It cannot be answered with a press, and
+saying yes only ever *starts* the ability — `shop.order` then asks for its own
+press exactly as before. Nothing in `offers.ts` may set `confirmed`, nor may
+the branch that runs an accepted one, and `npm run verify` checks both: an
+offer carrying a confirmation would be a way to reach a paid app with one yes
+to a question Grove thought of by itself.
+
+## Sending you the thing it found
+
+Two changes made offers worth having, and both were about a link surviving long
+enough to be sent.
+
+**A search used to delete its own addresses.** `lightBrief` was told to write
+no URLs and then stripped them anyway — sensible for a sentence read into an
+ear, where an address arrives as a minute of letters, and it made *"send me
+that link"* impossible to honour: by the time anyone could ask, the address no
+longer existed anywhere in the app. The rule in this file was already right —
+`spoken` is shortened for an ear and the full data goes in `detail` — it simply
+was not being followed. The model now writes a `LINKS:` line, which is parsed
+off, kept in `detail`, and never spoken. An address the model writes into its
+prose anyway is replaced with "their website" rather than deleted, because
+deleting it leaves the sentence around it: *"you can get it at for twenty
+dollars"*.
+
+**`link.send` is the delivery, and it has no confirmation.** Every other
+writing ability here takes a press; this one does not, and the whole argument
+is in the address — it comes from `google.me()` and **cannot be passed in**.
+There is no argument a misheard sentence could fill that would send it to
+anybody else, nothing is spent, and the worst case is an email you delete. That
+is a different risk class from `mail.send`, which is why it gets a different
+rule rather than an exception to the old one. `npm run verify` asserts the
+ability takes no `to`, `recipient`, `address`, `email` or `who` argument, since
+the moment one appears the exemption is no longer earned.
 
 ## Constraints, in one read
 
@@ -687,6 +728,13 @@ kind `tsc` and `npm run verify` cannot see:
   announced as "happening now until 18:00".
 - **Gmail quotes display names.** `"Chen, Mark" <…>` failed both person tests
   in `mail.important`, so a real person's mail scored below the cut.
+- **A harness slice with one unasserted end measures the wrong thing.** A check
+  on the offer-accept branch ran from a comment to a hardcoded line; the line
+  was later rewritten, `indexOf` returned -1, `slice(start, -1)` handed back
+  most of the file, and the check failed on a `confirmed:` three hundred lines
+  away. Same fault as the unguarded `.replace` that once left a whole pane
+  without its class: **assert every offset, and assert the size of what came
+  back.**
 - **A From line can be a bare address**, with no angle brackets — which the new
   inbox-address lookup discarded, producing "I have no address for Mark" for
   precisely the case it was written for.
@@ -913,6 +961,11 @@ in a pocket, not a purchase that needed asking for twice.
 `npm run verify` asserts that every ability which reaches a paid app takes a
 confirmation and is not marked `reads` — a read is reachable from a question,
 and a question must never buy anything.
+
+The one exemption is `link.send`, and it is earned in the type rather than
+argued for: the destination is the person's own account, read from
+`google.me()`, with no argument that could redirect it. See "Sending you the
+thing it found".
 
 The reasoning is the same one `detectActIntent` is built on, taken one step
 further: a false positive there costs an email nobody wrote, which is

@@ -134,6 +134,15 @@ export type Preset = {
   stuck: string;
   /** Acknowledging something worth remembering. */
   noted: (what: string) => string;
+  /**
+   * Turning down an offer Grove made itself.
+   *
+   * Two words, because they said no to a question nobody asked them to
+   * answer and the right response is to drop it. It still has to be *said*:
+   * falling silent after a no is indistinguishable from the app not having
+   * heard it, which is the failure that teaches people to press twice.
+   */
+  fine: string;
 };
 
 /**
@@ -156,6 +165,7 @@ export const PRESETS: Preset[] = [
     empty: "Yeah, nothing. Whatever's out there isn't saying.",
     stuck: "Can't get to anything right now. Not my finest hour.",
     noted: (what: string) => `Right, ${what}. Filed away.`,
+    fine: 'Fair enough.',
   },
   {
     key: 'alfred',
@@ -168,6 +178,7 @@ export const PRESETS: Preset[] = [
     empty: "I'm afraid I couldn't find anything reliable on that.",
     stuck: "I can't reach anything to check with at present. Do try me again shortly.",
     noted: (what: string) => `Noted, sir — ${what}. I shan't forget.`,
+    fine: 'Very good, sir.',
   },
   {
     key: 'hal',
@@ -180,6 +191,7 @@ export const PRESETS: Preset[] = [
     empty: 'No result.',
     stuck: 'No connection. Cannot retrieve.',
     noted: (what: string) => `Recorded. ${what.replace(/^./, (c) => c.toUpperCase())}.`,
+    fine: 'Understood.',
   },
 ];
 
@@ -381,6 +393,11 @@ export function activePreset(persona: Persona): Preset | undefined {
  */
 export function notedFor(persona: Persona, what: string): string {
   return activePreset(persona)?.noted(what) ?? `Noted — ${what}.`;
+}
+
+/** What Grove says when an offer of its own is turned down. */
+export function fineFor(persona: Persona): string {
+  return activePreset(persona)?.fine ?? 'Fair enough.';
 }
 
 /** One of the voice's holding lines, or a neutral one. */

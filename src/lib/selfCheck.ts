@@ -80,7 +80,7 @@ const CHECKS: Check[] = [
     run: async () => {
       const found = await within(30_000, lightBrief('what day of the week is it today'), null);
       return found
-        ? { ok: true, detail: found.slice(0, 80) }
+        ? { ok: true, detail: found.spoken.slice(0, 80) }
         : { ok: false, detail: 'Search did not come back. Usually signal; try again in a moment.' };
     },
   },

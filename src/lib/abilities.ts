@@ -283,9 +283,12 @@ const BRIEF: Ability = {
     // The town rides along, because half of what people search for out loud is
     // local — the next bus, what is open, what a ticket costs — and a search
     // with no place in it answers about somewhere else entirely.
-    const summary = (await lightBrief(topic, await homeTown()))?.trim();
-    return summary
-      ? { ok: true, spoken: summary }
+    const found = await lightBrief(topic, await homeTown());
+    // The spoken half is already fit for an ear; `detail` is the same answer
+    // with the web addresses still attached, which is what makes "send me
+    // that link" answerable afterwards. See the note in lightBrief.
+    return found
+      ? { ok: true, spoken: found.spoken, detail: found.detail }
       : { ok: false, spoken: `Nothing came back for ${topic}.` };
   },
 };
@@ -991,6 +994,81 @@ const MAIL_SEND: Ability = {
     // seconds and assuming Grove is broken.
     return sent
       ? { ok: true, spoken: asked === to ? 'Sent.' : `Sent to ${asked}.` }
+      : { ok: false, spoken: google.explain('sending that') };
+  },
+};
+
+/**
+ * Sending something to yourself.
+ *
+ * The missing half of being useful out loud. Grove finds the book, the
+ * restaurant, the three companies — and then has nowhere to put the result,
+ * because the only delivery it had was `mail.send`, which is for other people
+ * and asks for a press before it goes. Having to approve an email to your own
+ * inbox is a confirmation protecting you from yourself.
+ *
+ * So this is its own ability with no confirmation, and the reasoning is in the
+ * address: it comes from `google.me()` and **cannot be passed in**. There is
+ * no argument a misheard sentence could fill that would send this to anybody
+ * else, nothing is spent, and the worst case is an email you delete. That is a
+ * different risk class from every other thing in this file that writes, which
+ * is why it gets a different rule rather than an exception to the old one.
+ *
+ * It is also what makes a web address worth keeping (see `lightBrief`): spoken
+ * aloud a URL is a minute of letters, and in your inbox it is a tap.
+ */
+const SEND_SELF: Ability = {
+  id: 'link.send',
+  name: 'Send to yourself',
+  what: 'Sends something to the person themselves — a web address you found, a place, a product, a short list, anything they will want to open or keep later. Goes to their own inbox, or into a new document if it is long enough to read properly. Never for sending to anyone else; use the email tool for that.',
+  where: 'server',
+  wired: true,
+  needs: ['email'],
+  args: {
+    what: {
+      type: 'string',
+      what: 'a few words naming it, which becomes the subject or the title',
+      required: true,
+    },
+    body: {
+      type: 'string',
+      what: 'what to send — the web address or addresses, plus the one line of context that makes it obvious what it is',
+      required: true,
+    },
+    how: { type: 'string', what: '"doc" to put it in a Google Doc instead; an email otherwise' },
+  },
+  examples: [
+    'send me that link',
+    'email me the address',
+    'send that to myself so I can look at it later',
+    'put those links somewhere I can find them',
+  ],
+  run: async (args) => {
+    const what = (args.what || '').trim();
+    const body = (args.body || '').trim();
+    if (!body) return { ok: false, spoken: 'What should I send you?' };
+
+    const asDoc = /doc|document/i.test(args.how || '');
+    if (asDoc) {
+      if (!(await google.allowed('writing documents'))) {
+        return { ok: false, spoken: google.explain('writing documents') };
+      }
+      const made = await google.createDoc(what || 'From Grove', body);
+      return made
+        ? { ok: true, spoken: `In your docs, called ${what || 'From Grove'}.`, detail: made.url }
+        : { ok: false, spoken: google.explain('writing documents') };
+    }
+
+    if (!(await google.allowed('sending mail'))) {
+      return { ok: false, spoken: google.explain('sending mail') };
+    }
+    // Their own address, read rather than accepted. This is the whole safety
+    // argument for there being no confirmation on this one.
+    const own = await google.me();
+    if (!own) return { ok: false, spoken: 'I could not work out your own address.' };
+    const sent = await google.sendMail(own, what || 'From Grove', body);
+    return sent
+      ? { ok: true, spoken: 'Sent to your inbox.', detail: body }
       : { ok: false, spoken: google.explain('sending that') };
   },
 };
@@ -3710,6 +3788,7 @@ export const ABILITIES: Ability[] = [
   NAVIGATE,
   MAIL_READ,
   MAIL_SEND,
+  SEND_SELF,
   BRIEF,
   CALENDAR_READ,
   CALENDAR_MOVE,

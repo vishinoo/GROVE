@@ -29,6 +29,7 @@ import { usableAbilities, type Ability } from './abilities';
 import { askWithTools, type RanTool } from './brain';
 import { type Extracted, type Fact } from './memory';
 import { type Persona } from './persona';
+import type { Proposal } from './offers';
 
 export type TurnTool = {
   name: string;
@@ -51,6 +52,14 @@ export type GroveReply = {
    * so the microphone should open when it has finished speaking.
    */
   expectsReply?: boolean;
+  /**
+   * One more thing the model reckons it could do next, proposed and not run.
+   *
+   * Unchecked at this point — it is whatever the model said. `offerFrom` in
+   * offers.ts decides whether it names a real ability with real arguments,
+   * and the budget decides whether it is worth a line. See that file.
+   */
+  offer?: Proposal;
   /** What Grove says. Always non-empty. */
   text: string;
   /** The ability to run now, when the user asked for something to happen. */

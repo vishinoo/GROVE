@@ -695,7 +695,10 @@ TITLE: <two or three words, only for a standing job>`;
  * the direct path, the endpoint is no longer the missing piece — there is
  * nothing left to build it out of but a prompt.
  */
-export async function lightBrief(topic: string, place?: string | null): Promise<string | null> {
+export async function lightBrief(
+  topic: string,
+  place?: string | null
+): Promise<{ spoken: string; detail: string } | null> {
   /*
     A search needs a where and a when, and had neither.
   
@@ -723,7 +726,13 @@ export async function lightBrief(topic: string, place?: string | null): Promise<
     // markets", this prompt answered "where can I get this book, is it free"
     // with a summary of news about the book — the search was right and the
     // answer was to a different question.
-    'You answer a question out loud, using web search. Answer exactly what was asked, in one to three sentences, leading with the answer: the specific names, numbers, places, prices, dates, or where to get something and whether it is free. For news or markets, lead with what changed, with numbers. Spoken aloud, so no markdown, no URLs, no bullet points, no preamble. If search genuinely finds nothing, say so plainly rather than guessing.\n\n' +
+    'You answer a question out loud, using web search. Answer exactly what was asked, in one to three sentences, leading with the answer: the specific names, numbers, places, prices, dates, or where to get something and whether it is free. For news or markets, lead with what changed, with numbers. Spoken aloud, so no markdown, no bullet points, no preamble. If search genuinely finds nothing, say so plainly rather than guessing.\n\n' +
+      // Asked for, and kept out of the spoken half below. Links used to be
+      // forbidden here and then stripped for good measure, which made it
+      // impossible for Grove to ever send anyone anything it had found: the
+      // thing you actually want after "where can I get that book" is the
+      // address, and it had been deleted before the turn ever saw it.
+      'After your answer, on its own last line, write LINKS: followed by the one or two web addresses behind what you just said, separated by spaces. Leave the line out entirely if there are none worth keeping. The addresses are never spoken — they are for sending to the person — so do not refer to them in your sentences.\n\n' +
       `It is ${clock} on ${today}, timezone ${zone}. That is the real current date and time — search as of now, and never answer a question about today from what you already knew.` +
       (where
         ? `\nThey are in ${where}. Anything local — transport, departures, opening times, shops, what is nearby, prices in a shop — means there unless they name somewhere else. Search for that place by name; do not answer about a different city with the same question.`
@@ -734,16 +743,48 @@ export async function lightBrief(topic: string, place?: string | null): Promise<
     false,
     true
   );
-  // This line can be spoken as it is, when the model is too slow to rephrase
-  // it — so it leaves here already fit to be heard: no asterisks, no code
-  // formatting, no bare web addresses read out character by character.
-  const clean = (text ?? '')
-    .replace(/[*`]+/g, '')
-    .replace(/\bhttps?:\/\/\S+/g, '')
+  /*
+    Two halves, because they are for two different things.
+
+    `spoken` goes in an ear, so it cannot contain a web address — read aloud,
+    one arrives as a minute of letters and slashes. `detail` goes to the
+    model, which is how Grove can be asked to send you the link afterwards.
+
+    Stripping the addresses out of both was the old behaviour and it quietly
+    made "can you send me that" impossible to honour: by the time anything
+    could be asked, the address no longer existed anywhere in the app. The
+    rule in AGENTS.md was already right — `spoken` is shortened for an ear and
+    the full data goes in `detail` — it simply was not being followed here.
+  */
+  const whole = (text ?? '').replace(/[*`]+/g, '').trim();
+  if (!whole) return null;
+
+  const linked = /^\s*LINKS:\s*(.+)$/im.exec(whole);
+  const links = (linked?.[1] ?? '')
+    .split(/\s+/)
+    .map((url) => url.replace(/[.,;)\]]+$/, '').trim())
+    .filter((url) => /^https?:\/\/\S+$/.test(url))
+    .slice(0, 3);
+
+  const said = whole
+    .replace(/^\s*LINKS:.*$/im, '')
+    // Any address the model wrote into its prose anyway. Told not to, it
+    // still does — the same reason plainSpeech exists. Named rather than
+    // deleted, because deleting it leaves the sentence around it: "you can
+    // get it at for twenty dollars".
+    .replace(/\bhttps?:\/\/\S+/g, 'their website')
     .replace(/\b[\w-]+(?:\.[\w-]+)+\/[\w./-]*/g, 'their website')
     .replace(/\s{2,}/g, ' ')
     .trim();
-  return clean || null;
+  if (!said) return null;
+
+  return {
+    spoken: said,
+    // The links are named as links so the model can pass one to a tool, and
+    // only ever reach a person through something that was offered and agreed
+    // to.
+    detail: links.length > 0 ? `${said}\n\nLinks: ${links.join(' ')}` : said,
+  };
 }
 
 /**

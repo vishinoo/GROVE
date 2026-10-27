@@ -959,112 +959,136 @@ section('No web API React Native does not have');
 }
 
 /*
- * Offers, and the restraint that is the whole feature.
+ * Offers, and the division of labour that makes them safe.
  *
- * Grove noticing it could do something next — pull a book up on Amazon, write
- * the training plan being described — is one word away from the thing that
- * ruins it, which is an assistant that ends every reply trying to sell you
- * something. So the checks here are mostly about silence, and the first one
- * is the one that matters: ordinary conversation must produce nothing at all.
+ * Grove may end a reply with one line offering the obvious next thing — send
+ * you the link, write that up, put the numbers in a doc. **The model decides
+ * what; this file's subject decides whether.**
  *
- * Run against the real module rather than a copy of its regexes, because a
- * copy would drift and the only question anybody has about this feature is
- * how often it actually fires.
+ * The first version decided *what* here too, with a keyword list, and it was
+ * wrong in the way a keyword list is always wrong: "I'm running three minutes
+ * late" matched the gym rule and offered a training plan. So the proposal now
+ * comes from the model, on the call that was happening anyway, and
+ * `offerFrom` is the gate. These checks are that gate — every one of them is
+ * a way a model-written proposal could reach a person as nonsense or worse.
  */
-section('An offer is rare, named, and never a confirmation');
+section('An offer must survive its own schema');
 {
   const offers = require(path.join(OUT, 'lib/offers.js'));
-  const { abilityById } = require(path.join(OUT, 'lib/abilities.js'));
+  const { ABILITIES, abilityById } = require(path.join(OUT, 'lib/abilities.js'));
+  const available = ABILITIES.filter((a) => a.wired);
 
-  // Twenty-two turns of the app being used normally. Not one may fire.
-  const ORDINARY = [
-    ['how are you doing today', "Not bad. What's on?"],
-    ['what time is my lecture', 'MARK 312 at eleven, in Tory.'],
-    ["what's the weather like", "Four degrees, dry. You'll want a jacket."],
-    ['put some music on', 'Putting something on.'],
-    ['remind me to call mum at six', "Done, I'll nudge you at six."],
-    ['what do you think about moving to Toronto', 'Depends what you want out of the next two years.'],
-    ['i had a rough day honestly', "That's fair. What happened?"],
-    ['what is the capital of France', 'Paris.'],
-    ['do i have any emails from priya', 'One, about Thursday.'],
-    ['whats my first thing tomorrow', 'Gym at seven, then MARK 312 at eleven.'],
-    ['how did the oilers do last night', 'They beat Calgary four to two.'],
-    ['can you summarise my inbox', 'Three worth looking at.'],
-    ['what should i have for dinner', 'You said you had chicken in. Do that.'],
-    ['im feeling pretty anxious about the interview', "Understandable. What's the bit you're dreading?"],
-    ['whats the meaning of life', "Depends who's asking and why."],
-    ['email priya im running 3 minutes late', "Here's the email to Priya."],
-    ['move my 2 - 3 pm meeting to thursday', 'Moved to Thursday.'],
-    ['who is sarah again', 'Sarah Okonkwo, your project partner on the finance case.'],
-    ['set a timer for ten minutes', 'Ten minutes, starting now.'],
-    ['i think i want to switch majors', "That's a big one. What's pulling you?"],
-    ['whats on at the cinema tonight', 'Dune Part Two, and a couple of others.'],
-    ['tell me a joke about physics', 'A neutron walks into a bar.'],
-    // The near misses, which are the ones worth keeping forever. Each of
-    // these fired at some point while this was being written.
-    ['im running 3 minutes late', "I'll let them know."],
-    ['i need to run to the shop before it shuts', 'It closes at nine.'],
-    ['i went to the gym today actually', 'Good. How was it?'],
-    ['how did the market do today', 'The S&P finished up about half a percent.'],
-    ['whats the stock price of apple', 'Around 230 dollars.'],
-    ['i read a great book last year, already read it twice', 'Which one?'],
-    ['im on the train to Calgary', 'How long is that?'],
-    ['running out of time on this assignment', 'When is it due?'],
-  ];
-  const noisy = ORDINARY.filter(([said, replied]) => offers.offerFor({ said, replied, ran: [] }));
-  check(
-    noisy.length === 0,
-    `nothing is offered on ${ORDINARY.length} ordinary turns`,
-    noisy.length ? `fired on: ${noisy.map(([s]) => JSON.stringify(s)).join(', ')}` : ''
-  );
-
-  // And the cases it exists for, which must each produce the right kind.
-  const REAL = [
-    ['can you recommend a book on probability', 'Murphy’s Probabilistic Machine Learning is the standard one.', 'buy'],
-    ['ive been trying to get back into the gym three days a week', 'Three days is the right number to start on.', 'plan'],
-    ['im thinking about putting some money into energy stocks', 'Worth knowing what you are buying first.', 'research'],
-    ['i need to start studying for my midterm next week', 'How many chapters is it?', 'plan'],
-    ['should i put some of my savings into an index fund', 'Low cost and boring is the whole pitch.', 'research'],
-  ];
-  for (const [said, replied, kind] of REAL) {
-    const made = offers.offerFor({ said, replied, ran: [] });
-    check(Boolean(made) && made.kind === kind, `"${said.slice(0, 34)}..." offers a ${kind}`);
-  }
-
-  // Every offer names an ability that exists. A connection unlocking an id
-  // that had been renamed is a fault this file was written for.
-  for (const [said, replied] of REAL) {
-    const made = offers.offerFor({ said, replied, ran: [] });
-    if (!made) continue;
-    check(Boolean(abilityById(made.ability)), `the ${made.kind} offer names a real ability (${made.ability})`);
-    // It must also be able to say what it would do. An offer with no
-    // arguments is "shall I help with that?", which is the thing this is not.
-    check(
-      Object.values(made.args).some((value) => String(value).trim().length > 0),
-      `and the ${made.kind} offer carries arguments`
-    );
-  }
+  const good = {
+    say: 'Want me to send you the Amazon link for it?',
+    tool: 'shop_order',
+    args: '{"what":"Never Split The Difference book","store":"amazon"}',
+  };
+  const made = offers.offerFrom(good, available);
+  check(Boolean(made), 'a proposal naming a real tool with real arguments is kept');
+  check(made && made.ability === 'shop.order', 'and resolves the dotted ability id from the tool name');
+  check(made && made.args.what === 'Never Split The Difference book', 'with its arguments parsed');
 
   /*
-   * The money rule, applied to the one new way of reaching a paid app.
+   * The check that replaced the keyword list, and the better rule.
+   *
+   * An offer that cannot fill the required arguments of the thing it is
+   * offering has not worked out what it would do. "Want me to look that up
+   * for you?" with no topic is the sentence this feature exists never to say,
+   * and it is exactly what a model produces when it is being agreeable rather
+   * than useful.
+   */
+  check(
+    offers.offerFrom({ say: 'Want me to look that up?', tool: 'brief_web', args: '{}' }, available) === null,
+    'a proposal with no arguments is dropped',
+    'otherwise the offer is "shall I help with that?"'
+  );
+  check(
+    offers.offerFrom({ say: 'Want me to order it?', tool: 'shop_order', args: '{"store":"amazon"}' }, available) === null,
+    'and so is one missing a required argument'
+  );
+
+  // A tool that does not exist, and one this mode does not allow.
+  check(
+    offers.offerFrom({ say: 'Want me to book a table?', tool: 'restaurant_book', args: '{"where":"x"}' }, available) === null,
+    'a proposal naming a tool that does not exist is dropped'
+  );
+  check(
+    offers.offerFrom(good, available.filter((a) => a.id !== 'shop.order')) === null,
+    'and one naming a tool this mode has switched off'
+  );
+
+  // It has to be answerable out loud.
+  check(
+    offers.offerFrom({ ...good, say: 'I will send you the Amazon link.' }, available) === null,
+    'a statement is not an offer',
+    'there would be nothing for the person to say yes to'
+  );
+  check(
+    offers.offerFrom({ ...good, say: `${'Want me to '.repeat(20)}?` }, available) === null,
+    'and neither is a paragraph'
+  );
+
+  // Arguments arrive as JSON because a flat schema has nowhere to nest. A
+  // model that wraps it in prose should cost the offer, not the reply.
+  check(
+    Boolean(offers.offerFrom({ ...good, args: 'here you go: {"what":"a book","store":"amazon"} ' }, available)),
+    'arguments wrapped in prose are still recovered'
+  );
+  check(
+    offers.offerFrom({ ...good, args: 'what: a book, store: amazon' }, available) === null,
+    'and arguments that are not JSON at all are dropped'
+  );
+  check(
+    Boolean(offers.offerFrom({ ...good, args: { what: 'a book', store: 'amazon' } }, available)),
+    'arguments already given as an object work too'
+  );
+
+  /*
+   * The money rule, at the one new door into the same room.
    *
    * An offer is a question Grove thought of by itself. If one could carry a
-   * confirmation, then a yes to Grove's own idea would be the thing that
-   * sends or buys — and the whole point of the confirmation is that only the
-   * person can supply it. So no offer may set `confirmed`, and the branch
-   * that runs an accepted offer may not set it either.
+   * confirmation then a yes to Grove's own idea would be the thing that sends
+   * or buys, and the whole point of the confirmation is that only the person
+   * supplies it. Stripped here as well as in tools.ts.
    */
-  for (const [said, replied] of REAL) {
-    const made = offers.offerFor({ said, replied, ran: [] });
-    if (!made) continue;
-    check(!('confirmed' in made.args), `the ${made.kind} offer carries no confirmation`);
-  }
-  const agentSource = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
-  const accept = agentSource.slice(
-    agentSource.indexOf('An answer to something Grove offered to do'),
-    agentSource.indexOf("utter('Righto.')")
+  const sneaky = offers.offerFrom(
+    { ...good, args: '{"what":"a book","store":"amazon","confirmed":"yes"}' },
+    available
   );
-  check(accept.length > 400, 'the accept branch is where it is expected to be');
+  check(Boolean(sneaky), 'a proposal that tries to confirm itself still offers');
+  check(sneaky && !('confirmed' in sneaky.args), 'but the confirmation is stripped out of it');
+  for (const forbidden of ['draft', 'new_email']) {
+    const withIt = offers.offerFrom(
+      { say: 'Want me to send it?', tool: 'mail_send', args: JSON.stringify({ to: 'Priya', body: 'hello there', [forbidden]: 'yes' }) },
+      available
+    );
+    check(withIt && !(forbidden in withIt.args), `and so is ${forbidden}`);
+  }
+
+  const offersSource = fs.readFileSync(path.join(ROOT, 'src/lib/offers.ts'), 'utf8');
+  const settles = offersSource
+    .split('\n')
+    .filter((line) => !/^\s*(?:\/\/|\*|\/\*)/.test(line))
+    .some((line) => /\bconfirmed\s*:/.test(line));
+  check(!settles, 'offers.ts never sets a confirmation itself');
+
+  /*
+   * Both ends of this slice are asserted, which they were not.
+   *
+   * It used to end at a hardcoded line that was later rewritten, so
+   * `indexOf` returned -1, `slice(start, -1)` handed back most of the file,
+   * and the check failed on a `confirmed:` three hundred lines away. An
+   * unasserted offset is a check that silently measures the wrong thing —
+   * the same fault as the unguarded `.replace` that once left a whole pane
+   * without its class.
+   */
+  const agentSource = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
+  const acceptFrom = agentSource.indexOf('An answer to something Grove offered to do');
+  const acceptTo = agentSource.indexOf("An answer to Grove's own question", acceptFrom);
+  check(acceptFrom > 0, 'the accept branch is where it is expected to be');
+  check(acceptTo > acceptFrom, 'and the slice around it has both of its ends');
+  const accept = acceptFrom > 0 && acceptTo > acceptFrom ? agentSource.slice(acceptFrom, acceptTo) : '';
+  check(accept.length > 400 && accept.length < 6000, 'and is the size of a branch, not of a file');
   check(
     !/confirmed:/.test(accept),
     'accepting an offer never supplies the confirmation itself',
@@ -1075,57 +1099,114 @@ section('An offer is rare, named, and never a confirmation');
     'and an accepted offer re-arms the confirmation when the ability wants one'
   );
 
-  // Never offered twice, and never what the turn just did.
-  const twice = offers.offerFor({ said: REAL[1][0], replied: REAL[1][1], ran: ['doc.create'] });
-  check(twice === null, 'nothing is offered for work the turn already did');
-
   /*
    * A kind you refuse stops being offered.
    *
-   * The direct answer to "I don't want this on every message": saying no
-   * twice to one sort of offer switches that sort off and leaves the others
-   * alone. Checked on the real function, through the real counts.
+   * The direct answer to "I don't want this on every message", and now keyed
+   * by ability — refusing to be sent links is a different decision from
+   * refusing research notes, so refusing one must not quiet the other.
    */
-  check(offers.welcome({}, 'buy'), 'a kind never offered gets a go');
-  check(offers.welcome({ buy: { yes: 0, no: 1 } }, 'buy'), 'one no is not a verdict');
-  check(!offers.welcome({ buy: { yes: 0, no: 2 } }, 'buy'), 'two nos and that kind is done');
+  check(offers.welcome({}, 'shop.order'), 'a kind never offered gets a go');
+  check(offers.welcome({ 'shop.order': { yes: 0, no: 1 } }, 'shop.order'), 'one no is not a verdict');
+  check(!offers.welcome({ 'shop.order': { yes: 0, no: 2 } }, 'shop.order'), 'two nos and that kind is done');
   check(
-    offers.welcome({ plan: { yes: 0, no: 2 } }, 'buy'),
+    offers.welcome({ 'doc.create': { yes: 0, no: 2 } }, 'shop.order'),
     'and refusing one kind leaves the others alone'
   );
   check(
-    offers.welcome({ buy: { yes: 2, no: 3 } }, 'buy'),
+    offers.welcome({ 'shop.order': { yes: 2, no: 3 } }, 'shop.order'),
     'a kind that sometimes lands keeps being offered'
   );
   check(
-    !offers.welcome({ buy: { yes: 1, no: 9 } }, 'buy'),
+    !offers.welcome({ 'shop.order': { yes: 1, no: 9 } }, 'shop.order'),
     'one that almost never lands does not'
   );
 
+  // Caps as a backstop, not as the decision. Read from the source, because
+  // exercising them needs the vault and this file stubs no Keychain.
+  const perDay = Number(offersSource.match(/const PER_DAY = (\d+);/)?.[1]);
+  check(perDay >= 1 && perDay <= 6, `at most ${perDay} offers in a day`);
+  const between = Number(offersSource.match(/const TURNS_BETWEEN = (\d+);/)?.[1]);
+  check(between >= 1, `and ${between} turns of ordinary conversation between them`);
+
   /*
-   * And the caps are small.
+   * The model is actually asked, and told what makes an offer real.
    *
-   * Read from the source rather than exercised, because exercising them needs
-   * the vault and this file does not stub a Keychain — the same reason the
-   * interruption budget above is checked through its pure half. Measured
-   * end to end at the time of writing: sixty turns with six offer-worthy
-   * moments in them produced two offers, one per thirty turns.
+   * Checked because the whole design now rests on the model proposing: a tool
+   * declared but never offered to it, or offered without the rule that it has
+   * to name what it would do, is this feature silently reverting to nothing
+   * or to noise.
    */
-  const source = fs.readFileSync(path.join(ROOT, 'src/lib/offers.ts'), 'utf8');
-  const perDay = Number(source.match(/const PER_DAY = (\d+);/)?.[1]);
-  check(perDay >= 1 && perDay <= 3, `at most ${perDay} offers in a day`);
-  const between = Number(source.match(/const TURNS_BETWEEN = (\d+);/)?.[1]);
-  check(between >= 4, `and ${between} turns of ordinary conversation between them`);
-  // Prose about it is the point — the file explains why it must not. Code
-  // that sets it is the fault.
-  const settles = source
-    .split('\n')
-    .filter((line) => !/^\s*(?:\/\/|\*|\/\*)/.test(line))
-    .some((line) => /\bconfirmed\s*:/.test(line));
+  const brain = fs.readFileSync(path.join(ROOT, 'src/lib/brain.ts'), 'utf8');
+  check(/OFFER_NEXT/.test(brain) && /declarationsFor\(available\), ASK_BACK, OFFER_NEXT/.test(brain),
+    'the model is given offer_next alongside its abilities');
+  check(/name: 'offer_next'/.test(brain), 'declared under the name the loop looks for');
+  check(/offernext/.test(brain), 'and the loop recognises the call however it is spelled');
   check(
-    !settles,
-    'offers.ts never sets a confirmation',
-    'it may propose work; it may never be the thing that approves it'
+    /Offer the obvious next step/.test(brain) && /must be able to NAME it/i.test(brain),
+    'the rules tell it to name what it would do'
+  );
+  // Two questions and one microphone is a reply whose answer goes to
+  // whichever one Grove felt like.
+  check(
+    /if \(!proposed\.offer \|\| reply\.expectsReply\) return reply;/.test(brain),
+    'an offer is dropped when the turn already asked something back'
+  );
+
+  /*
+   * Sending to yourself has no confirmation, and the reason has to stay true.
+   *
+   * Every other writing ability here takes a press. This one does not, and
+   * the entire argument is that the address is read from the account and
+   * cannot be passed in — so there is no argument a misheard sentence could
+   * fill that would send it to anybody else. If an argument for the
+   * recipient ever appears, the exemption is no longer earned.
+   */
+  const sendSelf = abilityById('link.send');
+  check(Boolean(sendSelf), 'there is a way to send something to yourself');
+  if (sendSelf) {
+    check(sendSelf.reads !== true, 'sending to yourself is not a read');
+    for (const named of ['to', 'recipient', 'address', 'email', 'who']) {
+      check(!(named in sendSelf.args), `link.send takes no "${named}" argument`,
+        'its lack of a confirmation depends on the address coming from the account');
+    }
+    const body = fs.readFileSync(path.join(ROOT, 'src/lib/abilities.ts'), 'utf8');
+    const run = body.slice(body.indexOf("id: 'link.send'"));
+    check(/google\.me\(\)/.test(run.slice(0, run.indexOf('\n};'))),
+      'and reads the address from the account instead');
+  }
+
+  /*
+   * A link found by a search survives to be sendable.
+   *
+   * The spoken half of an answer cannot contain a web address — read aloud it
+   * is a minute of letters — so they used to be stripped, twice, and that
+   * made "send me that link" impossible to honour: by the time anything could
+   * be asked, the address no longer existed anywhere in the app.
+   */
+  const light = fs.readFileSync(path.join(ROOT, 'src/lib/lightModel.ts'), 'utf8');
+  const brief = light.slice(light.indexOf('export async function lightBrief'));
+  const briefEnd = brief.indexOf('\n}\n');
+  const briefBody = brief.slice(0, briefEnd);
+  check(/LINKS:/.test(briefBody), 'a web search is asked for the addresses behind its answer');
+  check(/spoken:/.test(briefBody) && /detail:/.test(briefBody),
+    'and returns them in detail rather than in what is spoken');
+  // Exercised rather than grepped: a regex about a regex proves nothing, and
+  // the property is simply that no address survives into `spoken`.
+  const spokenStrip = briefBody.slice(briefBody.indexOf('const said = whole'));
+  check(
+    /replace\(\/\\bhttps\?/.test(spokenStrip),
+    'while still stripping addresses out of the spoken half'
+  );
+  check(
+    briefBody.indexOf("replace(/^\\s*LINKS:.*$/im, '')") > 0,
+    'and takes the links line out of what is said'
+  );
+  const briefAbility = fs.readFileSync(path.join(ROOT, 'src/lib/abilities.ts'), 'utf8');
+  const briefRun = briefAbility.slice(briefAbility.indexOf("id: 'brief.web'"));
+  check(
+    /detail: found\.detail/.test(briefRun.slice(0, briefRun.indexOf('\n};'))),
+    'and the search ability passes that detail on to the model'
   );
 }
 

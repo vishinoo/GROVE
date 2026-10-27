@@ -1,275 +1,180 @@
 /**
  * The one thing Grove offers to do next, and all the reasons it does not.
  *
- * Talking about a book and then having to say "order that on Amazon" is a
- * sentence the conversation already contained. Talking about training three
- * days a week and then asking for a plan is the same. The useful move is for
- * Grove to notice the thing it could do and ask once — and the useful move is
- * one word away from the thing that ruins it, which is an assistant that ends
- * every reply trying to sell you something.
+ * Talking about a book and then having to say "send me the Amazon link" is a
+ * sentence the conversation already contained. Saying "I want food" and then
+ * having to separately ask for delivery, then for somewhere that fits what you
+ * are eating this month, then for the link, is three sentences where one
+ * exchange would do. So Grove may add **one line** to the end of a reply
+ * offering the thing it could obviously do next.
  *
- * So this file is mostly restraint, and the restraint is the feature. It is
- * the same shape as interrupt.ts and for the same reason: what Grove *could*
- * say is easy and what it is *worth* saying is the product.
+ * THE MODEL DECIDES WHAT; CODE DECIDES WHETHER
  *
- * FOUR RULES, AND THE SECOND ONE IS THE IMPORTANT ONE
+ * The first version of this file was a list of keywords — books, the gym,
+ * shares — each wired to one ability. It worked for exactly the three cases
+ * written into it and was useless everywhere else, which is the definition of
+ * a rail rather than a feature. Worse, it was wrong in the way a rail is
+ * always wrong: "I'm running three minutes late" matched the gym rule and
+ * offered a training plan.
  *
- *   1. **Rules, not a model.** This runs on every finished turn. A model call
- *      to decide whether to make an offer would cost more than the answer it
- *      is attached to, and would be wrong in a more imaginative way. Keywords
- *      over the person's own sentence, and a title lifted out of the reply.
+ * The model already sees the whole conversation, the long memory, the
+ * constraints and every ability as a typed function, on a call that is being
+ * made anyway. It is the only thing in the system that can tell a book worth
+ * owning from a book mentioned in passing, or know that the restaurant should
+ * suit what someone said about eating in January. So it proposes, in the same
+ * breath as its reply, at no extra cost — the same bargain `ask_back` makes.
  *
- *   2. **An offer must be able to name what it would do.** Every offer
- *      carries a real ability id and the real arguments it would run with,
- *      assembled from words that were actually said. If no arguments can be
- *      assembled there is no offer — which is what stops this becoming "shall
- *      I help with that?", the most annoying sentence software can produce.
- *      It is also why a vague conversation gets nothing: there is nothing to
- *      name.
+ * This file is now the *whether*, which is the half a model should not be
+ * trusted with:
  *
- *   3. **A kind you refuse stops being offered.** Not globally, per kind:
- *      saying no twice to research notes switches research notes off and
- *      leaves the rest alone. Nobody should have to find a setting for this,
- *      and nobody should have to say no three times.
+ *   1. **An offer must name a real ability and survive its schema.** The tool
+ *      has to exist, be allowed in this mode, and have its required arguments
+ *      filled. A proposal that fails any of that is dropped silently — the
+ *      reply is still said, minus the offer.
  *
- *   4. **Hard caps over judgement.** One per turn, two a day, never two turns
- *      running, never the same kind twice in a day, never the same subject
- *      twice at all. Each of those is a number rather than a decision,
- *      because a judgement call made sixty times a day is a judgement call
- *      that will eventually be made badly.
+ *   2. **A kind you refuse stops being offered.** Per ability, so two nos to
+ *      research notes switches research notes off and leaves the rest alone.
+ *      Nobody should have to say no to the same sort of thing three times, or
+ *      find a setting for it.
+ *
+ *   3. **Caps as a backstop.** The model's judgement is the primary control
+ *      now, so these are looser than they were: four a day, two turns apart,
+ *      never the same subject twice. They exist to bound a model having an
+ *      enthusiastic afternoon, not to decide what is useful.
  *
  * WHAT AN OFFER IS NOT
  *
- * An offer is not a confirmation. Saying yes to "want me to pull that up on
- * Amazon?" runs `shop.order` from the beginning, which then asks for its own
- * press like it always did. Nothing here may set `confirmed`, and
- * `npm run verify` checks that, because an offer that carried a confirmation
- * would be a way to reach a paid app with one yes to a question Grove thought
- * of by itself.
+ * An offer is not a confirmation. Saying yes to "want me to send you the
+ * link?" runs the ability from the beginning, which then asks for its own
+ * press if it has one. Nothing here may set `confirmed`, and `npm run verify`
+ * checks that — an offer that carried a confirmation would be a way to reach a
+ * paid app with one yes to a question Grove thought of by itself.
  */
 
+import { abilityById, type Ability } from './abilities';
+import { abilityIdFor } from './tools';
 import { vault } from './vault';
 
-/**
- * The kinds, which are the unit everything here counts in.
- *
- * Deliberately few. Each one exists because there is an ability it maps onto
- * exactly, and a kind with no ability behind it is a conversation starter,
- * which is not what this is for.
- */
-export type OfferKind = 'buy' | 'plan' | 'research';
+/** What the model proposed, before anything has been checked about it. */
+export type Proposal = {
+  /** The offer, one line, in Grove's own voice. */
+  say: string;
+  /** The tool it would call, however the model spelled it. */
+  tool: string;
+  /** Its arguments, as the model passed them — JSON, or already an object. */
+  args: unknown;
+};
 
 export type Offer = {
-  kind: OfferKind;
-  /** The ability it would run. An id, checked against the real set by verify. */
+  /**
+   * The ability id. Also the unit the learning counts in: refusing to be sent
+   * links is a different decision from refusing research notes.
+   */
+  kind: string;
   ability: string;
-  /** What it would run with — from what was said, never invented. */
+  /** What it would run with — checked against the ability's own schema. */
   args: Record<string, string>;
-  /** The sentence added to the reply. One line, ends in a question. */
+  /** The sentence added to the reply. */
   say: string;
   /** What it is about, so the same thing is never offered twice. */
   subject: string;
 };
 
-/* ------------------------------------------------------------- noticing */
-
-/** Already being done. An offer to do what was just asked for is noise. */
-const ASKED_FOR =
-  /\b(?:order|buy|purchase|add to (?:my )?(?:cart|basket)|write (?:me )?(?:a|an|the)? ?(?:doc|document|report|plan|note)|make me a doc|put together a (?:doc|report|note))\b/i;
-
 /**
- * A title, as it appears in a sentence that was spoken aloud.
- *
- * Grove names a book in one of two ways: in quotes, or in title case. Both are
- * cheap to find and both fail closed — no title means no offer, which is
- * correct, because "want me to look up that book on Amazon?" asked about a
- * book Grove cannot name is a question the person has to answer twice.
- *
- * Markdown has already been stripped by `plainSpeech` before this sees it, so
- * asterisks are not a third case.
+ * The turn fills these in itself. A model that could set them would be able to
+ * approve on the person's behalf, which is the one thing the confirmation
+ * exists to prevent — so they are stripped here as well as in tools.ts, because
+ * an offer is a second door into the same room.
  */
-function titleIn(text: string): string {
-  const quoted = /["“']([A-Za-z0-9][^"”']{2,60})["”']/.exec(text);
-  if (quoted) return quoted[1].trim();
-  // Two or more capitalised words in a row, not at the start of a sentence
-  // (where a capital is grammar rather than a name). Stop words let a title
-  // keep its own small words — "The Art of Doing Science".
-  const runs = text.match(
-    /(?:[A-Z][a-z'’]+|[A-Z]{2,})(?:\s+(?:of|the|and|a|an|in|to|for|on)\s+|\s+)(?:[A-Z][a-z'’]+|[A-Z]{2,})(?:(?:\s+(?:of|the|and|a|an|in|to|for|on)\s+|\s+)(?:[A-Z][a-z'’]+|[A-Z]{2,}))*/g
-  );
-  if (!runs) return '';
-  // The longest one, which is the title rather than a person's name in passing.
-  const best = runs
-    .map((r) => r.trim())
-    .filter((r) => r.split(/\s+/).length >= 2 && !/^(?:I|I'?m|Want|Here|There|Your|You)\b/.test(r))
-    .sort((a, b) => b.length - a.length)[0];
-  return best ?? '';
-}
+const NEVER_THE_MODELS = new Set(['confirmed', 'draft', 'new_email']);
 
-const BOOK = /\b(?:book|books|novel|read(?:ing)?|author|audiobook|paperback|textbook)\b/i;
+/** An offer has to be a question, short, and not a receipt. */
+const SAYABLE = /\?\s*$/;
 
-/** Already got it. Offering to buy someone a book they own is worse than silence. */
-const HAS_IT = /\b(?:already (?:read|have|own|bought|got)|i'?ve read|i own|finished it|on my shelf)\b/i;
-
-/**
- * A practice someone can have a plan for. Unambiguous on their own.
- */
-const PRACTICE =
-  /\b(?:gym|workout|workouts|training|lifting|weights|cardio|marathon|5k|10k|squats?|deadlifts?|bench press|revision|midterm|exam|finals?|syllabus|meal plan|macros)\b/i;
-
-/**
- * The same subjects, said with words that mean other things too. These only
- * count alongside an intention.
- *
- * `run` is deliberately not here, and it is the instructive one. "I'm running
- * three minutes late" is what got through the first version, and pairing it
- * with an intention does not save it either: "I need to run to the shop" has
- * both. The word is a training word perhaps a third of the time, so it is out
- * altogether, and running as training arrives through `marathon`, `5k`, `10k`
- * and `cardio` instead. "I want to start running" is therefore missed — which
- * is the right way round to be wrong. A missed offer costs nothing; one that
- * fires on somebody being late is the whole feature discrediting itself.
- */
-const PRACTICE_LOOSE = /\b(?:study|studying|revise|diet)\b/i;
-
-/**
- * Wanting to do something about it, which is what makes a plan wanted.
- *
- * Mentioning a practice is not the same as having designs on it. "I went to
- * the gym today" is a remark; "I'm trying to get to the gym three times a
- * week" is a plan waiting to be written down, and only the second one should
- * produce an offer. This is the difference between the two.
- */
-const INTENT =
-  /\b(?:want(?:ing)? to|trying to|need to|have to|should|thinking (?:about|of)|going to|planning to|plan to|get(?:ting)? (?:back )?into|start(?:ing|ed)?|build(?:ing)?|improve|work on|keep up|stick to|cut (?:down|back)|\d+\s*(?:x|times)?\s*(?:a|per)\s*week|(?:once|twice|three times|four times|five times)\s*(?:a|per)\s*week|every (?:day|morning|week))\b/i;
-
-const MONEY =
-  /\b(?:stock|stocks|share|shares|equity|equities|portfolio|invest|investing|investment|etf|index fund|ticker|dividend|market cap|s&p|nasdaq)\b/i;
-
-/**
- * Their money, rather than the news.
- *
- * "How did the market do today" is a lookup and gets its answer; it is not an
- * invitation to write a research note, and offering one is the feature being
- * pushy. A note is worth offering when the conversation is about what *they*
- * might do with their own money.
- */
-const MINE =
-  /\b(?:my|mine|i'?m|i am|i'?ve|i have|should i|for me|i want|i'?d like|thinking (?:of|about)|looking at|considering|put(?:ting)? (?:some )?money)\b/i;
-
-/** A subject worth writing about, in the person's own words. */
-function gistOf(said: string): string {
-  return said.replace(/\s+/g, ' ').trim().slice(0, 240);
-}
-
-/**
- * Whether this exchange contains an offer, and which.
- *
- * Pure, and takes everything it needs. No storage, no clock, no model — so it
- * is testable by itself, which matters because the whole question about this
- * feature is how often it fires.
- *
- * `ran` is what the turn already did. An offer to write a document on a turn
- * that just wrote a document is the feature at its worst.
- */
-export function offerFor(input: { said: string; replied: string; ran: string[] }): Offer | null {
-  const said = input.said.trim();
-  const replied = input.replied.trim();
-  if (said.length < 12) return null;
-  if (ASKED_FOR.test(said)) return null;
-
-  const ran = new Set(input.ran);
-  const both = `${said}\n${replied}`;
-
-  /*
-    A book, on Amazon.
-
-    Needs a name. The trigger may come from either side of the exchange —
-    they asked for a recommendation, or they mentioned one — but the title has
-    to be findable in the reply, where Grove actually said it. No title, no
-    offer, and that is the common case: most conversations about books do not
-    name one.
-  */
-  if (BOOK.test(both) && !HAS_IT.test(said) && !ran.has('shop.order')) {
-    const title = titleIn(replied) || titleIn(said);
-    if (title) {
-      return {
-        kind: 'buy',
-        ability: 'shop.order',
-        // Never `confirmed`. shop.order asks for its own press; see the note
-        // at the top of this file.
-        args: { what: `${title} book`, store: 'amazon' },
-        say: `Want me to pull ${title} up on Amazon?`,
-        subject: title.toLowerCase(),
-      };
+function cleanArgs(raw: unknown): Record<string, string> | null {
+  let value = raw;
+  // Passed as a JSON string, because a flat function schema has nowhere to put
+  // a nested object. Tolerant on purpose: a model that wraps it in prose or
+  // forgets a brace should cost the offer, not the reply.
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return {};
+    try {
+      value = JSON.parse(text);
+    } catch {
+      const braced = /\{[\s\S]*\}/.exec(text);
+      if (!braced) return null;
+      try {
+        value = JSON.parse(braced[0]);
+      } catch {
+        return null;
+      }
     }
   }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const out: Record<string, string> = {};
+  for (const [name, item] of Object.entries(value as Record<string, unknown>)) {
+    if (NEVER_THE_MODELS.has(name)) continue;
+    if (item === null || item === undefined) continue;
+    const text = typeof item === 'string' ? item : String(item);
+    if (text.trim()) out[name] = text.trim();
+  }
+  return out;
+}
+
+/**
+ * What the model proposed, if it holds up.
+ *
+ * Null for anything that does not, and silently — the reply is still said. An
+ * offer is the least important thing in the turn and must never be the reason
+ * a turn fails.
+ */
+export function offerFrom(proposal: Proposal | null, available: Ability[]): Offer | null {
+  if (!proposal) return null;
+
+  const say = proposal.say.trim().replace(/\s+/g, ' ');
+  // One line, and a question. A model that writes a paragraph here has
+  // misunderstood the job, and a statement is not an offer — there would be
+  // nothing for the person to say yes to.
+  if (!say || say.length > 160 || !SAYABLE.test(say)) return null;
+
+  const ids = available.map((a) => a.id);
+  const ability = abilityById(abilityIdFor(proposal.tool, ids));
+  // Not a real tool, or not one this mode allows. The model can only see what
+  // it is given, so this is it inventing a name.
+  if (!ability || !ids.includes(ability.id)) return null;
+
+  const args = cleanArgs(proposal.args);
+  if (!args) return null;
 
   /*
-    A plan, in their documents.
+    Its own schema is the test of whether the offer is real.
 
-    Triggered on the person's own sentence rather than on Grove's reply: Grove
-    mentioning the gym while answering something else is not the same as
-    someone talking about their training, and the second is the only one where
-    a plan is wanted.
+    This is what replaced the keyword list, and it is a better rule than any
+    list could be: an offer that cannot fill the required arguments of the
+    thing it is offering has not actually worked out what it would do. "Want
+    me to look that up for you?" with no topic is the sentence this feature
+    exists to never say.
   */
-  if (
-    (PRACTICE.test(said) || PRACTICE_LOOSE.test(said)) &&
-    INTENT.test(said) &&
-    !ran.has('doc.create') &&
-    !ran.has('doc.append')
-  ) {
-    const subject = (
-      PRACTICE.exec(said)?.[0] ??
-      PRACTICE_LOOSE.exec(said)?.[0] ??
-      ''
-    ).toLowerCase();
-    const studying = /\b(?:study|studying|revision|revise|exam|midterm|final|syllabus)\b/i.test(said);
-    return {
-      kind: 'plan',
-      ability: 'doc.create',
-      args: {
-        title: studying ? 'Study plan' : 'Training plan',
-        // Their words, which is what makes the document about their actual
-        // situation rather than about the keyword that matched.
-        about: `A practical ${studying ? 'study' : 'training'} plan for them, based on what they said: "${gistOf(
-          said
-        )}". Write it as a week they could follow, with specific sessions.`,
-      },
-      say: studying
-        ? 'Want me to turn that into a study plan in your docs?'
-        : 'Want me to write that up as a plan in your docs?',
-      subject: `plan:${subject}`,
-    };
+  for (const [name, spec] of Object.entries(ability.args)) {
+    if (spec.required === true && !(args[name] ?? '').trim()) return null;
   }
 
   /*
-    A research note, on something with money attached.
+    What it is about, for "never the same thing twice".
 
-    `research: 'yes'` because the whole failure mode here is a document full
-    of figures that were true last year — doc.create's researched path looks
-    each subject up against the web first. It is research and says so; it
-    names no price target and no amount to spend. See the money note in
-    abilities.ts.
+    Taken from the arguments rather than from the sentence, because the
+    arguments are the part that says what would actually happen — two
+    differently-worded offers to buy the same book are one offer.
   */
-  if (MONEY.test(said) && (INTENT.test(said) || MINE.test(said)) && !ran.has('doc.create')) {
-    const subject = (MONEY.exec(said)?.[0] ?? '').toLowerCase();
-    return {
-      kind: 'research',
-      ability: 'doc.create',
-      args: {
-        title: 'Research note',
-        about: `A research note on what they were asking about: "${gistOf(
-          said
-        )}". Current figures, dated, with the risks stated. Research rather than advice: no price targets, no recommendation of how much to put in.`,
-        research: 'yes',
-      },
-      say: 'Want me to put a research note together on that?',
-      subject: `research:${subject}`,
-    };
-  }
+  const subject = `${ability.id}:${Object.keys(args)
+    .sort()
+    .map((name) => args[name])
+    .join(' ')
+    .toLowerCase()
+    .slice(0, 80)}`;
 
-  return null;
+  return { kind: ability.id, ability: ability.id, args, say, subject };
 }
 
 /* --------------------------------------------------------------- budget */
@@ -278,7 +183,7 @@ type Ledger = {
   /** Local date, so the day's cap is a day's cap. */
   day: string;
   /** Made today: kind and subject, so neither repeats. */
-  today: { kind: OfferKind; subject: string; at: string }[];
+  today: { kind: string; subject: string; at: string }[];
   /** Every subject offered, for as long as it is kept. Never offered twice. */
   subjects: string[];
   /** What each kind has earned. This is the whole of the learning. */
@@ -287,8 +192,11 @@ type Ledger = {
 
 const KEY = 'grove:offers:v1';
 
-/** Two. An assistant that proposes a third thing in a day is a salesman. */
-const PER_DAY = 2;
+/**
+ * Four. Looser than it was, because the model's own judgement is the control
+ * now and a cap that bites every day is a cap doing the deciding.
+ */
+const PER_DAY = 4;
 
 /**
  * Turns of ordinary conversation between offers.
@@ -298,15 +206,13 @@ const PER_DAY = 2;
  * whether they are a minute apart or an hour.
  *
  * The count itself is the caller's, held in memory rather than written down.
- * Spacing only has to hold within a conversation, and keeping it on disk
- * would have meant a read and sometimes a write on every single turn — which
- * is the one cost this feature is not allowed to have. Across a relaunch the
- * day's cap and the subject list still hold.
+ * Spacing only has to hold within a conversation, and keeping it on disk would
+ * have meant a read on every single turn — the one cost this must not have.
  */
-export const TURNS_BETWEEN = 6;
+export const TURNS_BETWEEN = 2;
 
 /**
- * Chances a new kind gets before it has to have earned one.
+ * Chances a kind gets before it has to have earned one.
  *
  * Something never offered has no evidence either way, and refusing to try is
  * how a feature never gets used. Two is enough to tell the difference between
@@ -318,7 +224,7 @@ const FREE_GOES = 2;
 const ENOUGH_NO = 2;
 
 /** Long enough that a subject is not offered again; short enough to forget. */
-const SUBJECTS_KEPT = 60;
+const SUBJECTS_KEPT = 80;
 
 function dayStamp(now: Date): string {
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
@@ -335,7 +241,7 @@ async function load(uid: string, now: Date): Promise<Ledger> {
     const raw = await vault.getItem(`${KEY}:${uid}`);
     if (!raw) return fresh;
     const parsed = JSON.parse(raw) as Partial<Ledger>;
-    const kept: Ledger = {
+    return {
       day: fresh.day,
       // A new day clears the cap and keeps everything learned. The subjects
       // are kept too: a book offered yesterday is still the same book.
@@ -343,7 +249,6 @@ async function load(uid: string, now: Date): Promise<Ledger> {
       subjects: Array.isArray(parsed.subjects) ? parsed.subjects.slice(-SUBJECTS_KEPT) : [],
       learned: parsed.learned && typeof parsed.learned === 'object' ? parsed.learned : {},
     };
-    return kept;
   } catch {
     return fresh;
   }
@@ -365,7 +270,7 @@ async function save(uid: string, ledger: Ledger): Promise<void> {
  * making is a decision about someone's experience of the app, and a decision
  * they cannot see is one they cannot overrule.
  */
-export function welcome(learned: Ledger['learned'], kind: OfferKind): boolean {
+export function welcome(learned: Ledger['learned'], kind: string): boolean {
   const score = learned[kind] ?? { yes: 0, no: 0 };
   if (score.yes === 0 && score.no >= ENOUGH_NO) return false;
   if (score.yes + score.no < FREE_GOES) return true;
@@ -400,7 +305,6 @@ export async function worthOffering(
   const ledger = await load(uid, now);
   if (!welcome(ledger.learned, candidate.kind)) return { offer: false, why: 'unwelcome' };
   if (ledger.subjects.includes(candidate.subject)) return { offer: false, why: 'repeat' };
-  if (ledger.today.some((t) => t.kind === candidate.kind)) return { offer: false, why: 'repeat' };
   if (ledger.today.length >= PER_DAY) return { offer: false, why: 'spent' };
   return { offer: true, chosen: candidate };
 }
@@ -420,12 +324,12 @@ export async function made(uid: string, offer: Offer, now = new Date()): Promise
  * They said yes, or they said no.
  *
  * The only thing here that learns anything, and it learns from an answer to a
- * direct question — which is far better evidence than interrupt.ts gets, where
- * silence has to stand in for a verdict.
+ * direct question — far better evidence than interrupt.ts gets, where silence
+ * has to stand in for a verdict.
  */
 export async function answered(
   uid: string,
-  kind: OfferKind,
+  kind: string,
   yes: boolean,
   now = new Date()
 ): Promise<void> {
@@ -441,18 +345,20 @@ export async function answered(
   });
 }
 
-/** For the Memory screen: what Grove offers, and what it has stopped offering. */
+/** For the Memory screen: what Grove has been told to stop offering. */
 export async function offerStanding(
   uid: string,
   now = new Date()
-): Promise<{ kind: OfferKind; yes: number; no: number; welcome: boolean }[]> {
+): Promise<{ kind: string; yes: number; no: number; welcome: boolean }[]> {
   const ledger = await load(uid, now);
-  return (['buy', 'plan', 'research'] as OfferKind[]).map((kind) => ({
-    kind,
-    yes: ledger.learned[kind]?.yes ?? 0,
-    no: ledger.learned[kind]?.no ?? 0,
-    welcome: welcome(ledger.learned, kind),
-  }));
+  return Object.keys(ledger.learned)
+    .map((kind) => ({
+      kind,
+      yes: ledger.learned[kind]?.yes ?? 0,
+      no: ledger.learned[kind]?.no ?? 0,
+      welcome: welcome(ledger.learned, kind),
+    }))
+    .sort((a, b) => b.no - a.no || a.kind.localeCompare(b.kind));
 }
 
 export async function forgetOffers(uid: string): Promise<void> {
