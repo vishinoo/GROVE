@@ -274,6 +274,13 @@ sentence runs normally and only the window after it is dropped. A pending
 confirmation is cancelled, and a pending offer is cleared without being
 counted as a refusal.
 
+**Spoken input only.** The word exists to shut a listening window and the
+typed box has none, so typing "enough" there would have produced no reply and
+nothing on screen to say why — the typed version of the press that does
+nothing. Typed text is also deliberate in a way dictation is not: taking a
+word off the end of something somebody actually typed is a worse trade than
+taking it off a transcript.
+
 The whole risk is the other direction, because a false positive silently
 truncates a real request with nothing on screen to say why. Three rules, each
 earning its place against a sentence that has to keep working:
@@ -839,6 +846,53 @@ model, which invents names. Texts are left in your own voice.
 - **Addresses come from the inbox too.** Someone who emailed you has an address
   even when they are not in contacts. And a reply with nothing to reply to
   becomes a new email to the person named, through the same read-back and press.
+
+## Typing into something you cannot see
+
+Two defaults, both of which type-check, read correctly and fail by quietly
+doing nothing. Both were worst on the Memory screen — a list where every line
+is editable, on the screen whose whole argument is that **a memory you cannot
+see is one you cannot correct**.
+
+**The keyboard covered the field.** Tap a fact past the first screenful and
+the keyboard came up over the thing being typed into, with nothing to scroll
+it back. `automaticallyAdjustKeyboardInsets` is both halves of the fix, which
+is why it is a prop rather than a `KeyboardAvoidingView`: iOS adds the
+keyboard's overlap to the content inset *and* scrolls the focused field up by
+exactly how far it was buried (`RCTScrollView.m`, `_keyboardWillChangeFrame`).
+A `KeyboardAvoidingView` only does the first, which makes the field reachable
+by scrolling rather than putting it where you are looking. **Never both** —
+they each subtract the keyboard and the content jumps twice as far.
+
+**Done did nothing.** A `multiline` TextInput defaults to `submitBehavior:
+'newline'`, so the return key inserts a line break and `onSubmitEditing` is
+never called. Both boxes with a submit handler had one that could not fire:
+the fact editor's key said Done and put a newline in the middle of the fact,
+and the Talk screen's return key did the same to a sentence meant for Grove.
+The fact editor is `blurAndSubmit`; the Talk box is **`submit`**, which sends
+and keeps the keyboard, because dismissing it after each line is wrong for the
+one case that box exists for — typing to Grove in a meeting, several times
+over.
+
+**A background write discarded what you were typing.** `FactCard` followed the
+stored value so a fact rewritten by a later turn would not sit there showing
+the old one — and `consolidate.ts` runs every dozen turns with `compact()`
+rewriting facts wholesale, so a pass landing mid-edit replaced the half-typed
+line with the stored one and there was nothing to undo it with. It now skips
+while the box is focused, and blurring saves over the background change: of
+the two writers, one is in the room looking at it.
+
+The harness checks the general rule rather than the three fixes, because the
+next field somebody adds will have the same two defaults: every `multiline`
+input with a submit handler must say what its return key does, and every
+screen that takes typing must move out of the keyboard's way exactly once.
+
+**A delegation is only worth accepting if the delegate is the thing being
+asserted.** The first version of that check let Settings pass by pointing at
+the shared `Screen` wrapper — which holds no `TextInput`, so the loop skipped
+it entirely. Deleting the keyboard handling from `Screen` broke Settings and
+every screen using it, and every check still printed ok. Same fault as the
+slice that lost its end landmark, in a new place.
 
 ## Bugs that type-checked and passed the harness
 

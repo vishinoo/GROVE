@@ -99,6 +99,13 @@ export function Screen({
           paddingBottom: insets.bottom + 108,
         }}
         keyboardShouldPersistTaps="handled"
+        // The keyboard covers whatever is being typed into, for any field
+        // past the first screenful — Settings' own model key is right at the
+        // bottom. iOS insets the content by the overlap and scrolls the
+        // focused field up by exactly how far it was buried; see the longer
+        // note in sparks.tsx, including why this must never be paired with a
+        // KeyboardAvoidingView.
+        automaticallyAdjustKeyboardInsets
         // Index 1 is the sticky slot below. Passed only when something is in
         // it, so every other screen keeps exactly the behaviour it had.
         stickyHeaderIndices={sticky ? [1] : undefined}

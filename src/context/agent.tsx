@@ -681,7 +681,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    * because the ordering *is* the design — reply, record, then run — and
    * scattering it across handlers is how that ordering quietly gets lost.
    */
-  const exchange = useCallback(async (said: string) => {
+  const exchange = useCallback(async (said: string, heardAloud = true) => {
     /*
       "Enough" comes off the front of everything else.
 
@@ -693,8 +693,15 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
       Read before anything else looks at the words, so a confirmation sees the
       sentence without it and the model never has to be told the word exists.
+
+      Spoken input only. The word exists to shut a listening window, and the
+      typed box has none — so typing "enough" there would have produced no
+      reply and nothing on screen to say why, which is the typed version of
+      the press that does nothing. Typed text is also deliberate in a way
+      dictation is not: taking a word off the end of something somebody
+      actually typed is a worse trade than taking it off a transcript.
     */
-    const shut = closing(said);
+    const shut = heardAloud ? closing(said) : { text: said, closed: false };
     const text = shut.text.trim();
     if (!text) {
       // A confirmation left armed is a booby trap, and "enough" is not a yes.
@@ -2022,7 +2029,8 @@ function shortFailure(text: string): string {
   const say = useCallback(
     async (text: string) => {
       stopSpeaking();
-      await exchange(text);
+      // Typed, not heard — see the top of `exchange`.
+      await exchange(text, false);
     },
     [exchange]
   );

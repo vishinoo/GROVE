@@ -292,6 +292,27 @@ function SparksBody() {
         onScroll={onScroll}
         scrollEventThrottle={16}
         keyboardShouldPersistTaps="handled"
+        /*
+          Every line on this screen is editable, so the keyboard covers the
+          thing being typed into for everything past the first screenful —
+          you tap a fact, the keyboard comes up over it, and you are typing
+          into something you cannot see. A correction you cannot read is not a
+          correction, and this is the screen whose whole argument is that a
+          memory you cannot see is one you cannot correct.
+
+          `automaticallyAdjustKeyboardInsets` is both halves of the fix, which
+          is why it is a prop and not a `KeyboardAvoidingView`: iOS adds the
+          keyboard's overlap to the content inset *and* scrolls the focused
+          field up by exactly how far it was buried. A `KeyboardAvoidingView`
+          only does the first, which makes the field reachable by scrolling
+          rather than putting it where you are looking.
+
+          It must not be combined with one, either — they would both subtract
+          the keyboard and the content would jump twice as far. The screens
+          that already have a `KeyboardAvoidingView` deliberately do not have
+          this.
+        */
+        automaticallyAdjustKeyboardInsets
       >
 
       <Fading id="did" scrollY={scrollY} line={readingLine(header)} onMeasure={mark}>
@@ -643,12 +664,40 @@ function FactCard({
   const palette = usePalette();
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(fact.value);
+  /*
+    The same flag as `editing`, where an effect can read it without depending
+    on it. Listing `editing` in the deps below would re-run the effect as the
+    box closes and reset the field to the stored value for a frame, which is
+    the old text flashing back after you have just corrected it.
+  */
+  const typing = useRef(false);
 
-  // Follows the stored value: a later turn can rewrite a fact while this
-  // screen is open, and the box should not sit there showing the old one.
-  useEffect(() => setText(fact.value), [fact.value]);
+  /*
+    Follows the stored value — but never over the top of what is being typed.
+
+    A later turn can rewrite a fact while this screen is open, and the box
+    should not sit there showing the old one. It also must not throw away a
+    correction in progress, which is what it did: consolidation runs every
+    dozen turns and `compact()` rewrites facts wholesale, so a background pass
+    landing mid-edit replaced the half-typed line with the stored one and
+    there was nothing to undo it with.
+
+    The human wins. Blurring then saves what they typed over the background
+    change, which is the right way round: one of the two writers is in the
+    room and looking at it.
+  */
+  useEffect(() => {
+    if (typing.current) return;
+    setText(fact.value);
+  }, [fact.value]);
+
+  const begin = () => {
+    typing.current = true;
+    setEditing(true);
+  };
 
   const commit = () => {
+    typing.current = false;
     setEditing(false);
     const next = text.trim();
     if (!next) {
@@ -671,6 +720,18 @@ function FactCard({
           autoFocus
           returnKeyType="done"
           multiline
+          /*
+            Done saves, which it did not.
+
+            A `multiline` field defaults to `submitBehavior: 'newline'`, so
+            the return key inserted a line break and `onSubmitEditing` was
+            never called at all. The key said Done, the only way to save was
+            to tap somewhere else, and pressing Done put a newline in the
+            middle of the fact instead. Multiline is still right — a
+            correction can be longer than the box — so the behaviour is set
+            rather than the prop dropped.
+          */
+          submitBehavior="blurAndSubmit"
           accessibilityLabel={`Correct: ${fact.value}`}
           style={{
             fontFamily: Type.body.fontFamily,
@@ -684,7 +745,7 @@ function FactCard({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`${fact.value}. Tap to correct.`}
-          onPress={() => setEditing(true)}
+          onPress={begin}
           hitSlop={4}
           style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
         >

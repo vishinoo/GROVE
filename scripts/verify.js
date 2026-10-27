@@ -1045,6 +1045,128 @@ section('A reply is finished before the microphone opens');
  * with nothing on screen to explain why. Every phrase here is one that has to
  * keep working.
  */
+/**
+ * You can see what you are typing, and finishing a line does something.
+ *
+ * Two faults of exactly the kind this harness exists for: both type-check,
+ * both read correctly, and both fail by quietly doing nothing.
+ *
+ *   THE KEYBOARD COVERS THE FIELD. The Memory screen is a list where every
+ *   line is editable, and it had no keyboard handling at all — tap a fact
+ *   past the first screenful and the keyboard comes up over the thing you are
+ *   typing into. On the screen whose whole argument is that a memory you
+ *   cannot see is one you cannot correct.
+ *
+ *   DONE DID NOTHING. A `multiline` TextInput defaults to
+ *   `submitBehavior: 'newline'`, so the return key inserts a line break and
+ *   `onSubmitEditing` is never called. Both boxes with a submit handler had
+ *   one that could not fire: the fact editor's Done key put a newline in the
+ *   middle of the fact, and the Talk screen's return key did the same to a
+ *   sentence meant for Grove.
+ *
+ * The rules are general rather than named at the two fixes, because the next
+ * input somebody adds will have the same two defaults.
+ */
+section('You can see what you type, and Done does something');
+{
+  const screens = [
+    'src/app/(app)/index.tsx',
+    'src/app/(app)/sparks.tsx',
+    'src/app/(app)/settings.tsx',
+    'src/app/onboarding.tsx',
+    'src/app/login.tsx',
+    'src/components/ui.tsx',
+  ];
+
+  /*
+   * Comments stripped first, because this section is about what the code
+   * does. The note in sparks.tsx explaining why a KeyboardAvoidingView must
+   * not be used here contains the words "KeyboardAvoidingView", and the
+   * check read its own explanation as the thing it was warning about.
+   */
+  const code = (source) => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+
+  for (const file of screens) {
+    // Both: the stripped text is what gets tested, the original is what line
+    // numbers are counted in. Reporting a line from the stripped copy points
+    // at whatever happens to sit there in the real file.
+    const original = fs.readFileSync(path.join(ROOT, file), 'utf8');
+    const source = code(original);
+    const inputs = source.match(/<TextInput\b[\s\S]*?\/>/g) ?? [];
+
+    /*
+     * A submit handler that cannot be reached is worse than no handler: it
+     * reads as the feature being there. `blurOnSubmit` is accepted because
+     * React Native still honours it, though `submitBehavior` supersedes it.
+     */
+    for (const input of inputs) {
+      if (!/\bmultiline\b/.test(input) || !/onSubmitEditing/.test(input)) continue;
+      // Located by its `value={…}` prop, which survives stripping and is
+      // unique per field; the whole tag does not match, since the original
+      // still has the comments in it.
+      const marker = /value=\{[^}]*\}/.exec(input)?.[0];
+      const at = marker ? original.indexOf(marker) : -1;
+      const line = at >= 0 ? original.slice(0, at).split('\n').length : '?';
+      check(
+        /submitBehavior|blurOnSubmit/.test(input),
+        `${file}:${line} — a multiline field with a submit handler says what the return key does`,
+        "multiline defaults to inserting a newline, so onSubmitEditing never fires and the key lies"
+      );
+    }
+
+    // Only screens that actually take typing need to deal with a keyboard.
+    if (inputs.length === 0) continue;
+    const avoiding = /KeyboardAvoidingView/.test(source);
+    const insets = /automaticallyAdjustKeyboardInsets/.test(source);
+    /*
+     * Or it hands the job to the shared wrapper, which is itself in this
+     * list. Settings has three fields and no scroll view of its own — the
+     * first version of this check called that a failure, which is the check
+     * being wrong rather than the screen.
+     */
+    const delegates = /<Screen\b/.test(source);
+    check(
+      avoiding || insets || delegates,
+      `${file} takes typing and moves out of the keyboard's way`,
+      'otherwise the keyboard covers whatever is being typed into'
+    );
+    /*
+     * Never both. A KeyboardAvoidingView shrinks the container by the
+     * keyboard's height and the inset adjustment subtracts it again, so the
+     * content jumps twice as far as it should and the field overshoots off
+     * the top.
+     */
+    check(
+      !(avoiding && insets),
+      `${file} subtracts the keyboard once, not twice`,
+      'a KeyboardAvoidingView and keyboard insets together scroll the field clean past where you are looking'
+    );
+  }
+
+  /*
+   * And the wrapper those screens delegate to, checked on its own terms.
+   *
+   * This is the hole the first version of the section had, and it is the one
+   * this harness already has a whole section about: `ui.tsx` holds no
+   * TextInput of its own, so the loop above skipped it entirely, while
+   * Settings passed by pointing at it. Removing the keyboard handling from
+   * the shared `Screen` broke Settings and every other screen using it, and
+   * every check still printed ok. A delegation is only worth accepting if the
+   * delegate is the thing being asserted.
+   */
+  const ui = code(fs.readFileSync(path.join(ROOT, 'src/components/ui.tsx'), 'utf8'));
+  const shared = between(ui, 'export function Screen(', 'stickyHeaderIndices', {
+    min: 400,
+    max: 2500,
+  });
+  check(shared !== null, 'the shared screen wrapper is where it is expected to be');
+  check(
+    shared !== null && /automaticallyAdjustKeyboardInsets/.test(shared),
+    'the shared screen wrapper moves out of the keyboard’s way',
+    'every screen that delegates its scrolling to it is relying on this'
+  );
+}
+
 section('Enough means enough, and nothing else does');
 {
   const { closing } = require(path.join(OUT, 'lib/closing.js'));
@@ -1136,7 +1258,7 @@ section('Enough means enough, and nothing else does');
 
   const exchange = between(agent, 'const exchange = useCallback', 'const turn = ++turnSeq.current;', {
     min: 200,
-    max: 2000,
+    max: 2600,
   });
   check(exchange !== null, 'the start of a turn is where it is expected to be');
   check(

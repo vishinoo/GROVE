@@ -270,6 +270,23 @@ function TalkBody() {
               // a two-row box, taller than the send button beside it.
               numberOfLines={1}
               onSubmitEditing={send}
+              /*
+                Return sends, and keeps the keyboard.
+
+                It did neither: a `multiline` field defaults to
+                `submitBehavior: 'newline'`, so return added a line break and
+                `onSubmitEditing` never fired. The Send button meant nothing
+                was unreachable, which is why this survived — but a newline in
+                a sentence to Grove is never what anybody wanted, and a
+                sentence nobody can finish by pressing return is a box that
+                behaves unlike every other message field on the phone.
+
+                `submit` rather than `blurAndSubmit`, because dismissing the
+                keyboard after each line is wrong for the one case this box
+                exists for: typing to Grove in a meeting, several times in a
+                row.
+              */
+              submitBehavior="submit"
               style={{
                 flex: 1,
                 maxHeight: 110,
