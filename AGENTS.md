@@ -224,8 +224,9 @@ disconnected and reconnected.** Nothing else can fix it.
 ## When Grove listens, and how you know
 
 **Every reply ends with a window you can talk into, and the window shuts
-itself.** A second and a half after an ordinary reply (`GRACE_MS`), twelve
-after Grove has actually asked something (`ANSWER_MS`).
+itself.** Three seconds after an ordinary reply (`GRACE_MS`), twelve after
+Grove has actually asked something (`ANSWER_MS`) — and none at all if you said
+you were finished (`closing.ts`).
 
 **They are answers to different questions, and treating them as one dial is
 why both have been wrong.** `ANSWER_MS` is "Grove asked you something, how
@@ -234,20 +235,63 @@ deciding takes thought. `GRACE_MS` is only "how long to wait for you to
 *begin* a word you already meant to say", with nothing pending and the reply
 finished.
 
-That one went two → four and a half → one and a half. Four and a half was set
-to make room for the tail of Grove's own voice, and overshot badly: once
-`SPEECH_TAIL_MS` held the microphone back until the sound had actually
+That one went two → four and a half → one and a half → three. Four and a half
+was set to make room for the tail of Grove's own voice, and overshot badly:
+once `SPEECH_TAIL_MS` held the microphone back until the sound had actually
 stopped, the window no longer had to absorb it, and four and a half seconds of
 a screen saying Listening after an ordinary answer reads as the app having
 hung. **An offer counts as a question** and gets the long window, because the
 whole point of asking is that somebody answers.
 
-The short number is safe because it only governs *starting*: `onPartial`
-re-arms to `TRAILING_MS` the moment a word is heard, so anyone who does begin
-gets three and a half seconds of pausing room per breath and is never cut off
+**A second and a half then overshot the other way, and the number was only
+half of why.** The clock started when `startListening` *returned*, which is
+the recogniser agreeing to start rather than a microphone being open —
+bringing up the audio engine takes a few hundred milliseconds more, and on a
+window that short most of it was charged to the person. Which is why talking
+straight away worked sometimes and not others, for no reason visible from
+outside. The clock now starts at the **first level reading**, the first thing
+that cannot happen until a microphone is genuinely being read, so three
+seconds means three seconds of microphone. It is armed on starting as well as
+on that first reading, and only the first reading re-arms it: the readings
+arrive every hundred milliseconds whether or not anyone is speaking, so
+re-arming on each would be a window that never closes, and arming only on
+them would hold the microphone open for ever on a build that reports none.
+
+The number is safe because it only governs *starting*: `onPartial` re-arms to
+`TRAILING_MS` the moment a word is heard, so anyone who does begin gets three
+and a half seconds of pausing room per breath and is never cut off
 mid-sentence. `npm run verify` asserts the relationships rather than the
 numbers — the trailing window must exceed the opening one, or beginning a
 sentence would shorten the time you had to finish it.
+
+**And "enough" closes it early.** `src/lib/closing.ts`. A window that shuts
+itself is right nearly always and wrong in one case: when you already know you
+are finished, and the only way out is to say nothing and wait. Said on its own
+the word gets **no reply at all** — there is nothing to reply to, and "sure,
+done" after "enough" is the exact noise being asked for less of. Said at the
+end of a real sentence ("text Priya I'm three minutes late, enough") the
+sentence runs normally and only the window after it is dropped. A pending
+confirmation is cancelled, and a pending offer is cleared without being
+counted as a refusal.
+
+The whole risk is the other direction, because a false positive silently
+truncates a real request with nothing on screen to say why. Three rules, each
+earning its place against a sentence that has to keep working:
+
+- **A question is never a close.** "Can you text Priya, that's all?"
+- **The bare words need a break in front of them** — a comma, a full stop, an
+  "and". "That's good enough", "I've had enough", "late enough" have none.
+  Phrases that cannot be said by accident (`that's all`, `nothing else`,
+  `stop listening`) do not need one.
+- **The match is exact, not contained**, which is what makes negation safe for
+  free: "no, that's not enough" has the break and ends in the word, but its
+  tail is not in the list. A test for *containing* "enough" would have needed
+  a rule about "not", then one about "hardly", and so on.
+
+`npm run verify` runs the real module over both halves: twelve phrasings that
+must close, five that must close and still be answered, and sixteen ordinary
+sentences — "mark the essay as done", "add enough milk for the week to the
+list" — that must survive whole.
 
 This is a change of mind, and the reasoning it replaced is still half right.
 The mic used to open after anything ending in a question mark, and a
@@ -363,10 +407,17 @@ observations; no closes them and leaves the urgent half alone, because "don't
 chat to me" and "don't tell me I'm about to be late" are different requests.
 
 **Nothing unprompted opens the microphone**, even the lines that end in a
-question. Grove started it, the phone is in a pocket, and a mic that hears
-nothing closes with a second sound. Urgency always wins over a discovery: being
-told what you talk about most while you should be leaving the house is the wrong
-order.
+question. Grove started it, the phone is in a pocket, and nobody asked for a
+microphone to come on. Urgency always wins over a discovery: being told what
+you talk about most while you should be leaving the house is the wrong order.
+
+That one used to hold by construction, because a reply only ever listened when
+something was waiting on an answer — and **the grace window after every reply
+made it untrue without anything here changing, and nothing said so.** So it is
+stated in code now rather than only in prose: `volunteer` sets the same hush
+`closing.ts` sets, and `npm run verify` fails if it stops doing it. An
+invariant that can be broken from another file by someone who never read this
+paragraph needs a check, not a sentence.
 
 ## The interruption budget
 

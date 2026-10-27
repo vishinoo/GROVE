@@ -944,7 +944,13 @@ section('A reply is finished before the microphone opens');
   const trailing = ms('TRAILING_MS');
   const speechTail = ms('SPEECH_TAIL_MS');
   check([grace, answer, trailing, speechTail].every(Number.isFinite), 'every window is a number');
-  check(grace > 0 && grace <= 2500, `an ordinary reply waits ${grace}ms for you to start`);
+  // The ceiling is three and a half seconds, not four and a half. Four and a
+  // half was the number that read as the app having hung; a second and a half
+  // was the number that was gone before the microphone had finished opening.
+  // What made the small number safe to raise is the arming check below: the
+  // clock now starts at the first level reading, so this is time spent
+  // listening rather than time spent partly on the audio engine.
+  check(grace > 1500 && grace <= 3500, `an ordinary reply waits ${grace}ms for you to start`);
   check(answer >= 4 * grace, `and a question waits ${answer}ms, much longer`);
   check(
     trailing > grace,
@@ -968,9 +974,18 @@ section('A reply is finished before the microphone opens');
   );
 
   // The automatic window, opened when a reply ended by itself.
-  const after = agent.slice(agent.indexOf('The tail has to finish'), agent.indexOf('The tail has to finish') + 1600);
+  //
+  // Landmarked rather than sliced to a byte count. This read `+ 1600` and
+  // broke the first time a comment was added above the code it was pointing
+  // at — which is a check failing for a reason that has nothing to do with
+  // what it checks, and the kind of noise that gets a harness ignored.
+  const after = between(agent, 'The tail has to finish', '}, SPEECH_TAIL_MS);', {
+    min: 400,
+    max: 3000,
+  });
+  check(after !== null, 'the automatic window is where it is expected to be');
   check(
-    /SPEECH_TAIL_MS/.test(after) && /beginListening/.test(after),
+    after !== null && /beginListening\(false, false, \{ window/.test(after),
     'a reply that ends on its own waits for the tail'
   );
 
@@ -979,6 +994,176 @@ section('A reply is finished before the microphone opens');
   check(
     /stopSpeaking\(\)/.test(barge) && !/SPEECH_TAIL_MS/.test(barge),
     'and a press interrupts without waiting'
+  );
+
+  /*
+   * The window is measured from the microphone, not from asking for one.
+   *
+   * `startListening` returning true is the recogniser accepting the request;
+   * the audio engine comes up a few hundred milliseconds later. On a short
+   * window that gap was most of it, which is why talking straight away worked
+   * some of the time and not others.
+   *
+   * Two halves, and the check needs both. The first level reading re-arms the
+   * clock — that is the fix. And the clock is armed after start regardless —
+   * that is what stops the fix becoming a microphone held open for ever on a
+   * build whose native half never reports a level.
+   */
+  const onLevel = between(agent, 'onLevel: (value) =>', 'onError: (message) =>', {
+    min: 100,
+    max: 1200,
+  });
+  check(onLevel !== null, 'the level handler is where it is expected to be');
+  check(
+    onLevel !== null && /armSilence\(\)/.test(onLevel),
+    'the first level reading starts the no-speech clock',
+    'otherwise the window is partly spent waiting for the audio engine'
+  );
+  check(
+    onLevel !== null && /micLive/.test(onLevel),
+    'and only the first one, since they arrive every hundred milliseconds'
+  );
+  const afterStart = between(agent, 'openedAt.current = Date.now();', 'beginListeningRef.current =', {
+    min: 10,
+    max: 600,
+  });
+  check(
+    afterStart !== null && /armSilence\(\)/.test(afterStart),
+    'the clock is armed on starting too, so a silent build still closes the microphone'
+  );
+}
+
+/**
+ * "Enough" closes the microphone, and nothing else does by accident.
+ *
+ * Every reply ends with a window you can talk into. The word is for when you
+ * already know you are finished and would rather not wait it out.
+ *
+ * The whole risk is in the other direction. "Enough" is an ordinary English
+ * word and most of its uses are not this one, so the cost of a false positive
+ * is a sentence silently truncated or dropped — a request that half happened,
+ * with nothing on screen to explain why. Every phrase here is one that has to
+ * keep working.
+ */
+section('Enough means enough, and nothing else does');
+{
+  const { closing } = require(path.join(OUT, 'lib/closing.js'));
+
+  /** Said on its own: nothing left to answer, and the window stays shut. */
+  const alone = [
+    'Enough.',
+    'enough',
+    'Ok, enough.',
+    "That's enough.",
+    "That's all.",
+    "That's it.",
+    'Thanks, that’s all.',
+    'Nothing else.',
+    'Stop listening.',
+    "We're done.",
+    'Done.',
+    'Alright, done',
+  ];
+  for (const said of alone) {
+    const got = closing(said);
+    check(
+      got.closed === true && got.text === '',
+      `"${said}" closes the microphone and needs no reply`,
+      'a reply to "enough" is the exact noise being asked for less of'
+    );
+  }
+
+  /** Riding on a real sentence: answer it, then stay shut. */
+  const riding = [
+    ["Text Priya I'm running three minutes late, enough.", "Text Priya I'm running three minutes late"],
+    ['Add milk to the list and enough', 'Add milk to the list'],
+    ['Send that report to Priya, that’s all.', 'Send that report to Priya'],
+    ['Put the gym at seven tomorrow, nothing else', 'Put the gym at seven tomorrow'],
+    ['Remind me to call Mark — that’s it', 'Remind me to call Mark'],
+  ];
+  for (const [said, left] of riding) {
+    const got = closing(said);
+    check(
+      got.closed === true && got.text === left,
+      `"${said}" is answered as "${got.text}" with no window after`
+    );
+  }
+
+  /*
+   * And the sentences that end in one of those words and mean something else.
+   *
+   * These are the reason the bare words need a break in front of them and the
+   * match is exact rather than contained. Without either rule, "mark the
+   * essay as done" becomes "mark the essay as".
+   */
+  const ordinary = [
+    'Is twenty minutes enough?',
+    "That's good enough",
+    "I've had enough of this course",
+    'Have I slept enough',
+    "No, that's not enough",
+    'Book it for nine, that is not enough time',
+    'Mark the essay as done',
+    'Is the build done?',
+    'Tell Priya the deck is finished',
+    'Am I done for the day?',
+    'I need enough time to get there',
+    'Add enough milk for the week to the list',
+    'No more meetings this week please',
+    'Can you text Priya, that’s all?',
+    'Move my 2 - 3 pm meeting',
+    'Order me a burger and some fries',
+  ];
+  for (const said of ordinary) {
+    const got = closing(said);
+    check(
+      got.closed === false && got.text === said,
+      `"${said}" is an ordinary sentence and survives whole`,
+      'a stop word read into a real request truncates it with nothing on screen to say why'
+    );
+  }
+
+  /*
+   * The wiring, which the strings above cannot see.
+   *
+   * Two things set the hush, and the second is the one that was quietly
+   * untrue: "nothing unprompted opens the microphone" used to hold by
+   * construction, because a reply only listened when something was waiting on
+   * an answer. The grace window after every reply broke it without anything
+   * in attention.ts or interrupt.ts changing.
+   */
+  const agent = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
+
+  const exchange = between(agent, 'const exchange = useCallback', 'const turn = ++turnSeq.current;', {
+    min: 200,
+    max: 2000,
+  });
+  check(exchange !== null, 'the start of a turn is where it is expected to be');
+  check(
+    exchange !== null && /closing\(said\)/.test(exchange),
+    'the stop word is read before anything else looks at the sentence'
+  );
+
+  const volunteered = between(agent, 'attention.current.said.add', 'transcript.record', {
+    min: 100,
+    max: 1500,
+  });
+  check(volunteered !== null, 'the unprompted line is where it is expected to be');
+  check(
+    volunteered !== null && /hushAfter\.current = turnSeq\.current;/.test(volunteered),
+    'nothing Grove says unprompted opens the microphone',
+    'nobody asked for it, the phone is in a pocket, and the window would record the room'
+  );
+
+  const window = between(agent, 'A window that was asked not to open.', 'const window = listenAfter', {
+    min: 100,
+    max: 1200,
+  });
+  check(window !== null, 'the hush is read where the window is chosen');
+  check(
+    window !== null && /!listenAfter && hushAfter\.current === turn/.test(window),
+    'the hush drops the grace window but never a real question',
+    'a question Grove had to ask, with no way to answer it, is the worse failure'
   );
 }
 

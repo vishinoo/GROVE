@@ -73,6 +73,7 @@ import {
   type Offer,
   type Proposal,
 } from '@/lib/offers';
+import { closing } from '@/lib/closing';
 import { plainFailure } from '@/lib/failure';
 import * as struggles from '@/lib/struggles';
 import { afterTurn, consolidateNow } from '@/lib/consolidate';
@@ -119,10 +120,22 @@ const SILENCE_TIMEOUT_MS = 5000;
  * four and a half seconds of a screen saying Listening after an ordinary
  * answer reads as the app having hung.
  *
- * A second and a half is enough to start talking if you intend to, and this
- * is only ever about *starting*: `onPartial` re-arms to `TRAILING_MS` the
- * moment a word is heard, so anyone who does begin gets three and a half
+ * Cutting it to a second and a half overshot the other way, and the reason is
+ * worth writing down because the number alone does not explain it. The clock
+ * used to start when `startListening` *returned*, which is the recogniser
+ * agreeing to start — not the microphone being open. Bringing up the audio
+ * engine takes a few hundred milliseconds more, and all of it was being spent
+ * out of a window that short. So the clock now starts at the first level
+ * reading from the recogniser, which is the first evidence that a microphone
+ * is genuinely listening, and three seconds here means three seconds of
+ * microphone rather than three seconds minus however long the hardware took.
+ *
+ * This is only ever about *starting*: `onPartial` re-arms to `TRAILING_MS`
+ * the moment a word is heard, so anyone who does begin gets three and a half
  * seconds of pausing room per breath and is never cut off mid-sentence.
+ *
+ * And if you already know you are finished, you do not have to wait it out —
+ * see `closing.ts`.
  *
  * The asymmetry is the whole point. A short window costs one press from
  * someone who hesitated; a long one makes every single reply end in a pause
@@ -142,7 +155,7 @@ const SILENCE_TIMEOUT_MS = 5000;
  */
 const SPEECH_TAIL_MS = 500;
 
-const GRACE_MS = 1500;
+const GRACE_MS = 3000;
 const ANSWER_MS = 12_000;
 
 /**
@@ -259,6 +272,15 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const openedAt = useRef(0);
   /** Set while a window Grove opened itself is running, so it makes no sound. */
   const quietListen = useRef(false);
+  /**
+   * The turn after which no grace window opens, because it was not wanted.
+   *
+   * Held as a turn number rather than a flag so it cannot leak: it applies to
+   * exactly the turn that set it, and the next sentence carries its own
+   * number and is listened after as usual. Two things set it — someone
+   * saying "enough" (`closing.ts`), and anything Grove says unprompted.
+   */
+  const hushAfter = useRef(-1);
   /** When the current claim to be listening began, for the desync watchdog. */
   const listenStartedAt = useRef(0);
   /** When Grove last made a sound, which is when a phantom press can arrive. */
@@ -298,7 +320,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const soundFor = (was: AgentState, now: AgentState) => {
     const opening =
       (now === 'listening' || now === 'noting') && was !== 'listening' && was !== 'noting';
-    const closing =
+    const shutting =
       (was === 'listening' || was === 'noting') && (now === 'idle' || now === 'asleep');
 
     /*
@@ -311,13 +333,13 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       heard you and the sound is the answer.
     */
     const quietly = quietListen.current;
-    if (closing) quietListen.current = false;
+    if (shutting) quietListen.current = false;
 
     // Haptics first: they work on every build, and the chimes only exist on one
     // that has the native half.
     if (opening && !quietly) {
       buzz('open');
-    } else if (closing && !quietly) {
+    } else if (shutting && !quietly) {
       buzz('closed');
     }
     const remote = remoteModule();
@@ -330,7 +352,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
     if (opening && !quietly) {
       remote.chime('listen');
-    } else if (closing && !quietly) {
+    } else if (shutting && !quietly) {
       // Stopped hearing you without anything to act on — the case that used
       // to be invisible.
       remote.chime('stop');
@@ -660,13 +682,39 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    * scattering it across handlers is how that ordering quietly gets lost.
    */
   const exchange = useCallback(async (said: string) => {
-    const text = said.trim();
+    /*
+      "Enough" comes off the front of everything else.
+
+      It can be the whole sentence, in which case there is nothing to answer
+      and the only right reply is no reply: close the microphone and stop. A
+      "sure, done" after "enough" is exactly the noise being asked for less
+      of. Or it can be the last word of a real sentence, in which case the
+      sentence runs normally and only the window afterwards is dropped.
+
+      Read before anything else looks at the words, so a confirmation sees the
+      sentence without it and the model never has to be told the word exists.
+    */
+    const shut = closing(said);
+    const text = shut.text.trim();
     if (!text) {
+      // A confirmation left armed is a booby trap, and "enough" is not a yes.
+      // Neither is it a no worth teaching anything from: an offer cleared here
+      // is cleared without being counted, the same as any sentence that moved
+      // on rather than refusing.
+      awaitingYes.current = null;
+      offered.current = null;
+      if (shut.closed) console.log('[grove:listen] closed on request');
+      // No sound said from here. Dropping out of 'listening' is itself the
+      // closing transition, so `soundFor` makes the one noise this deserves —
+      // and `onPartial` has already cleared `quietListen`, so it makes it
+      // even for a window Grove opened itself. Saying it again here was two
+      // taps for one event.
       setState(restingState());
       return;
     }
 
     const turn = ++turnSeq.current;
+    if (shut.closed) hushAfter.current = turn;
     /** Whether this turn is still the one the user is waiting on. */
     const mine = () => mounted.current && turn === turnSeq.current;
 
@@ -1303,9 +1351,16 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     lastVolunteered.current = new Date().toISOString();
     setCaption(say);
     // Spoken, never listened after — even the lines that end in a question.
-    // Grove started this, the phone is in a pocket, and an opened microphone
-    // that hears nothing closes with a second sound. One unasked-for noise is
-    // the most this is worth. The press is there if they want to answer.
+    // Grove started this, the phone is in a pocket, and nobody asked for a
+    // microphone to come on. One unasked-for noise is the most this is worth.
+    // The press is there if they want to answer.
+    //
+    // This used to be true by construction, because a reply only ever opened
+    // the microphone when something was waiting on an answer. The grace
+    // window after every reply made it untrue without anything here changing,
+    // and nothing said so — which is the shape of invariant worth stating in
+    // code rather than only in a comment. `utter` reads the turn number back.
+    hushAfter.current = turnSeq.current;
     utter(say);
 
     if (account && account !== 'anon') {
@@ -1413,13 +1468,28 @@ function shortFailure(text: string): string {
           Ready and then opening the mic a moment later would flicker through
           a state that was never true.
         */
+        /*
+          A window that was asked not to open.
+
+          Only the grace window, never the one after a real question. "Enough"
+          means "I have finished talking", and if Grove has nonetheless had to
+          ask for something, leaving it asking with no way to answer is the
+          worse of the two failures — and unprompted lines never set
+          `listenAfter` in the first place, so the distinction costs them
+          nothing.
+
+          Still spent inside the tail below rather than returning here, so the
+          state drops to Ready when the sound stops and not while it is still
+          audibly draining — which is the same reason the tail exists at all.
+        */
+        const hushed = !listenAfter && hushAfter.current === turn;
         const window = listenAfter ? ANSWER_MS : GRACE_MS;
         setTimeout(() => {
           if (!mounted.current) return;
           // A newer press or a newer line owns the app now, and owns the
           // state with it.
           if (turn !== turnSeq.current || isSpeaking()) return;
-          if (!running.current) {
+          if (!running.current && !hushed) {
             void beginListening(false, false, { window, quiet: !listenAfter });
             return;
           }
@@ -1540,6 +1610,43 @@ function shortFailure(text: string): string {
       // moves the volume and would otherwise read as a second press.
       trigger.suppressVolumeTriggers();
 
+      /**
+       * Nothing said at all: close the recogniser rather than leave it holding
+       * the microphone with the UI insisting it is listening.
+       */
+      const armSilence = () => {
+        clearSilence();
+        silence.current = setTimeout(() => {
+          if (!mounted.current || turn !== listenSeq.current) return;
+          console.log('[grove:listen] nothing heard in', window, 'ms — cancelling');
+          abortListening();
+          setState(restingState());
+        }, window);
+      };
+
+      /*
+        The window is measured from the microphone opening, not from asking it
+        to open.
+
+        `startListening` returning true means the recogniser accepted the
+        request. Bringing up the audio engine takes a few hundred milliseconds
+        after that, and on a short window most of it was being charged to the
+        person — who then found that talking straight away sometimes worked
+        and sometimes did not, for no reason they could see.
+
+        A level reading is the first thing that cannot happen until a
+        microphone is actually being read, so the first one restarts the
+        clock. Exactly the first: the readings arrive every hundred
+        milliseconds whether or not anyone is speaking, so re-arming on each
+        one would be a window that never closes.
+
+        And it only ever *delays* the close — the timer is armed below either
+        way, so a build whose native half never reports a level still shuts
+        the microphone on time rather than holding it open for ever.
+      */
+      let micLive = false;
+      let heardSomething = false;
+
       const started = startListening(
         {
           onPartial: (text) => {
@@ -1558,6 +1665,7 @@ function shortFailure(text: string): string {
             */
             if (text.trim()) {
               quietListen.current = false;
+              heardSomething = true;
               clearSilence();
               silence.current = setTimeout(() => {
                 if (!mounted.current || turn !== listenSeq.current) return;
@@ -1568,11 +1676,25 @@ function shortFailure(text: string): string {
             if (mounted.current) setHeard(text);
           },
           onFinal: (text) => {
+            // Belt and braces with onPartial. Partials nearly always arrive
+            // first, but a very short utterance can produce only a final — and
+            // then a level reading landing in the gap before the recogniser's
+            // own end would re-arm the no-speech timer, which three seconds
+            // later would abort a turn already in flight and drop the screen
+            // to Ready while Grove was still thinking.
+            heardSomething = true;
             clearSilence();
             console.log('[grove:listen] final', JSON.stringify(text));
             void exchange(text);
           },
           onLevel: (value) => {
+            // The microphone is real as of now. Give the window back the time
+            // the audio engine spent coming up — but never once a word has
+            // arrived, because from there on the pause belongs to onPartial.
+            if (!micLive) {
+              micLive = true;
+              if (!heardSomething && turn === listenSeq.current) armSilence();
+            }
             if (mounted.current) setLevel(value);
           },
           onError: (message) => {
@@ -1654,15 +1776,7 @@ function shortFailure(text: string): string {
       // nothing at all — so it is worth exactly one more go.
       openedAt.current = Date.now();
 
-      // Nothing said at all: close the recogniser rather than leave it holding
-      // the microphone with the UI insisting it is listening.
-      clearSilence();
-      silence.current = setTimeout(() => {
-        if (!mounted.current || turn !== listenSeq.current) return;
-        console.log('[grove:listen] nothing heard in', window, 'ms — cancelling');
-        abortListening();
-        setState(restingState());
-      }, window);
+      armSilence();
     },
     // utter is a useCallback with no deps, so it is stable; listing it would
     // rebuild this and, through `press`, resubscribe the ring on every render.
