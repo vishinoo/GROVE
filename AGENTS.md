@@ -224,16 +224,30 @@ disconnected and reconnected.** Nothing else can fix it.
 ## When Grove listens, and how you know
 
 **Every reply ends with a window you can talk into, and the window shuts
-itself.** Four and a half seconds of silence after an ordinary reply
-(`GRACE_MS`), twelve after Grove has actually asked something (`ANSWER_MS`) —
-because it has asked for a decision and deciding takes longer than breathing.
+itself.** A second and a half after an ordinary reply (`GRACE_MS`), twelve
+after Grove has actually asked something (`ANSWER_MS`).
 
-Those started at two and seven and were both too short in use. The window opens
-when the speech callback reports the sentence done, which is not the moment
-sound stops leaving the glasses — so part of it goes on the tail of Grove's own
-voice, before the person has registered it is their turn. Being generous costs
-little precisely because the window is silent and closes itself; being stingy
-is the failure it was built to fix.
+**They are answers to different questions, and treating them as one dial is
+why both have been wrong.** `ANSWER_MS` is "Grove asked you something, how
+long to decide" — twelve seconds, because the question was Grove's idea and
+deciding takes thought. `GRACE_MS` is only "how long to wait for you to
+*begin* a word you already meant to say", with nothing pending and the reply
+finished.
+
+That one went two → four and a half → one and a half. Four and a half was set
+to make room for the tail of Grove's own voice, and overshot badly: once
+`SPEECH_TAIL_MS` held the microphone back until the sound had actually
+stopped, the window no longer had to absorb it, and four and a half seconds of
+a screen saying Listening after an ordinary answer reads as the app having
+hung. **An offer counts as a question** and gets the long window, because the
+whole point of asking is that somebody answers.
+
+The short number is safe because it only governs *starting*: `onPartial`
+re-arms to `TRAILING_MS` the moment a word is heard, so anyone who does begin
+gets three and a half seconds of pausing room per breath and is never cut off
+mid-sentence. `npm run verify` asserts the relationships rather than the
+numbers — the trailing window must exceed the opening one, or beginning a
+sentence would shorten the time you had to finish it.
 
 This is a change of mind, and the reasoning it replaced is still half right.
 The mic used to open after anything ending in a question mark, and a
@@ -488,6 +502,46 @@ press exactly as before. Nothing in `offers.ts` may set `confirmed`, nor may
 the branch that runs an accepted one, and `npm run verify` checks both: an
 offer carrying a confirmation would be a way to reach a paid app with one yes
 to a question Grove thought of by itself.
+
+## A searched answer, and an answer that only looks searched
+
+Asked for "burgers near me", Grove named a burger place that does not exist.
+That is the worst kind of invention this app can produce, because **a made-up
+local business reads exactly like a real one and you can be sent to it** — it
+is not a wrong fact, it is a wasted trip.
+
+Gemini says whether it actually searched, in `groundingMetadata`, and we were
+throwing it away along with the URIs of the pages it read. Both are kept now:
+
+- **Groundedness is a hard signal, not a guess.** Chunks it read or queries it
+  ran means it looked; no metadata at all means it answered out of its own
+  head. `groundingFrom()` is its own function so the **absent** case can be
+  tested, which is the case that matters — and "absent" arrives as `undefined`,
+  as `{}` and as empty arrays depending on the day.
+- **It is reset before every completion.** Only the Gemini path sets it, and
+  that is not the only path: Ollama runs locally with no web at all. Left over
+  from the previous call, a local answer would have arrived carrying the last
+  search's `searched: true` and its links — an unverified sentence with
+  real-looking citations attached, which is this signal's own failure mode
+  wearing a disguise.
+- **Real URIs beat model-written ones.** Asking the model to write its links
+  out is asking the faculty that invented the restaurant to invent the address
+  too. A grounding URI is a page that was actually fetched, so it wins; the
+  `LINKS:` line is only used when there is no grounding to use instead.
+- **An ungrounded answer is labelled on its way to the turn.** `brief.web`
+  appends `[NOT FROM A SEARCH: …]` to `detail`, and `TOOL_RULES` names the
+  same label: nothing specific in it may be stated as true.
+
+And the prompt finally carries the instruction that was missing — *never name
+a shop, restaurant, venue, product, person or price the search did not
+return.* Found, or not said.
+
+**The hand-off is the answer, not the consolation prize.** When Grove cannot
+verify something but an app on the phone could, "I can't find a specific one
+from here — want me to open Uber Eats?" is a better reply than any name it
+could guess at, and it is the offer mechanism doing exactly what it was built
+for. The rules say so outright, because the failure mode is a model reaching
+for a plausible name rather than admitting a gap.
 
 ## Sending you the thing it found
 

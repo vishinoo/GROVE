@@ -272,6 +272,68 @@ export function lastModelTrouble(): ModelTrouble {
   return modelTrouble;
 }
 
+/**
+ * Whether the last answer actually came from a search, and where from.
+ *
+ * Gemini says so and we were discarding it. When `google_search` is offered
+ * and the model uses it, the reply carries `groundingMetadata` naming the
+ * pages it read; when the model answers out of its own head instead, there is
+ * no metadata at all. That is a **hard signal for an ungrounded answer**, and
+ * it is the difference between a real restaurant and "Fox Burger".
+ *
+ * Asked for "burgers near me", the model named a place that does not exist,
+ * and nothing downstream could tell — the sentence read exactly like a
+ * sentence about a real place, which is what makes an invented local business
+ * worse than most inventions: you can be sent to it.
+ *
+ * The URIs are better than the alternative for the same reason. Asking the
+ * model to write its links out is asking the thing that invented the
+ * restaurant to invent the address too; a grounding URI is a page that was
+ * actually fetched.
+ *
+ * Module-level rather than threaded through every return, matching
+ * `modelTrouble` above — `askDirect` returns a string, and widening it would
+ * touch every caller for something only the search path asks about.
+ */
+export type Grounding = { searched: boolean; links: string[] };
+
+let grounding: Grounding = { searched: false, links: [] };
+
+export function lastGrounding(): Grounding {
+  return grounding;
+}
+
+/** The shape Gemini returns alongside a grounded answer. */
+type GroundingMetadata = {
+  groundingChunks?: { web?: { uri?: string; title?: string } }[];
+  webSearchQueries?: string[];
+};
+
+/**
+ * What the metadata says about whether a search happened.
+ *
+ * Its own function so it can be tested against the real response shapes
+ * rather than grepped for. The interesting case is the **absent** one: no
+ * metadata means the model answered out of its own head, which is the signal
+ * everything downstream depends on, and "absent" arrives as undefined, as an
+ * empty object and as an empty array depending on the day.
+ */
+export function groundingFrom(metadata: unknown): Grounding {
+  const found = (metadata ?? {}) as GroundingMetadata;
+  const chunks = Array.isArray(found.groundingChunks) ? found.groundingChunks : [];
+  const queries = Array.isArray(found.webSearchQueries) ? found.webSearchQueries : [];
+  const links = [
+    ...new Set(
+      chunks
+        .map((chunk) => (typeof chunk?.web?.uri === 'string' ? chunk.web.uri : ''))
+        .filter((uri) => /^https?:\/\//.test(uri))
+    ),
+  ].slice(0, 3);
+  // A query it ran, or a page it read. Either is proof it looked; a URI that
+  // is not a web address is proof of nothing and is dropped.
+  return { searched: links.length > 0 || queries.length > 0, links };
+}
+
 /** Straight to Gemini with this device's key: the main path, no server. */
 async function askDirect(
   system: string,
@@ -347,10 +409,18 @@ async function askDirect(
       return null;
     }
     const data = (await response.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      candidates?: {
+        content?: { parts?: { text?: string }[] };
+        groundingMetadata?: GroundingMetadata;
+      }[];
     };
     const text =
       data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('').trim() || null;
+
+    // Recorded on every call, so a later non-search answer cannot be read as
+    // grounded because an earlier search was.
+    grounding = groundingFrom(data.candidates?.[0]?.groundingMetadata);
+
     modelTrouble = text ? 'none' : 'refused';
     return text;
   } catch (problem) {
@@ -401,6 +471,21 @@ async function complete(
   // is meant to be read, and 600 tokens stops it mid-sentence on page one.
   tokens = 600
 ): Promise<string | null> {
+  /*
+    Groundedness starts false, every time.
+
+    Only `askDirect` ever sets it, and it is not the only path here — Ollama
+    runs locally with no web at all, and the server answers through its own
+    key. Left over from the previous call, a local answer would have arrived
+    carrying the last Gemini search's "searched: true" and its links, which
+    is the exact failure this signal exists to catch, wearing a disguise: an
+    unverified sentence with real-looking citations attached.
+
+    Reset here rather than in each branch, so a path added later is honest by
+    default and has to claim grounding on purpose.
+  */
+  grounding = { searched: false, links: [] };
+
   // Free and local first, then the server that holds the shared key, then the
   // device's own key. Three paths so that no single thing going down takes
   // Grove's ability to think with it.
@@ -698,7 +783,7 @@ TITLE: <two or three words, only for a standing job>`;
 export async function lightBrief(
   topic: string,
   place?: string | null
-): Promise<{ spoken: string; detail: string } | null> {
+): Promise<{ spoken: string; detail: string; grounded: boolean } | null> {
   /*
     A search needs a where and a when, and had neither.
   
@@ -732,7 +817,12 @@ export async function lightBrief(
       // impossible for Grove to ever send anyone anything it had found: the
       // thing you actually want after "where can I get that book" is the
       // address, and it had been deleted before the turn ever saw it.
-      'After your answer, on its own last line, write LINKS: followed by the one or two web addresses behind what you just said, separated by spaces. Leave the line out entirely if there are none worth keeping. The addresses are never spoken — they are for sending to the person — so do not refer to them in your sentences.\n\n' +
+      // The instruction that was missing, and the reason "Fox Burger" was
+      // said about a city that has no Fox Burger. A named business is the
+      // worst thing to invent in this app, because the person can be sent to
+      // it — and an invented one reads exactly like a real one.
+      'NEVER name a shop, restaurant, venue, product, person or price that the search did not actually return. If you did not find a specific one, say that plainly — "I could not find a specific one" — and stop. A wrong name is far worse here than no name, because they will go there. The same goes for an address, a phone number or an opening time: found, or not said.\n\n' +
+      'After your answer, on its own last line, you may write LINKS: followed by one or two web addresses you actually read, separated by spaces. Leave the line out if you have none. The addresses are never spoken — they are for sending to the person — so do not refer to them in your sentences.\n\n' +
       `It is ${clock} on ${today}, timezone ${zone}. That is the real current date and time — search as of now, and never answer a question about today from what you already knew.` +
       (where
         ? `\nThey are in ${where}. Anything local — transport, departures, opening times, shops, what is nearby, prices in a shop — means there unless they name somewhere else. Search for that place by name; do not answer about a different city with the same question.`
@@ -759,12 +849,24 @@ export async function lightBrief(
   const whole = (text ?? '').replace(/[*`]+/g, '').trim();
   if (!whole) return null;
 
-  const linked = /^\s*LINKS:\s*(.+)$/im.exec(whole);
-  const links = (linked?.[1] ?? '')
-    .split(/\s+/)
-    .map((url) => url.replace(/[.,;)\]]+$/, '').trim())
-    .filter((url) => /^https?:\/\/\S+$/.test(url))
-    .slice(0, 3);
+  /*
+    Real pages first, the model's own writing second.
+
+    `lastGrounding()` holds the URIs Gemini says it actually read. Those
+    cannot be invented. A `LINKS:` line the model typed can be, by exactly
+    the same faculty that invented the restaurant — so it is only used when
+    there is no grounding to use instead.
+  */
+  const found = lastGrounding();
+  const written = /^\s*LINKS:\s*(.+)$/im.exec(whole);
+  const links =
+    found.links.length > 0
+      ? found.links
+      : (written?.[1] ?? '')
+          .split(/\s+/)
+          .map((url) => url.replace(/[.,;)\]]+$/, '').trim())
+          .filter((url) => /^https?:\/\/\S+$/.test(url))
+          .slice(0, 3);
 
   const said = whole
     .replace(/^\s*LINKS:.*$/im, '')
@@ -784,6 +886,16 @@ export async function lightBrief(
     // only ever reach a person through something that was offered and agreed
     // to.
     detail: links.length > 0 ? `${said}\n\nLinks: ${links.join(' ')}` : said,
+    /*
+      Said out loud so the turn can be honest about it.
+
+      An answer the model produced without searching is a recollection, and
+      the one thing it must not do is arrive looking like a fact that was
+      just checked. The turn is told which it has — see TOOL_RULES — and the
+      right move on an ungrounded local question is to offer the app that
+      knows rather than to name a guess.
+    */
+    grounded: found.searched,
   };
 }
 

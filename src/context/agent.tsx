@@ -103,17 +103,30 @@ const SILENCE_TIMEOUT_MS = 5000;
  * A question gets much longer, because Grove has just asked for something and
  * the person has to think before they answer.
  *
- * These started at two seconds and seven and were both too short in use. The
- * window opens when the speech callback says the sentence is done, which is
- * not the same moment the sound stops coming out of the glasses — so some of
- * it is spent listening to the tail of Grove's own voice before the person
- * has even registered it is their turn. Four and a half, and twelve for a
- * question, leave room for that and for a normal beat of hesitation.
+ * WHY THE TWO NUMBERS ARE SO FAR APART
  *
- * The cost of being generous here is small precisely because the window is
- * silent and closes itself: an unused one leaves no trace. The cost of being
- * stingy is the thing it was built to fix, which is reaching for the ring
- * again to say one more sentence.
+ * They are answers to different questions, and treating them as one dial is
+ * why both have been wrong at some point.
+ *
+ * `ANSWER_MS` is "Grove asked you something, how long to decide" — twelve
+ * seconds, because deciding takes thought and the question was Grove's idea.
+ *
+ * `GRACE_MS` is only "how long to wait for you to *begin* a word you already
+ * meant to say". Nothing is pending; the reply is finished. It went from two
+ * to four and a half to make room for the tail of Grove's own voice, and that
+ * overshot badly: `SPEECH_TAIL_MS` now holds the microphone back until the
+ * sound has actually stopped, so the window no longer has to absorb it, and
+ * four and a half seconds of a screen saying Listening after an ordinary
+ * answer reads as the app having hung.
+ *
+ * A second and a half is enough to start talking if you intend to, and this
+ * is only ever about *starting*: `onPartial` re-arms to `TRAILING_MS` the
+ * moment a word is heard, so anyone who does begin gets three and a half
+ * seconds of pausing room per breath and is never cut off mid-sentence.
+ *
+ * The asymmetry is the whole point. A short window costs one press from
+ * someone who hesitated; a long one makes every single reply end in a pause
+ * that looks like a fault.
  */
 /**
  * The gap between a sentence being finished and the microphone opening.
@@ -129,7 +142,7 @@ const SILENCE_TIMEOUT_MS = 5000;
  */
 const SPEECH_TAIL_MS = 500;
 
-const GRACE_MS = 4500;
+const GRACE_MS = 1500;
 const ANSWER_MS = 12_000;
 
 /**

@@ -284,12 +284,26 @@ const BRIEF: Ability = {
     // local — the next bus, what is open, what a ticket costs — and a search
     // with no place in it answers about somewhere else entirely.
     const found = await lightBrief(topic, await homeTown());
-    // The spoken half is already fit for an ear; `detail` is the same answer
-    // with the web addresses still attached, which is what makes "send me
-    // that link" answerable afterwards. See the note in lightBrief.
-    return found
-      ? { ok: true, spoken: found.spoken, detail: found.detail }
-      : { ok: false, spoken: `Nothing came back for ${topic}.` };
+    if (!found) return { ok: false, spoken: `Nothing came back for ${topic}.` };
+    /*
+      The spoken half is already fit for an ear; `detail` is the same answer
+      with the web addresses still attached, which is what makes "send me that
+      link" answerable afterwards. See the note in lightBrief.
+
+      And `detail` says whether a search actually happened. Gemini reports it
+      and we were discarding it — asked for "burgers near me" the model named
+      a place that does not exist, and nothing downstream could tell, because
+      an invented restaurant reads exactly like a real one. An ungrounded
+      answer is a recollection; it is handed over labelled as one so the turn
+      does not state it as a fact it just checked.
+    */
+    return {
+      ok: true,
+      spoken: found.spoken,
+      detail: found.grounded
+        ? found.detail
+        : `${found.detail}\n\n[NOT FROM A SEARCH: this is recollection, not a looked-up fact. Do not state any name, place, price or time in it as true. If they wanted something specific and local, say you could not find one and offer to open the app that would know.]`,
+    };
   },
 };
 

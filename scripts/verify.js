@@ -921,6 +921,52 @@ section('A reply is finished before the microphone opens');
   const tail = agent.match(/const SPEECH_TAIL_MS = (\d+);/);
   check(Boolean(tail) && Number(tail[1]) > 0, 'there is a gap between speaking and listening');
 
+  /*
+   * And the windows are the right way round.
+   *
+   * Four numbers that have each been wrong on their own, and the failures
+   * only make sense as relationships between them:
+   *
+   *   - A plain reply's window is only "how long to wait for you to BEGIN".
+   *     At four and a half seconds every answer ended in a pause that read as
+   *     the app having hung.
+   *   - A question's window is "how long to decide", which is much longer.
+   *   - Once a word is heard the timer re-arms to the trailing window, so
+   *     nobody who did start talking is cut off. That has to be the larger of
+   *     the two, or starting to speak would shorten your own window.
+   *   - The speech tail is spent inside the window, so it has to be a small
+   *     part of it.
+   */
+  const ms = (name) =>
+    Number(agent.match(new RegExp(`const ${name} = ([\\d_]+);`))?.[1]?.replace(/_/g, ''));
+  const grace = ms('GRACE_MS');
+  const answer = ms('ANSWER_MS');
+  const trailing = ms('TRAILING_MS');
+  const speechTail = ms('SPEECH_TAIL_MS');
+  check([grace, answer, trailing, speechTail].every(Number.isFinite), 'every window is a number');
+  check(grace > 0 && grace <= 2500, `an ordinary reply waits ${grace}ms for you to start`);
+  check(answer >= 4 * grace, `and a question waits ${answer}ms, much longer`);
+  check(
+    trailing > grace,
+    `starting to talk buys ${trailing}ms per pause, more than the window itself`,
+    'otherwise beginning a sentence would shorten the time you had to finish it'
+  );
+  check(speechTail < grace / 2, 'and the speech tail is a small part of the window');
+
+  // An offer ends in a question, so it must get the question's window. The
+  // whole point of asking is that someone answers.
+  const offerListens = between(
+    agent,
+    'One sentence added to the end, sometimes',
+    'if (offer) offerSpoken(offer)',
+    { min: 200, max: 3000 }
+  );
+  check(offerListens !== null, 'the offer utterance is where it is expected to be');
+  check(
+    offerListens !== null && /offer \? true :/.test(offerListens),
+    'an offer opens the microphone like any other question'
+  );
+
   // The automatic window, opened when a reply ended by itself.
   const after = agent.slice(agent.indexOf('The tail has to finish'), agent.indexOf('The tail has to finish') + 1600);
   check(
@@ -1315,7 +1361,7 @@ section('An offer must survive its own schema');
   const briefAbility = fs.readFileSync(path.join(ROOT, 'src/lib/abilities.ts'), 'utf8');
   const briefRun = briefAbility.slice(briefAbility.indexOf("id: 'brief.web'"));
   check(
-    /detail: found\.detail/.test(briefRun.slice(0, briefRun.indexOf('\n};'))),
+    /found\.detail/.test(briefRun.slice(0, briefRun.indexOf('\n};'))),
     'and the search ability passes that detail on to the model'
   );
 }
@@ -1384,6 +1430,146 @@ section('A check that stops checking must fail, not pass');
     !(missing !== null && !/forbidden/.test(missing)),
     'so a guard on an unreadable region reports failure',
     'every such check in this file is written `region !== null && ...`'
+  );
+}
+
+/*
+ * A searched answer, and an answer that only looks searched.
+ *
+ * Asked for "burgers near me", the model named a place that does not exist.
+ * Nothing downstream could tell, which is what makes an invented local
+ * business worse than most inventions — the sentence reads exactly like a
+ * sentence about a real place, and the person can be sent to it.
+ *
+ * Gemini says whether it actually searched, in `groundingMetadata`, and that
+ * was being discarded along with the URIs of the pages it read. Both are now
+ * kept: the groundedness so the turn can be honest, and the URIs because
+ * asking the model to write its own links out is asking the faculty that
+ * invented the restaurant to invent the address too.
+ */
+section('An answer that was not searched does not pretend to be');
+{
+  const light = fs.readFileSync(path.join(ROOT, 'src/lib/lightModel.ts'), 'utf8');
+  const abilitiesSource = fs.readFileSync(path.join(ROOT, 'src/lib/abilities.ts'), 'utf8');
+  const brainSource = fs.readFileSync(path.join(ROOT, 'src/lib/brain.ts'), 'utf8');
+
+  /*
+   * Run, not grepped. The grounding read is its own function precisely so the
+   * absent case can be exercised — and absent is the case that matters, since
+   * it is the one that says the model answered out of its own head.
+   */
+  const { groundingFrom } = require(path.join(OUT, 'lib/lightModel.js'));
+  check(/export function lastGrounding\(\)/.test(light), 'groundedness is available to the search path');
+
+  // A real grounded reply.
+  const grounded = groundingFrom({
+    webSearchQueries: ['burger restaurants near Edmonton'],
+    groundingChunks: [
+      { web: { uri: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc', title: 'yelp.ca' } },
+      { web: { uri: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/def', title: 'opentable.ca' } },
+    ],
+  });
+  check(grounded.searched === true, 'a reply with pages behind it counts as searched');
+  check(grounded.links.length === 2, 'and its real page addresses are kept');
+
+  // The one that produced "Fox Burger": the model did not look at all.
+  for (const [what, metadata] of [
+    ['no metadata at all', undefined],
+    ['an empty object', {}],
+    ['empty arrays', { groundingChunks: [], webSearchQueries: [] }],
+    ['null', null],
+  ]) {
+    const out = groundingFrom(metadata);
+    check(out.searched === false, `${what} means it did not search`);
+    check(out.links.length === 0, `and offers no links (${what})`);
+  }
+
+  // A query with no pages is still a search; a junk URI is not a link.
+  check(groundingFrom({ webSearchQueries: ['x'] }).searched === true, 'a query it ran counts on its own');
+  const junk = groundingFrom({ groundingChunks: [{ web: { uri: 'not-a-url' } }, { web: {} }, {}] });
+  check(junk.links.length === 0, 'and a chunk with no web address yields no link');
+  check(junk.searched === false, 'so it does not count as having searched');
+
+  // Duplicates collapse, and the list is bounded.
+  const many = groundingFrom({
+    groundingChunks: Array.from({ length: 9 }, (_, i) => ({
+      web: { uri: `https://example.com/${i % 2}` },
+    })),
+  });
+  check(many.links.length === 2, 'duplicate pages collapse to one link each');
+
+  /*
+   * And it cannot be stale.
+   *
+   * Only the Gemini path sets groundedness, and it is not the only path:
+   * Ollama runs locally with no web at all. Left over from the previous call,
+   * a local answer would arrive carrying the last search's "searched: true"
+   * and its links — an unverified sentence with real-looking citations
+   * attached, which is this signal's own failure mode wearing a disguise.
+   */
+  const completeBody = between(light, 'async function complete(', '\n}\n', { min: 300, max: 4000 });
+  check(completeBody !== null, 'the model entry point is where it is expected to be');
+  check(
+    completeBody !== null && /grounding = \{ searched: false, links: \[\] \};/.test(completeBody),
+    'groundedness is reset before every completion',
+    'otherwise a local answer inherits the last search'
+  );
+  check(
+    completeBody !== null &&
+      completeBody.indexOf('grounding = {') < completeBody.indexOf('probeOllama'),
+    'and reset before any path can answer'
+  );
+
+  // Real URIs beat model-written ones.
+  const briefBody = between(
+    light,
+    'export async function lightBrief',
+    '\n}\n',
+    { min: 500, max: 8000 }
+  );
+  check(briefBody !== null, 'lightBrief is where it is expected to be');
+  check(
+    briefBody !== null && /found\.links\.length > 0\s*\n?\s*\? found\.links/.test(briefBody),
+    'a real grounding URI is preferred over one the model typed',
+    'a typed link can be invented by whatever invented the restaurant'
+  );
+  check(briefBody !== null && /grounded: found\.searched/.test(briefBody), 'and groundedness is returned');
+
+  // The prompt carries the instruction that was missing.
+  check(
+    briefBody !== null && /NEVER name a shop, restaurant, venue, product, person or price/.test(briefBody),
+    'the search is told never to name something it did not find'
+  );
+
+  // An ungrounded answer is labelled on its way to the turn.
+  const briefRun = between(abilitiesSource, "id: 'brief.web'", '\n};', { min: 400, max: 6000 });
+  check(briefRun !== null, 'the search ability is where it is expected to be');
+  check(
+    briefRun !== null && /found\.grounded/.test(briefRun),
+    'the search ability checks whether its answer was grounded'
+  );
+  check(
+    briefRun !== null && /NOT FROM A SEARCH/.test(briefRun),
+    'and says so in the detail the model reads'
+  );
+  check(
+    briefRun !== null && /detail: found\.grounded/.test(briefRun),
+    'while a grounded answer is handed over unlabelled'
+  );
+
+  // And the turn is told what to do about it, which is to hand off.
+  check(
+    /Never name a place, business, product, price or person you did not get from a tool/.test(brainSource),
+    'the rules forbid naming anything a tool did not return'
+  );
+  check(
+    /NOT FROM A SEARCH/.test(brainSource),
+    'name the label the rules are talking about',
+    'the ability writes it and the prompt has to use the same words'
+  );
+  check(
+    /that hand-off IS the answer/.test(brainSource),
+    'and tell it to hand off to the app rather than guess a name'
   );
 }
 
