@@ -903,6 +903,86 @@ kind `tsc` and `npm run verify` cannot see:
   and bullets intact. When an API is off, the error names which one and carries
   Google's own activation link to the card.
 
+## Memory that bears on the question
+
+`src/lib/bearing.ts`, and the goal block in `memory.ts`. Grove's memory was
+complete and inert: all forty facts rode in every prompt, the entity roster
+with them — and the framing above the facts said, in these words, *"use a line
+ONLY when it is directly relevant to what they just asked. Most turns need
+none of it."*
+
+That sentence fixed something real. Without it the model dragged a note about
+someone owing for lunch into a question about software, which reads as an
+assistant that is not listening rather than one that remembers. **It also
+taught the model that memory is wallpaper.** Grove knew somebody was trying to
+lose ten kilos, was asked where to get a burger, and answered the question.
+The instruction said to.
+
+**The two halves pull in opposite directions, so they are now two blocks.**
+Restraint about background facts is right. Restraint about goals is the bug —
+a goal is not trivia about a person, it is the thing they asked for help with.
+
+### The goal block, and the thing that stops it becoming a diet app
+
+`goalDirective` says outright that goals are not background, and that when a
+request touches one the answer should be shaped by it: the version that gets
+them closer, the option they would not have thought of, the conflict they may
+not have clocked.
+
+The obvious failure of fixing this is the opposite one, and it is worse —
+an assistant that turns every mention of food into a lecture about your
+weight gets deleted, where one that merely under-uses its memory only
+disappoints. So the rule is **once, alongside, and then help**: one sentence,
+never instead of doing what was asked, never twice, never a lecture, never a
+reason to refuse. *If they still want the burger after you have said your bit,
+get them the burger.* Grove is their friend, not their conscience.
+
+Deliberately **not** a table of what helps or hurts each goal. That would be a
+topic map, it would only cover the goals somebody wrote rules for, and the
+model does not need one — it knows what a burger has to do with losing weight.
+What it did not know was that noticing was part of the job.
+
+### What bears on this
+
+The facts were always in the prompt; what was never there was anything saying
+which of them matter *now*. `bearingOn` picks those out in code — no model
+call, no embeddings — by overlapping the words of the sentence against the
+memory, and puts them under a heading that says what they are for.
+
+- **Scored by rarity, not by count.** Ordinary inverse document frequency,
+  measured across this person's own memory, which is the scoring half of BM25
+  and the same reasoning already recorded for keeping lookup keyword-based.
+  Counting matches flat was wrong in both directions at once: "Priya" shared
+  with one entity in seven says a great deal, "lecture" shared with four says
+  almost nothing, and a flat count needed two coincidences to beat one real
+  signal — so asking what to get Priya for her birthday surfaced nothing
+  about Priya.
+- **One distinctive word of a name is a name.** Requiring every word meant
+  "Priya" did not match "Priya Shah", which is not how anybody refers to
+  anyone.
+- **Kindred.** When the sentence matches something Grove knows, its nearest
+  neighbour of the same kind comes too. That is what makes *"you liked that
+  one, this other one is close to it"* possible at all, and it is general:
+  nothing in the file knows what a book is, only that two things share
+  unusual words.
+- **Capped at six lines and deduplicated.** A promise lives as both a fact and
+  an episode by design, so both qualify, and printing both makes a short block
+  look like padding — which teaches the model that the block is padding. A
+  long list under a heading saying "this is relevant" is the flat list again
+  with a new label.
+- **Silent on most turns.** Measured on ten realistic sentences: five carried
+  a block, mean ~60 tokens, and the goal block is ~180 tokens on every turn.
+  About 3% on top of the ~7,200 a turn already costs, for the thing that makes
+  the memory do any work at all.
+
+**The stemmer had a bug of exactly the shape this file exists to avoid.**
+`"notes"` lost its `es` and became `"not"` — a stopword — so "I need to send
+those notes" matched an open commitment about sending notes on precisely zero
+words. `es` now comes off only after a sibilant (boxes, dishes), `ing` undoes
+a doubled consonant (running → run, but falling → fall), and `npm run verify`
+tests both. Nothing in a type system can see that one: it looks like the
+feature simply not working.
+
 ## The long memory
 
 `src/lib/memory.ts` is forty one-line facts sent with every turn. `src/lib/life.ts`

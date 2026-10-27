@@ -1573,6 +1573,197 @@ section('An answer that was not searched does not pretend to be');
   );
 }
 
+/*
+ * Memory that bears on the question, rather than memory that sits there.
+ *
+ * Grove's memory was complete and inert. All forty facts rode in every
+ * prompt — and the framing above them said, in these words, "use a line ONLY
+ * when it is directly relevant to what they just asked. Most turns need none
+ * of it." That sentence fixed a real fault, where a note about someone owing
+ * for lunch turned up in a question about software. It also taught the model
+ * that memory is wallpaper: Grove knew somebody was trying to lose ten kilos,
+ * was asked where to get a burger, and answered the question.
+ *
+ * Two halves, and they pull in opposite directions, which is why they are now
+ * two blocks. Restraint about background facts is right. Restraint about
+ * goals is the bug — a goal is not trivia about someone, it is the thing they
+ * asked for help with.
+ */
+section('What bears on this, and what stays out of it');
+{
+  const { bearingOn, contentWords } = require(path.join(OUT, 'lib/bearing.js'));
+  const { asPromptBlock, goalDirective } = require(path.join(OUT, 'lib/memory.js'));
+
+  const ent = (kind, name, summary, facts = []) => ({
+    id: name.toLowerCase().replace(/\W+/g, '-'),
+    kind,
+    name,
+    aliases: [],
+    summary,
+    facts: facts.map((text) => ({ text, at: '2026-09-01' })),
+    firstSeen: '2026-01-01',
+    lastSeen: '2026-10-01',
+    mentions: 3,
+    updatedAt: '2026-10-01',
+  });
+  const life = {
+    entities: [
+      ent('idea', 'Never Split The Difference', 'A negotiation book he read twice.', ['book by Chris Voss']),
+      ent('idea', 'Thinking Fast and Slow', 'A book on judgement he never finished.', ['book by Kahneman']),
+      ent('person', 'Priya Shah', 'Classmate on the finance case competition.', ['owes him the Tuesday notes']),
+      ent('project', 'Noctus', 'His own backend project, mostly retired.', ['was the OAuth broker']),
+      ent('place', 'Padmanadi', 'Vegetarian place on 97 Street.', ['he likes the rendang']),
+    ],
+    episodes: [
+      {
+        id: 'e1',
+        kind: 'commitment',
+        at: '2026-10-20',
+        title: 'Send Priya the lecture notes',
+        summary: 'He said he would send Priya his notes from the Tuesday lecture.',
+        about: ['priya-shah'],
+        open: true,
+        source: 'conversation',
+        updatedAt: '2026-10-20',
+      },
+    ],
+    pending: [],
+  };
+  const facts = [
+    { id: 'f1', subject: 'me', key: 'home', value: 'I live in Edmonton', source: 'told', at: '2026-01-01' },
+    { id: 'f2', subject: 'me', key: 'weight', value: 'wants to lose 10 kg', source: 'told', at: '2026-09-01', kind: 'goal' },
+    { id: 'f3', subject: 'me', key: 'study', value: 'studying finance at UAlberta', source: 'told', at: '2026-01-01' },
+  ];
+
+  /*
+   * The restraint half. A block that shows up on every turn is one the model
+   * stops reading, and the original complaint about memory was that it got
+   * worked into answers to prove it had remembered.
+   */
+  const QUIET = [
+    "what's the weather",
+    'put some music on',
+    'remind me to call mum at six',
+    'how are you doing today',
+    'set a timer for ten minutes',
+    'what is the capital of France',
+    'tell me a joke',
+    'what time is it',
+  ];
+  const noisy = QUIET.filter((said) => bearingOn(said, life, facts).block !== '');
+  check(
+    noisy.length === 0,
+    `nothing is surfaced on ${QUIET.length} turns that touch nothing`,
+    noisy.length ? `surfaced on: ${noisy.map((s) => JSON.stringify(s)).join(', ')}` : ''
+  );
+
+  // And the half that was missing.
+  const named = (said) => bearingOn(said, life, facts).named;
+  check(
+    named('what should I get Priya for her birthday').includes('Priya Shah'),
+    'one distinctive word of a name surfaces that person',
+    'requiring every word meant "Priya" did not match "Priya Shah"'
+  );
+  check(
+    named('I really liked Never Split The Difference').includes('Never Split The Difference'),
+    'something named outright is surfaced'
+  );
+  check(
+    named('I really liked Never Split The Difference').includes('Thinking Fast and Slow'),
+    'along with the nearest thing of the same kind',
+    'this is what makes "you liked that one, this is close to it" possible'
+  );
+  check(
+    named('can you recommend me a book').length >= 2,
+    'and one shared word that is not ubiquitous is enough on its own'
+  );
+  check(
+    /Still open: Send Priya the lecture notes/.test(bearingOn('I need to send those notes', life, facts).block),
+    'an open promise the sentence touches comes with it'
+  );
+
+  /*
+   * The stemmer, which had this exact bug.
+   *
+   * "notes" lost its "es" and became "not", which is a stopword, so a
+   * sentence about sending notes matched a commitment about sending notes on
+   * zero words. Nothing in a type system or a lint can see that; it looks
+   * like the feature simply not working.
+   */
+  for (const [word, want] of [
+    ['notes', 'note'],
+    ['boxes', 'box'],
+    ['dishes', 'dish'],
+    ['running', 'run'],
+    ['burgers', 'burger'],
+  ]) {
+    const got = [...contentWords(word)][0];
+    check(got === want, `"${word}" stems to "${want}"${got === want ? '' : ` (got "${got}")`}`);
+  }
+  /*
+   * The real property, stated correctly.
+   *
+   * My first attempt at this check asserted that no stem may land on a
+   * stopword, and it failed on "needs", "uses" and "things" — whose stems
+   * land on stopwords because their singulars *are* stopwords, which is
+   * correct behaviour. The fault was never "a stem is a stopword"; it was "a
+   * stem is a DIFFERENT word that happens to be a stopword". So the words
+   * tested are ones whose singular carries meaning.
+   */
+  const swallowed = ['notes', 'cases', 'roles', 'goals', 'rates', 'dates', 'sites'].filter(
+    (w) => contentWords(w).size === 0
+  );
+  check(
+    swallowed.length === 0,
+    'stemming never deletes a word whose singular means something',
+    swallowed.length ? `swallowed: ${swallowed.join(', ')}` : ''
+  );
+
+  // Bounded, because the point is a few things it should notice.
+  const biggest = Math.max(
+    ...['I need to send those notes to Priya about the finance lecture at UAlberta', 'book'].map(
+      (s) => bearingOn(s, life, facts).block.length
+    )
+  );
+  check(biggest < 1200, `the block stays small (${biggest} chars at its largest here)`);
+  // And never says the same thing twice: a promise lives as both a fact and
+  // an episode by design.
+  const both = bearingOn('I need to send those notes', life, facts).block;
+  const dupes = both.split('\n').filter((l) => /Priya/.test(l) && /notes?/i.test(l));
+  check(dupes.length <= 1, 'and never says the same thing twice');
+
+  /*
+   * Goals are out from under the instruction to ignore background.
+   */
+  const background = asPromptBlock(facts);
+  check(
+    !/lose 10 kg/.test(background.split('WHAT THEY ARE TRYING TO DO')[0]),
+    'goals are not inside the background block',
+    'that block is framed as context to leave alone unless asked'
+  );
+  check(/ONLY when it is directly relevant/.test(background), 'background keeps its restraint');
+  const goals = goalDirective(facts.filter((f) => f.kind === 'goal'));
+  check(/lose 10 kg/.test(goals), 'and the goals get a block of their own');
+  check(/not background/i.test(goals), 'which says outright that they are not background');
+  check(
+    /ONE sentence/.test(goals) && /never a lecture/.test(goals),
+    'with the restraint that keeps it from becoming a diet app',
+    'the failure of fixing this is an assistant that nags about your weight'
+  );
+  check(
+    /get them the burger/.test(goals),
+    'and does what was asked regardless',
+    'Grove is not in charge of them'
+  );
+  check(goalDirective([]) === '', 'nothing at all when there are no goals');
+
+  // Wired in, not merely written.
+  const brainSource = fs.readFileSync(path.join(ROOT, 'src/lib/brain.ts'), 'utf8');
+  check(/bearingOn\(userText/.test(brainSource), 'the turn asks what bears on what was said');
+  const memorySource = fs.readFileSync(path.join(ROOT, 'src/lib/memory.ts'), 'utf8');
+  check(/goalDirective\(goals\)/.test(memorySource), 'and the goal block rides with the facts');
+}
+
 /* ------------------------------------------------------------- verdict */
 
 console.log(

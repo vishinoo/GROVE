@@ -38,6 +38,7 @@ import { rapport, rapportDirective } from './rapport';
 import { calculate } from './calc';
 import { ABILITIES } from './abilities';
 import { activePreset, fallback, mannerDirective } from './persona';
+import { bearingOn } from './bearing';
 import type { Proposal } from './offers';
 import { abilityIdFor, argsFromCall, declarationsFor } from './tools';
 
@@ -530,7 +531,25 @@ async function runTurn(
   // turn. Everything else about them is a tool call away.
   const [roster, usual, friction, talks] = await Promise.all([
     loadLife(currentAccount())
-      .then((l) => [whoIsWho(l), lately(l)].filter(Boolean).join('\n'))
+      .then((l) =>
+        [
+          whoIsWho(l),
+          lately(l),
+          /*
+            And what, out of all of it, bears on this particular sentence.
+
+            The roster and the facts were already here. What was missing was
+            anything saying which of them matter now — so the model treated
+            the lot as wallpaper, which the framing above the facts explicitly
+            told it to do. This picks out the overlap in code, names the
+            connection, and says what it is for. No model call; see
+            bearing.ts.
+          */
+          bearingOn(userText, l, context.facts).block,
+        ]
+          .filter(Boolean)
+          .join('\n\n')
+      )
       .catch(() => ''),
     // What a normal week looks like, and whether today is one. Free: a median
     // and a group-by over what is already on the phone.

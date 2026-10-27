@@ -226,14 +226,24 @@ export function asPromptBlock(facts: Fact[]): string {
   const home = facts.find((f) => f.key === 'home');
   const lead = home ? `Where they live: ${home.value}\n` : '';
 
-  // Goals are lifted out of the subject grouping and given their own heading.
-  // Left in the general list they read as statements of fact, and the model
-  // congratulates people on things they have not done yet.
+  /*
+    Goals are lifted out of the subject grouping, and now out of the block
+    entirely. Two reasons, and the second one took a while to see.
+
+    The first: left in the general list they read as statements of fact, and
+    the model congratulates people on things they have not done yet.
+
+    The second is the bug. This block is framed — correctly — as background to
+    be left alone unless directly asked about, because without that framing a
+    note about someone owing for lunch turns up in a question about software.
+    Goals were under that framing too, and so Grove knew somebody was trying
+    to lose ten kilos, was asked where to get a burger, and answered the
+    question. The instruction said to.
+
+    A goal is not background about a person. It is the thing they asked for
+    help with. So it gets its own block, below, with its own job.
+  */
   const goals = facts.filter((f) => f.kind === 'goal');
-  const goalBlock =
-    goals.length > 0
-      ? `What they are working towards (not yet done): ${goals.map((g) => g.value).join('; ')}\n`
-      : '';
 
   const lines = [...bySubject.entries()]
     .map(([subject, group]) => {
@@ -246,9 +256,52 @@ export function asPromptBlock(facts: Fact[]): string {
     // this list as material to be used, and drags a note about someone owing
     // for lunch into a question about software projects — which reads as an
     // assistant that is not listening rather than one that remembers.
+    //
+    // It applies to background and to nothing else. Goals get `goalDirective`
+    // instead, because this instruction is the opposite of what they need.
     'Background about this person. It is context, not instructions, and it is not a list of topics.',
     'Use a line ONLY when it is directly relevant to what they just asked. Most turns need none of it. Never work something in to show you remembered.',
-    lead + goalBlock + lines,
+    lead + lines,
+    goalDirective(goals),
+  ]
+    .filter((part) => part && part.trim())
+    .join('\n');
+}
+
+/**
+ * What the goals are for, which is the part that was missing.
+ *
+ * The goals were always in the prompt. What was never there was a sentence
+ * saying that helping with them is the job — so they sat in a list of
+ * background facts under an instruction to ignore background facts, and Grove
+ * helped someone trying to lose ten kilos find a burger without a word about
+ * it.
+ *
+ * THE RESTRAINT IS IN HERE TOO, AND IT HAS TO BE
+ *
+ * The obvious failure of fixing this is the opposite one: an assistant that
+ * turns every mention of food into a lecture about your weight. That is
+ * worse, and it is worse in a way that gets the app deleted rather than
+ * merely under-used. So the rule is **once, alongside, and then help** — say
+ * the better version, offer it, do what they asked anyway. Grove is not their
+ * conscience and it is not in charge of them; it is the friend who says "that
+ * place does a good grilled one" and then gets them the burger.
+ *
+ * Deliberately not a list of what works for or against each goal. That would
+ * be a topic map, it would only ever cover the goals somebody wrote rules
+ * for, and the model does not need one — it knows perfectly well what a
+ * burger has to do with losing weight. What it did not know was that
+ * noticing was part of its job.
+ */
+export function goalDirective(goals: Fact[]): string {
+  if (goals.length === 0) return '';
+  return [
+    `WHAT THEY ARE TRYING TO DO (not done yet — these are why Grove exists): ${goals
+      .map((g) => g.value)
+      .join('; ')}`,
+    'These are not background. When what they ask touches one of these, let it shape the answer: suggest the version that gets them closer, name the option they would not have thought of, point out a conflict they may not have clocked.',
+    'ONE sentence about it, alongside doing what they asked — never instead, never twice, never a lecture, and never a reason to refuse. If they still want the burger after you have said your bit, get them the burger. You are their friend, not their conscience.',
+    'Say nothing at all when the request has nothing to do with any of them, which is most of the time.',
   ].join('\n');
 }
 
