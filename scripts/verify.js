@@ -112,6 +112,28 @@ Module._load = function (request, parent, isMain) {
 let failures = 0;
 let checks = 0;
 const section = (name) => console.log(`\n${name}`);
+
+/**
+ * A section whose checks have to await something.
+ *
+ * Nearly everything here is synchronous, and the verdict at the bottom used to
+ * be reached synchronously too — so an `async` block in the middle of the file
+ * scheduled its checks, `process.exit` ran first, and they never happened.
+ * Thirteen checks printed a heading and nothing else, the tally was unaffected,
+ * and the section looked like it had simply found nothing wrong. Which is this
+ * harness's own worst failure: a check that stops checking and keeps looking
+ * green.
+ *
+ * So anything async is registered here and awaited before the verdict, and the
+ * verdict is inside the same async tail. An ability is an async function; the
+ * only way to assert what one actually *does*, rather than what its source
+ * looks like, is to run it.
+ */
+const deferred = [];
+const laterSection = (name, fn) => deferred.push(async () => {
+  section(name);
+  await fn();
+});
 function check(ok, label, detail) {
   checks += 1;
   if (!ok) failures += 1;
@@ -785,14 +807,20 @@ section('Running out of credit says it has run out of credit');
 }
 
 /*
- * 22. The Sparks screen shows a couple, not a drawer.
+ * 22. The Memory screen shows a couple, not a drawer.
  *
  * Folding the archive away left a screen of shut drawers: nothing to read,
  * nothing to recognise, and no reason to believe any of it had anything in it.
- * And a conversation is not a log — filling the action list with "hey" and
- * "thanks" would bury the five lines worth reading.
+ *
+ * It also held "What it did" — the last few tool calls, with their state and
+ * their timestamps. **That is a log, not a memory.** It was the first thing on
+ * the screen and the largest, it said nothing that would still matter
+ * tomorrow, and it pushed the things that would below the fold. Memory is for
+ * what Grove should know next week; a receipt for something it did forty
+ * seconds ago belongs nowhere, and certainly not above a list of the people
+ * in somebody's life.
  */
-section('What it did, and what it still owes');
+section('Memory is what it knows, not a log of what it did');
 {
   const screen = fs.readFileSync(path.join(ROOT, 'src/app/(app)/sparks.tsx'), 'utf8');
 
@@ -815,9 +843,24 @@ section('What it did, and what it still owes');
   // Sparks names the section you are in once, in its pinned header, so the
   // blocks themselves carry no label any more. What still has to hold is the
   // shape: five shown, the rest behind a press.
-  check(/<Peek show=\{5\}>/.test(screen), 'the action log shows five before the rest');
-  check(/entry\.tool\)/.test(screen), 'and only exchanges that actually did something');
-  check(/still going/.test(screen), 'something still running says so');
+  check(/<Peek show=\{5\}>/.test(screen), 'a long list shows five before the rest');
+
+  /*
+   * And there is no action log on it at all.
+   *
+   * Asserted as an absence, on both halves, because deleting a block from a
+   * screen is the easiest thing in the world to half-do: the list goes and
+   * the section stays, leaving a heading, a colour on the map and a set of
+   * dots for a list that renders nothing.
+   */
+  const map = fs.readFileSync(path.join(ROOT, 'src/components/memory-map.tsx'), 'utf8');
+  check(!/\bactivity\b/.test(screen), 'the memory screen does not read the action log');
+  check(!/'did'/.test(map) && !/'did'/.test(screen), 'and no section is left behind for it');
+  check(
+    !/What it did/.test(map),
+    'nor a heading with nothing under it',
+    'a memory screen is for what Grove should know next week, not a receipt for a minute ago'
+  );
 
   // Goals and commitments are one list: the split was a filing decision.
   // Goals and open commitments render inside one block. Checking for the
@@ -1193,6 +1236,178 @@ section('You can see what you type, and Done does something');
  * The check is a cross-language one, because the failure is a disagreement
  * between two files in two languages that no compiler reads together.
  */
+/**
+ * An address you have used once is an address Grove knows.
+ *
+ * "Email mom" is the case contacts can never answer. Nobody has a contact
+ * called mom, so `findContact` returns nothing, the inbox search finds nothing,
+ * and Grove says "I have no address for mom" — every time, however many times
+ * it has already sent one. The word people use for somebody is not the word
+ * written on the contact card.
+ *
+ * So a send that worked teaches the word, keyed on what was *said*: that is
+ * the half contacts does not already hold, and the half that comes back next
+ * time. Written after the send rather than after the lookup, so it only ever
+ * records an address a press approved going out.
+ *
+ * Driven rather than read. The ordering — memory before contacts — is the
+ * whole feature, and a check that greps for both calls cannot tell which runs
+ * first. So `findContact` is made to throw, and the send has to succeed
+ * anyway.
+ */
+laterSection('An address you have used once is one Grove knows', async () => {
+  const memory = require(path.join(OUT, 'lib/memory.js'));
+  const google = require(path.join(OUT, 'lib/google.js'));
+  const send = ALL.find((a) => a.id === 'mail.send');
+  check(Boolean(send), 'there is a mail.send to drive');
+
+  // Everything replaced here is put back at the end: later sections read the
+  // real modules, and a harness that leaves its own stubs lying around is
+  // measuring itself.
+  const keep = {
+    loadFacts: memory.loadFacts,
+    remember: memory.remember,
+    me: google.me,
+    findContact: google.findContact,
+    searchMail: google.searchMail,
+    allowed: google.allowed,
+    sendMail: google.sendMail,
+  };
+
+  let facts = [];
+  memory.loadFacts = async () => facts;
+  memory.remember = async (_uid, entry) => {
+    facts = [...facts.filter((f) => !(f.key === entry.key && f.subject === entry.subject)), { ...entry, id: entry.key }];
+    return facts;
+  };
+  google.me = async () => 'you@example.com';
+  google.allowed = async () => true;
+  google.searchMail = async () => [];
+  let sentTo = null;
+  google.sendMail = async (to) => {
+    sentTo = to;
+    return true;
+  };
+
+  /**
+   * Run the two halves of a confirmed send and report where it went.
+   *
+   * Throws are caught and reported as a refusal rather than left to escape.
+   * `findContact` is deliberately made to throw below, and an escaping error
+   * failed the section as "an async section threw" — which is a red tick with
+   * no idea which rule broke, three lines from a check written to say exactly
+   * that.
+   */
+  const sendTo = async (to, body) => {
+    sentTo = null;
+    try {
+      const first = await send.run({ to, body });
+      if (!first.needsConfirming) return { refused: first.spoken, sentTo: null, detail: '' };
+      const done = await send.run({ ...first.confirmArgs, confirmed: 'yes' });
+      return { refused: done.ok ? null : done.spoken, sentTo, detail: first.detail ?? '' };
+    } catch (error) {
+      return { refused: `threw: ${String((error && error.message) || error)}`, sentTo, detail: '' };
+    }
+  };
+
+  {
+    // Nothing known, and contacts has never heard of her.
+    google.findContact = async () => [];
+    let out = await sendTo('mom', 'I will be home at six');
+    check(
+      out.sentTo === null && /no address/i.test(out.refused ?? ''),
+      'with nothing known, a name contacts cannot match is refused rather than guessed'
+    );
+
+    // An address dictated in full teaches nothing: the key would be the
+    // address and the fact would say an address is its own address.
+    out = await sendTo('jane@example.com', 'I will be home at six');
+    check(out.sentTo === 'jane@example.com', 'an address said in full is used as it is');
+    check(
+      !facts.some((f) => String(f.key).startsWith('email:')),
+      'and files nothing, since the word and the address would be the same',
+      JSON.stringify(facts.map((f) => f.key))
+    );
+
+    // Contacts works once, which is how the word gets learned.
+    google.findContact = async () => [{ name: 'Mom', email: 'jane@example.com' }];
+    out = await sendTo('mom', 'I will be home at six');
+    check(out.sentTo === 'jane@example.com', 'a name contacts can match sends as before');
+    const learned = facts.find((f) => f.key === 'email:mom');
+    check(Boolean(learned), 'and the word is remembered against the address it reached');
+    check(
+      learned !== undefined && /jane@example\.com/.test(learned.value) && /\bmom\b/i.test(learned.value),
+      'in a line that reads as a fact about her',
+      learned && learned.value
+    );
+    check(learned !== undefined && learned.kind !== 'goal', 'as an ordinary fact, never a goal');
+    check(
+      learned !== undefined && learned.source === 'noticed',
+      'marked as noticed rather than told, because nobody said it'
+    );
+
+    // The whole point. Contacts is now a trap: consulting it fails the test.
+    google.findContact = async () => {
+      throw new Error('contacts must not be consulted');
+    };
+    out = await sendTo('mom', 'running ten minutes late');
+    check(
+      out.sentTo === 'jane@example.com',
+      'next time the word alone is enough, without contacts at all',
+      out.refused ?? 'contacts was consulted'
+    );
+    check(
+      /^To jane@example\.com$/m.test(out.detail),
+      'and the address is on the card being confirmed',
+      'a remembered address that is never shown cannot be caught when it goes stale'
+    );
+
+    // Correcting the fact on the Memory screen changes where mail goes, which
+    // is what makes the staleness survivable.
+    facts = facts.map((f) => (f.key === 'email:mom' ? { ...f, value: 'email for mom is new@example.com' } : f));
+    out = await sendTo('mom', 'changed my mind');
+    check(out.sentTo === 'new@example.com', 'correcting the fact changes where mail goes');
+
+    /*
+     * A send that failed teaches nothing.
+     *
+     * The address was found, the press happened, and the mail did not go —
+     * which is exactly when the address is least worth keeping, because the
+     * failure may be the address. Learning it anyway would file a bad one and
+     * then use it in preference to contacts for ever.
+     *
+     * This is the one guarantee the cases above cannot see: with `sendMail`
+     * always succeeding, recording before the send and recording after it
+     * look identical.
+     */
+    facts = [];
+    google.findContact = async () => [{ name: 'Dad', email: 'dad@example.com' }];
+    google.sendMail = async () => false;
+    const failed = await sendTo('dad', 'I will call you tonight');
+    check(failed.refused !== null, 'a send that fails is reported as a failure');
+    check(
+      !facts.some((f) => f.key === 'email:dad'),
+      'and teaches nothing, since the address may be why it failed',
+      JSON.stringify(facts.map((f) => f.key))
+    );
+    google.sendMail = async (to) => {
+      sentTo = to;
+      return true;
+    };
+
+    // And the one address that is nobody's.
+    google.findContact = async () => [];
+    await sendTo('me', 'remember the bins');
+    check(
+      !facts.some((f) => f.key === 'email:me'),
+      'emailing yourself files no fact about a person called me'
+    );
+
+    Object.assign(memory, { loadFacts: keep.loadFacts, remember: keep.remember });
+    Object.assign(google, keep);
+  }
+});
+
 section('Listening does not stop the music');
 {
   const listen = fs.readFileSync(path.join(ROOT, 'src/lib/listen.ts'), 'utf8');
@@ -2323,8 +2538,22 @@ section('The per-sentence path never pays for a search');
 
 /* ------------------------------------------------------------- verdict */
 
-console.log(
-  `\n${failures === 0 ? 'All' : `${checks - failures}/${checks}`} checks passed` +
-    (failures ? ` — ${failures} FAILING` : '')
-);
-process.exit(failures === 0 ? 0 : 1);
+/*
+ * The async sections run here, before the count is read. A `process.exit` in
+ * synchronous code at the bottom of this file would run before any of them.
+ */
+(async () => {
+  for (const run of deferred) {
+    try {
+      await run();
+    } catch (error) {
+      check(false, 'an async section threw', String((error && error.stack) || error));
+    }
+  }
+
+  console.log(
+    `\n${failures === 0 ? 'All' : `${checks - failures}/${checks}`} checks passed` +
+      (failures ? ` — ${failures} FAILING` : '')
+  );
+  process.exit(failures === 0 ? 0 : 1);
+})();

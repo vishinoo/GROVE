@@ -44,11 +44,10 @@ import Svg, {
   Stop,
 } from 'react-native-svg';
 
-export type MapSection = 'did' | 'open' | 'repeats' | 'people' | 'happened' | 'about';
+export type MapSection = 'open' | 'repeats' | 'people' | 'happened' | 'about';
 
 /** In the order the screen lists them, so the map reads top to bottom too. */
 export const MAP_SECTIONS: { id: MapSection; label: string; colour: string }[] = [
-  { id: 'did', label: 'What it did', colour: '#7DD3FC' },
   { id: 'open', label: 'Still to do', colour: '#F3A063' },
   { id: 'repeats', label: 'Keeps tripping', colour: '#F0836A' },
   { id: 'people', label: 'People and projects', colour: '#86EFAC' },

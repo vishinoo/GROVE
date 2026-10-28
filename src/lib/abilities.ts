@@ -886,6 +886,26 @@ const MAIL_SEND: Ability = {
       if (!own) return { ok: false, spoken: 'I could not work out your own address.' };
       to = own;
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(asked)) {
+      /*
+        Memory before contacts.
+
+        Not an optimisation — it is the only thing that can answer "email
+        mom". Contacts has no such entry and never will, so the lookup below
+        fails, the inbox search fails, and Grove says it has no address for
+        her however many times it has already sent one. The word somebody uses
+        for a person is not the word on the contact card.
+
+        It wins over contacts rather than backing them up, because it got here
+        by being sent to successfully and confirmed by a press, which is better
+        evidence than one of several contacts matching on a first name. The
+        address is on the confirmation card either way, and the fact is
+        visible and correctable on the Memory screen — which is the whole
+        argument of that screen.
+      */
+      const known = await addressFor(asked);
+      if (known) {
+        to = known;
+      } else {
       const matches = await google.findContact(asked);
       if (matches === null) {
         return { ok: false, spoken: google.explain('sending that') };
@@ -950,6 +970,7 @@ const MAIL_SEND: Ability = {
       to = matches[0].email;
       const full = (matches[0].name || '').trim();
       if (full && full.toLowerCase() !== asked.toLowerCase()) matched = full;
+      }
     }
 
     // Dictated by voice, sent to a name Grove looked up, and unrecallable. One
@@ -1002,6 +1023,9 @@ const MAIL_SEND: Ability = {
     // A note to yourself is not signed: "Best, Vishnu" at the bottom of your own
     // reminder is the tell of something written by a machine.
     const sent = await google.sendMail(to, subject, toSelf ? draft : await signed(draft));
+    // Learned from the send, so next time the word is enough. Not for
+    // yourself — "email for me is …" is a fact about nobody.
+    if (sent && !toSelf) await rememberAddress(asked, to);
     // The reason matters most here. "That did not send" covered an expired
     // sign-in, a missing scope and a dead network alike — and sending is the
     // one thing where knowing which is the difference between fixing it in ten
@@ -1540,6 +1564,57 @@ export async function rememberTone(who: string, register: 'professional' | 'casu
     source: 'told',
     subject: name,
   });
+}
+
+/**
+ * The address somebody is reachable at, under the word used for them.
+ *
+ * "Email mom" is the case contacts cannot answer and never will: nobody has a
+ * contact called mom, so the lookup fails, the inbox search fails, and Grove
+ * says it has no address for her — every time, however many times you have
+ * already told it. The word people use for someone is not the word written on
+ * the contact.
+ *
+ * So a send that worked teaches the word. Keyed on what was *said* rather than
+ * on the contact's real name, because the said word is the one that will come
+ * back next time, and it is the only half of the pair that contacts does not
+ * already hold.
+ *
+ * Written after the send, not after the lookup. An address that was found and
+ * then failed to send to is not worth keeping — and the press has happened by
+ * then, so this only ever records something the person approved going out.
+ */
+async function rememberAddress(said: string, address: string): Promise<void> {
+  const name = said.trim();
+  const to = address.trim().toLowerCase();
+  // Nothing to learn from an address somebody dictated in full: the key would
+  // be the address and the fact would say it is its own address.
+  if (!name || !to || /@/.test(name)) return;
+  try {
+    await remember(CURRENT_UID, {
+      key: `email:${name.toLowerCase()}`,
+      value: `email for ${name} is ${to}`,
+      source: 'noticed',
+      subject: name,
+    });
+  } catch {
+    // Failing to remember an address must never fail the email that was sent.
+  }
+}
+
+/** The address last used for this word, if there is one. */
+async function addressFor(said: string): Promise<string | null> {
+  const name = said.trim().toLowerCase();
+  if (!name) return null;
+  try {
+    const facts = await loadFacts(CURRENT_UID);
+    const told = facts.find((f) => f.key === `email:${name}`);
+    const found = /[^\s<>"]+@[^\s<>"]+\.[^\s<>"]+/.exec(told?.value ?? '')?.[0];
+    return found ?? null;
+  } catch {
+    // No memory to read is not a reason to refuse to look somebody up.
+    return null;
+  }
 }
 
 const MAIL_REPLY: Ability = {

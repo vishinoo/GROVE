@@ -143,7 +143,7 @@ export default function Sparks() {
 
 function SparksBody() {
   const palette = usePalette();
-  const { activity, facts, editFact, forgetFact, life, forgetEntity, forgetEpisode, struggles, gotStruggle, forgetStruggle } =
+  const { facts, editFact, forgetFact, life, forgetEntity, forgetEpisode, struggles, gotStruggle, forgetStruggle } =
     useAgent();
   // Goals and facts are shown apart because they are read differently: a goal
   // is something you check on, a fact is something you correct.
@@ -172,7 +172,7 @@ function SparksBody() {
    * you touch the screen.
    */
   const headerRef = useRef(0);
-  const [lit, setLit] = useState<MapSection>('did');
+  const [lit, setLit] = useState<MapSection>('open');
   const tops = useRef<Partial<Record<MapSection, number>>>({});
 
   const scrollY = useSharedValue(0);
@@ -185,7 +185,7 @@ function SparksBody() {
   // comparison and almost never a React render.
   const look = (y: number) => {
 
-    let current: MapSection = 'did';
+    let current: MapSection = 'open';
     for (const section of MAP_SECTIONS) {
       const top = tops.current[section.id];
       if (top !== undefined && top <= y + readingLine(headerRef.current)) current = section.id;
@@ -251,15 +251,10 @@ function SparksBody() {
     for (const item of stuck) {
       out.push({ id: item.id, label: item.what, section: 'repeats', weight: item.raised });
     }
-    for (const entry of activity) {
-      if (!entry.tool) continue;
-      out.push({ id: entry.id, label: entry.said || entry.tool.name, section: 'did' });
-    }
     return out;
-  }, [life.entities, life.episodes, plain, goals, stuck, activity]);
+  }, [life.entities, life.episodes, plain, goals, stuck]);
 
   const counts: Record<MapSection, number> = {
-    did: activity.filter((entry) => entry.tool).length,
     open: goals.length + owed.length,
     repeats: stuck.length,
     people: life.entities.length,
@@ -314,10 +309,6 @@ function SparksBody() {
         */
         automaticallyAdjustKeyboardInsets
       >
-
-      <Fading id="did" scrollY={scrollY} line={readingLine(header)} onMeasure={mark}>
-          <Done />
-        </Fading>
 
       {/*
         Goals and promises in one place, because the distinction was a
@@ -585,62 +576,6 @@ function SparksBody() {
   );
 }
 
-/**
- * What Grove has actually done for you.
- *
- * Everything else on this screen is what it knows. This is what it did — the
- * mail it sent, the events it moved, the documents it wrote, the reminders it
- * set — and until now the only place you could see any of that was the Talk
- * screen, where it scrolls away behind the next thing you say.
- *
- * It shows what is **still running** too, which is the half that matters while
- * it is happening: a document takes most of a minute to write, and during that
- * minute the only sign anything was going on was a screen that said "working".
- *
- * Only exchanges that actually did something. A conversation is not a log, and
- * filling this with "hey" and "thanks" would bury the five lines worth reading.
- */
-function Done() {
-  const palette = usePalette();
-  const { activity } = useAgent();
-  const ran = activity.filter((entry) => entry.tool);
-  if (ran.length === 0) return null;
-
-  return (
-    <Peek show={5}>
-      {ran.map((entry) => {
-        const tool = entry.tool!;
-        const failed = tool.state === 'failed' || tool.state === 'blocked';
-        const running = tool.state === 'running';
-        return (
-          <Card key={entry.id} style={{ marginBottom: 8 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 9 }}>
-              <View
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: 4,
-                  marginTop: 6,
-                  backgroundColor: failed ? palette.alert : running ? palette.muted : palette.signal,
-                }}
-              />
-              <View style={{ flex: 1 }}>
-                <Text style={[Type.body, { color: palette.ink }]} numberOfLines={3}>
-                  {tool.detail || entry.replied || tool.name}
-                </Text>
-                <Text style={[Type.bodySm, { color: palette.muted, marginTop: 3 }]}>
-                  {tool.name}
-                  {running ? ' · still going' : failed ? ` · ${tool.state}` : ''} ·{' '}
-                  {transcriptWhen(entry.at)}
-                </Text>
-              </View>
-            </View>
-          </Card>
-        );
-      })}
-    </Peek>
-  );
-}
 
 /**
  * One remembered line, correctable in place.

@@ -165,6 +165,15 @@ single user.
   and edited on its own screen rather than in Settings: a memory you cannot see
   is one you cannot correct.
 
+  **It holds what Grove should know, not a log of what it did.** The screen
+  used to open with "What it did" — the last few tool calls with their state
+  and timestamps — which was the largest thing on it, said nothing that would
+  matter tomorrow, and pushed the things that would below the fold. A receipt
+  for something forty seconds old belongs nowhere, and certainly not above the
+  list of people in somebody's life. What is left is the five kinds that are
+  actually memory: still to do, keeps tripping, people and projects, what
+  happened, about you.
+
 ## Documents, and why a scope change needs a reconnect
 
 `doc.create` writes a new Google Doc and never touches one you already have.
@@ -876,6 +885,22 @@ model, which invents names. Texts are left in your own voice.
 - **Addresses come from the inbox too.** Someone who emailed you has an address
   even when they are not in contacts. And a reply with nothing to reply to
   becomes a new email to the person named, through the same read-back and press.
+- **A send that worked teaches the word.** "Email mom" is the case contacts can
+  never answer — nobody has a contact called mom, so the lookup finds nothing,
+  the inbox search finds nothing, and Grove says "I have no address for mom"
+  however many times it has already sent one. **The word people use for
+  somebody is not the word on the contact card.** So a successful send records
+  `email:<what was said>`, and memory is consulted **before** contacts.
+
+  Keyed on what was *said*, because that is the half contacts does not already
+  hold and the half that comes back next time. Written **after** the send, not
+  after the lookup: an address that was found and then failed to send to is
+  least worth keeping, since the failure may be the address. It beats contacts
+  rather than backing them up, because it got there by being sent to and
+  approved by a press, which is better evidence than one of several contacts
+  matching on a first name — and it is a visible, correctable fact on the
+  Memory screen, with the address on the confirmation card every time, which
+  is what makes going stale survivable.
 
 ## Typing into something you cannot see
 
