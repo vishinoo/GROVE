@@ -185,6 +185,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     case "music":
       let action = (message["action"] as? String) ?? "play"
       run(Job(id: UUID().uuidString, kind: "music.\(action)", args: [:], fromPhone: false)) { _, _ in }
+    case "pair":
+      connectPhone()
     case "signin":
       account.signIn()
     case "log":

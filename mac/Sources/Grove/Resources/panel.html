@@ -47,6 +47,8 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
 .chip, .ask input { font-weight: 400; }
 .x { position: absolute; top: 8px; right: 12px; width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.22); background: rgba(255,255,255,0.12); color: #FFFFFF; font: 400 15px var(--sans); line-height: 24px; text-align: center; cursor: pointer; z-index: 4; padding: 0; }
 .x:hover { background: rgba(255,255,255,0.24); }
+.pairbtn { position: absolute; top: 8px; left: 12px; height: 26px; border-radius: 13px; border: 1px solid rgba(255,255,255,0.22); background: rgba(255,255,255,0.12); color: #FFFFFF; font: 500 11.5px var(--sans); padding: 0 10px; cursor: pointer; z-index: 4; }
+.pairbtn:hover { background: rgba(255,255,255,0.24); }
 .ask { display: flex; gap: 8px; }
 .ask input { flex: 1; min-width: 0; background: rgba(8,10,16,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; color: #FFFFFF; font: 400 13.5px var(--sans); padding: 9px 12px; outline: none; -webkit-user-select: text; user-select: text; }
 .ask input::placeholder { color: rgba(255,255,255,0.55); }
@@ -118,7 +120,12 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     document.getElementById('ask').addEventListener('submit', (e) => { e.preventDefault(); if (input.value.trim()) post({ t: 'ask', instruction: input.value.trim() }); });
   };
   // Every state can be closed, from a corner that is always in the same place.
-  const closer = () => { if (S.mode !== 'closed' && !document.getElementById('x')) body.insertAdjacentHTML('beforebegin', '<button class="x" id="x" aria-label="Close">×</button>'); };
+  const closer = () => {
+    if (S.mode !== 'closed' && !document.getElementById('x')) body.insertAdjacentHTML('beforebegin', '<button class="x" id="x" aria-label="Close">×</button>');
+    // Opposite the ×: a code for connecting the phone, while there is none connected.
+    document.getElementById('pairbtn')?.remove();
+    if (S.mode === 'idle' && S.signedIn && !S.phone) body.insertAdjacentHTML('beforebegin', '<button class="pairbtn" id="pairbtn">Connect iPhone</button>');
+  };
 
   const render = () => {
     const m = S.mode, d = S.data;
@@ -188,7 +195,10 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     }
   };
 
-  panel.addEventListener('click', (e) => { if (e.target.id === 'x') post({ t: 'close' }); });
+  panel.addEventListener('click', (e) => {
+    if (e.target.id === 'x') post({ t: 'close' });
+    if (e.target.id === 'pairbtn') post({ t: 'pair' });
+  });
   body.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.ask) return post({ t: 'ask', instruction: b.dataset.ask });
@@ -217,9 +227,9 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
       if (e.event === 'heard') { const el = document.getElementById('heard'); if (el) el.textContent = e.data.words; }
       if (e.event === 'choose') { const el = document.getElementById('listen-state'); if (el) el.textContent = 'Say it, or pick'; }
     },
-    close() { S.mode = 'closed'; panel.classList.remove('open'); document.getElementById('x')?.remove(); size(); },
+    close() { S.mode = 'closed'; panel.classList.remove('open'); document.getElementById('x')?.remove(); document.getElementById('pairbtn')?.remove(); size(); },
     look(l) { S.look = Object.assign(S.look, l); },
-    phone(on) { S.phone = on; if (S.mode === 'idle') render(); },
+    phone(on) { S.phone = on; if (S.mode === 'idle') { render(); closer(); } },
     account(signedIn) { S.signedIn = signedIn; if (S.mode === 'idle') render(); },
   };
 

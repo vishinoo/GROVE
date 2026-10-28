@@ -142,6 +142,39 @@ final class Account {
     }
   }
 
+  /**
+    The account's channel secret as the server has it now, not as it was when
+    this Mac signed in. If the phone made one first, or made a new one, this is
+    how the Mac finds it — the two only meet if they agree.
+  */
+  func currentLink() async -> String? {
+    guard let access = await freshAccess(), let url = URL(string: base + "/auth/v1/user") else { return session?.link }
+    var request = URLRequest(url: url, timeoutInterval: 15)
+    request.setValue(anon, forHTTPHeaderField: "apikey")
+    request.setValue("Bearer \(access)", forHTTPHeaderField: "Authorization")
+    guard let (data, _) = try? await URLSession.shared.data(for: request),
+          let user = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return session?.link }
+    let found = (user["user_metadata"] as? [String: Any])?["grove_link"] as? String
+    if let found, found.count >= 32 {
+      await MainActor.run {
+        if self.session?.link != found, var s = self.session {
+          Log.say("account: the account's channel changed, following it")
+          s.link = found
+          self.session = s
+          Keychain.write(s)
+        }
+      }
+      return found
+    }
+    // None on the account at all: make one, so the phone can find it.
+    let made = Account.random(48).filter { $0.isLetter || $0.isNumber }
+    if await saveLink(made, access: access) {
+      await MainActor.run { if var s = self.session { s.link = made; self.session = s; Keychain.write(s) } }
+      return made
+    }
+    return session?.link
+  }
+
   private func saveLink(_ secret: String, access: String) async -> Bool {
     guard let url = URL(string: base + "/auth/v1/user") else { return false }
     var request = URLRequest(url: url, timeoutInterval: 20)

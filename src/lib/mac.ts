@@ -117,7 +117,14 @@ export async function startMac(): Promise<void> {
     set({ state: 'signed-out' });
     return;
   }
-  let secret = kept ?? String(session?.user.user_metadata?.grove_link ?? '');
+  // Asked of the server, not read off the stored session: a session from
+  // before the Mac made the secret does not have it, and making a second one
+  // put the phone on a different channel from the Mac for good.
+  let secret = kept ?? '';
+  if (!kept && session) {
+    const { data } = await client.auth.getUser().catch(() => ({ data: { user: null } }));
+    secret = String(data.user?.user_metadata?.grove_link ?? session.user.user_metadata?.grove_link ?? '');
+  }
   if (!kept && session && secret.length < 32) {
     // First device on this account: make the secret and keep it in the account.
     const bytes = Array.from({ length: 48 }, () => 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[Math.floor(Math.random() * 62)]);

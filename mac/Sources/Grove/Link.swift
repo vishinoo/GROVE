@@ -71,9 +71,19 @@ final class Link {
 
   func start() {
     watch?.invalidate()
+    var ticks = 0
     watch = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
       guard let self else { return }
       self.setConnected(self.joined && Date().timeIntervalSince(self.lastHeard) < 150)
+      // Not connected: every two minutes, check the account's channel has not
+      // moved. One small request, and only while there is no phone.
+      ticks += 1
+      if !self.connected, ticks % 12 == 0 {
+        let before = self.topic
+        Task { @MainActor in
+          if let secret = await self.account.currentLink(), "realtime:grove-link-\(secret)" != before { self.connect() }
+        }
+      }
     }
     connect()
   }
@@ -94,10 +104,17 @@ final class Link {
       Log.say("link: not signed in, not connecting")
       return
     }
-    guard let secret = session.link else {
-      Log.say("link: the account has no channel secret yet")
-      return
+    Task { @MainActor in
+      guard let secret = await self.account.currentLink() else {
+        Log.say("link: the account has no channel secret yet")
+        self.retry()
+        return
+      }
+      self.open(url: url, secret: secret, session: session)
     }
+  }
+
+  private func open(url: URL, secret: String, session: Session) {
     stop()
     topic = "realtime:grove-link-\(secret)"
     let task = URLSession.shared.webSocketTask(with: url)
