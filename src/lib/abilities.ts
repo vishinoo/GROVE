@@ -23,6 +23,7 @@
  * Grove is up, and the UI has to say so rather than quietly not happening.
  */
 
+import { macJob } from './mac';
 import {
   addReminder,
   openReminders,
@@ -3233,6 +3234,64 @@ const NOW: Ability = {
  * Unset by default — no URL and no token means no ability. This does not
  * quietly become available because someone is on the right network.
  */
+/*
+  The Mac as the phone's hands, over the local network (mac.ts).
+
+  Separate from mac.do above, which hands a written job to an agent bridge.
+  These two drive the Grove app that lives in the Mac's notch: music in Apple
+  Music, and opening a link or an app. Both are things a person would do with
+  one click and could undo with one more, so neither takes a press; nothing
+  here spends money, and when anything that does arrives it will stop for one.
+
+  Wired whenever the code is here. Unpaired or out of reach, they say so in a
+  sentence rather than disappearing, because "play something on my laptop"
+  answered with silence is the worst version of not working.
+*/
+const MAC_MUSIC: Ability = {
+  id: 'mac.music',
+  name: 'Music on your Mac',
+  what: 'Plays, pauses or skips music in Apple Music on their laptop. Only when they say laptop, Mac or computer; music on the phone is the other music tool.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {
+    action: { type: 'string', what: '"play", "pause", "resume", "next" or "previous"', required: true },
+    what: { type: 'string', what: 'for play: a playlist, song, album or artist from their library; empty to shuffle' },
+  },
+  examples: [
+    'play something on my laptop',
+    'put my focus playlist on the mac',
+    'pause the music on my computer',
+    'skip this song on my mac',
+  ],
+  run: async (args) => {
+    const action = (args.action || 'play').trim().toLowerCase();
+    const kind = ['pause', 'resume', 'next', 'previous'].includes(action) ? `music.${action}` : 'music.play';
+    const result = await macJob(kind, kind === 'music.play' ? { what: (args.what || '').trim() } : {});
+    return { ok: result.ok, spoken: result.spoken };
+  },
+};
+
+const MAC_OPEN: Ability = {
+  id: 'mac.open',
+  name: 'Open on your Mac',
+  what: 'Opens a web address or an app on their laptop. Only when they say laptop, Mac or computer.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {
+    what: { type: 'string', what: 'a web address, or the name of an app such as Notes or Safari', required: true },
+  },
+  examples: ['open notes on my mac', 'open youtube on my laptop', 'open that link on my computer'],
+  run: async (args) => {
+    const what = (args.what || '').trim();
+    if (!what) return { ok: false, spoken: 'What should I open on your Mac?' };
+    const looksLikeLink = /^https?:\/\//i.test(what) || /^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(what);
+    const result = await macJob(looksLikeLink ? 'open.url' : 'open.app', looksLikeLink ? { url: what } : { app: what });
+    return { ok: result.ok, spoken: result.spoken };
+  },
+};
+
 const MAC_URL = (process.env.EXPO_PUBLIC_MAC_URL ?? '').trim();
 const MAC_TOKEN = (process.env.EXPO_PUBLIC_MAC_TOKEN ?? '').trim();
 
@@ -3853,6 +3912,8 @@ export const ABILITIES: Ability[] = [
   PERSON_BRIEF,
   MAIL_IMPORTANT,
   MAC_TASK,
+  MAC_MUSIC,
+  MAC_OPEN,
   RIDE,
   DELIVERY,
   SHOP,

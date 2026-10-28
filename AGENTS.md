@@ -1418,6 +1418,48 @@ gated on `holdForTool`, which is only set when the model returned a tool call
 with no words, so the second call is never made when the first already wrote
 the line.
 
+## Grove for Mac: the phone's hands
+
+`mac/` is a native Mac app, built with the command-line tools alone
+(`mac/build.sh`, or `--run` to relaunch it). It lives in the notch and the
+menu bar, never the Dock, and does two jobs: it is a computer the phone can
+drive, and a quicker Grove at the keyboard.
+
+**The phone stays the brain.** Memory, accounts and the decision about what to
+do never leave it; the Mac is told colour, name and manner (so the notch is in
+the phone's colours), is handed jobs, and asks the phone what to do with ⌘K
+text so the answer comes in the same Grove's voice (`lightSelection`). If the
+phone is not there, the Mac falls back to the model with a key `build.sh`
+writes into the built Info.plist only — never into a tracked file.
+
+**The link is a WebSocket on the local network**, port 47321, advertised over
+Bonjour as `_grove._tcp`, no server. The phone's end is `src/lib/mac.ts`; it
+needs no native code, which is why it reaches a phone by an update. Pairing is
+a six-digit code from the Mac's menu (Pair an iPhone…) typed into Settings ›
+Your Mac with the Mac's `.local` name; the Mac answers with a token the phone
+keeps in the Keychain. Finding the Mac without typing its name needs Bonjour
+on the phone, which is native and not built yet. The protocol is written out
+at the top of `mac/Sources/Grove/Link.swift`.
+
+**⌘K is taken only when text is highlighted.** macOS does not use it, but
+Notes, Pages, Docs, Mail, Slack, Notion and Terminal all do, mostly exactly
+when text is selected, so a registered hotkey would break insert-link
+everywhere. An event tap (Accessibility permission) claims the press only when
+the front app reports selected text; an app that does not say (Chrome,
+Electron) gets a held press, a copy, and the original ⌘K sent on if nothing
+came back. ⌥⌘K is in the menu for anyone who would rather Grove never shared.
+Replace writes through Accessibility, or pastes and puts the clipboard back.
+
+**The window follows the panel.** A transparent window still takes clicks, so
+it is exactly the visible panel while open and full size but mouse-blind while
+closed. Making it permanently full size swallowed clicks under the panel's
+empty corners.
+
+`mac.music` and `mac.open` are the phone's abilities for it, separate from
+`mac.do` (the older agent bridge over HTTP). Neither spends money; driving a
+website — forms, bookings, orders, trades — is the next thing and will stop for
+a press like everything else that cannot be undone.
+
 ## Checks
 
 Two kinds, and the difference matters. `npm run verify` and the live harness

@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Grove</title>
+<style>
+/*
+  Grove's panel in the notch. The window is transparent and the size of the
+  largest panel; this page draws only the part in use, growing out of the
+  notch, over the same moving field as the phone, in the phone's colours.
+*/
+:root {
+  --sans: -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --live: #5EE08A;
+  --notch-w: 190px;
+  --notch-h: 32px;
+}
+html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; -webkit-user-select: none; user-select: none; }
+body { font-family: var(--sans); color: #FFFFFF; }
+.panel { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: var(--notch-w); height: var(--notch-h); border-radius: 0 0 14px 14px; overflow: hidden; background: #000; opacity: 0; transition: width 420ms cubic-bezier(.2,.9,.2,1), height 420ms cubic-bezier(.2,.9,.2,1), border-radius 420ms ease, opacity 200ms ease; }
+.panel.fake { opacity: 1; }
+.panel.open { opacity: 1; width: 560px; height: var(--h, 200px); border-radius: 0 0 28px 28px; background: transparent; box-shadow: 0 30px 80px rgba(0,0,0,0.45); }
+canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; transition: opacity 360ms ease 60ms; }
+.panel.open canvas { opacity: 1; }
+.scrim { position: absolute; inset: 0; background: rgba(8,10,16,0.16); opacity: 0; transition: opacity 360ms ease; pointer-events: none; }
+.panel.open .scrim { opacity: 1; }
+/* The camera housing is hardware: black, and only it. */
+.cut { position: absolute; top: 0; left: 50%; width: var(--notch-w); height: var(--notch-h); transform: translateX(-50%); background: #000; border-radius: 0 0 14px 14px; z-index: 2; }
+.body { position: absolute; left: 0; right: 0; top: var(--notch-h); bottom: 0; padding: 14px 18px 16px; display: flex; flex-direction: column; gap: 10px; opacity: 0; transform: translateY(-6px); transition: opacity 240ms ease, transform 340ms ease; z-index: 3; }
+.panel.open .body { opacity: 1; transform: none; transition-delay: 140ms; }
+.row { display: flex; align-items: center; gap: 10px; }
+.space { justify-content: space-between; }
+.hello { font-size: 22px; font-weight: 300; letter-spacing: -0.03em; }
+.small { font-size: 12.5px; color: rgba(255,255,255,0.75); }
+.label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.7); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid rgba(255,255,255,0.24); background: rgba(255,255,255,0.13); color: #FFFFFF; border-radius: 999px; padding: 7px 12px; font: 500 12.5px var(--sans); cursor: pointer; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.chip:hover { background: rgba(255,255,255,0.22); }
+.chip.solid { background: #FFFFFF; color: #0B0C12; border-color: #FFFFFF; }
+.quote { border-left: 2px solid rgba(255,255,255,0.5); padding: 2px 0 2px 10px; font-size: 13px; line-height: 1.45; color: rgba(255,255,255,0.88); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.heard { font-size: 15px; line-height: 1.4; min-height: 21px; }
+.ask { display: flex; gap: 8px; }
+.ask input { flex: 1; min-width: 0; background: rgba(8,10,16,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; color: #FFFFFF; font: 400 13.5px var(--sans); padding: 9px 12px; outline: none; -webkit-user-select: text; user-select: text; }
+.ask input::placeholder { color: rgba(255,255,255,0.55); }
+.answer { font-size: 14px; line-height: 1.5; max-height: 130px; overflow: auto; white-space: pre-wrap; -webkit-user-select: text; user-select: text; }
+.code { font-family: var(--mono); font-size: 30px; letter-spacing: 0.18em; }
+.bars { display: inline-flex; gap: 3px; align-items: center; height: 16px; }
+.bars i { width: 3px; border-radius: 2px; background: #FFFFFF; animation: bar 900ms ease-in-out infinite; }
+.bars i:nth-child(1) { height: 6px; } .bars i:nth-child(2) { height: 14px; animation-delay: 120ms; } .bars i:nth-child(3) { height: 9px; animation-delay: 240ms; } .bars i:nth-child(4) { height: 12px; animation-delay: 360ms; }
+@keyframes bar { 50% { transform: scaleY(0.35); } }
+.steps { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.steps li { display: flex; gap: 8px; align-items: center; color: rgba(255,255,255,0.85); }
+.steps li i { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.35); }
+.steps li.done i { background: var(--live); }
+.steps li.now i { background: #FFFFFF; animation: blink 900ms ease-in-out infinite; }
+@keyframes blink { 50% { opacity: 0.3; } }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.4); display: inline-block; }
+.dot.on { background: var(--live); }
+</style>
+</head>
+<body>
+<div class="panel" id="panel">
+  <canvas id="gl"></canvas>
+  <div class="scrim"></div>
+  <div class="cut"></div>
+  <div class="body" id="body"></div>
+</div>
+<script>
+(() => {
+  const panel = document.getElementById('panel');
+  const body = document.getElementById('body');
+  const post = (m) => { try { window.webkit.messageHandlers.grove.postMessage(m); } catch (e) {} };
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const S = { mode: 'closed', data: {}, phone: false, look: { name: 'Grove', stops: ['#061C26', '#1F7A8C', '#C9EDE6', '#E3B868'], speed: 0.8, warp: 1.6 }, notchH: 32, flow: 1 };
+
+  const greeting = () => {
+    const h = new Date().getHours();
+    return h < 5 ? 'Still up?' : h < 12 ? 'Morning.' : h < 18 ? 'Afternoon.' : h < 22 ? 'Evening.' : 'Late one.';
+  };
+
+  const size = () => {
+    requestAnimationFrame(() => {
+      const open = panel.classList.contains('open');
+      post({ t: 'size', w: open ? 560 : 0, h: open ? parseFloat(getComputedStyle(panel).getPropertyValue('--h')) || 200 : 0 });
+    });
+  };
+  const setH = (n) => { panel.style.setProperty('--h', (n + S.notchH) + 'px'); size(); };
+
+  const render = () => {
+    const m = S.mode, d = S.data;
+    S.flow = m === 'thinking' ? 2.6 : m === 'listening' ? 1.7 : m === 'job' ? 2.2 : 1;
+    if (m === 'idle') {
+      setH(150);
+      body.innerHTML = `
+        <div class="row space"><span class="hello">${greeting()}</span><span class="small row"><span class="dot ${S.phone ? 'on' : ''}"></span>${S.phone ? 'iPhone connected' : 'iPhone not connected'}</span></div>
+        <div class="chips">
+          <button class="chip" data-music="play">Play music</button>
+          <button class="chip" data-music="pause">Pause</button>
+          <button class="chip" data-music="next">Next song</button>
+        </div>`;
+    }
+    if (m === 'listening') {
+      setH(232);
+      body.innerHTML = `
+        <div class="row space"><span class="label">Highlighted</span><span class="row small" id="listen-state"><span class="bars"><i></i><i></i><i></i><i></i></span>Listening</span></div>
+        <div class="quote">${esc(d.text)}</div>
+        <div class="heard" id="heard"></div>
+        <div class="chips">
+          <button class="chip" data-ask="Make this sound more casual">More casual</button>
+          <button class="chip" data-ask="Make this shorter">Shorter</button>
+          <button class="chip" data-ask="What does this mean?">What does this mean?</button>
+          <button class="chip" data-ask="Fix the grammar">Fix grammar</button>
+        </div>
+        <form class="ask" id="ask"><input id="ask-input" placeholder="Or type it" autocomplete="off"><button class="chip" type="submit">Go</button></form>`;
+      const input = document.getElementById('ask-input');
+      input.addEventListener('focus', () => post({ t: 'focus' }));
+      document.getElementById('ask').addEventListener('submit', (e) => { e.preventDefault(); if (input.value.trim()) post({ t: 'ask', instruction: input.value.trim() }); });
+    }
+    if (m === 'thinking') {
+      setH(118);
+      body.innerHTML = `<div class="row space"><span class="label">${esc(d.ask)}</span><span class="row small"><span class="bars"><i></i><i></i><i></i><i></i></span>Thinking</span></div><div class="quote">${esc(d.text)}</div>`;
+    }
+    if (m === 'rewrite' || m === 'answer') {
+      setH(m === 'rewrite' ? 222 : 206);
+      body.innerHTML = `
+        <div class="row space"><span class="label">${esc(d.ask)}</span><span class="small">${d.via === 'phone' ? 'From your iPhone' : d.failed ? '' : 'On this Mac'}</span></div>
+        <div class="answer">${esc(d.text)}</div>
+        <div class="chips">
+          ${m === 'rewrite' ? '<button class="chip solid" data-act="replace">Replace  ⏎</button>' : ''}
+          <button class="chip" data-act="copy">Copy</button><button class="chip" data-act="close">Close</button>
+        </div>`;
+    }
+    if (m === 'job') {
+      setH(150);
+      const steps = d.steps || [];
+      body.innerHTML = `
+        <div class="row space"><span class="label">${esc(d.from || '')}</span></div>
+        <span class="hello" style="font-size:18px">${esc(d.title)}</span>
+        <ul class="steps">${steps.map((t, i) => `<li class="${i < (d.at || 0) ? 'done' : i === (d.at || 0) ? 'now' : ''}"><i></i>${esc(t)}</li>`).join('')}</ul>`;
+    }
+    if (m === 'done') {
+      setH(110);
+      body.innerHTML = `<div class="row space"><span class="hello" style="font-size:18px">${esc(d.title)}</span><span class="small row"><span class="dot ${d.ok ? 'on' : ''}"></span>${d.ok ? 'Done' : 'Didn’t work'}</span></div><span class="small">${esc(d.text)}</span>`;
+    }
+    if (m === 'pair') {
+      setH(190);
+      body.innerHTML = `
+        <div class="row space"><span class="label">Pair your iPhone</span><button class="chip" data-act="close">Done</button></div>
+        <span class="code">${esc(d.code)}</span>
+        <span class="small">In Grove on your iPhone: Settings › Your Mac. Enter <b>${esc(d.host)}</b> and this code. Same Wi-Fi as this Mac.</span>`;
+    }
+    if (m === 'synced') {
+      setH(100);
+      body.innerHTML = `<div class="row space"><span class="hello">${esc(d.label)}.</span><span class="small">From your iPhone</span></div><span class="small">The same colours as your phone.</span>`;
+    }
+  };
+
+  body.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.ask) return post({ t: 'ask', instruction: b.dataset.ask });
+    if (b.dataset.music) return post({ t: 'music', action: b.dataset.music });
+    if (b.dataset.act === 'copy') return post({ t: 'copy', text: S.data.text });
+    if (b.dataset.act) return post({ t: b.dataset.act });
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') post({ t: 'close' });
+    if (e.key === 'Enter' && S.mode === 'rewrite' && document.activeElement?.id !== 'ask-input') { e.preventDefault(); post({ t: 'replace' }); }
+  });
+
+  window.grove = {
+    setup(o) {
+      S.notchH = o.notchHeight || 32;
+      document.documentElement.style.setProperty('--notch-w', (o.notchWidth || 190) + 'px');
+      document.documentElement.style.setProperty('--notch-h', S.notchH + 'px');
+      panel.classList.toggle('fake', !o.hardware);
+    },
+    show(p) { S.mode = p.mode; S.data = p; panel.classList.add('open'); render(); },
+    event(e) {
+      if (e.event === 'heard') { const el = document.getElementById('heard'); if (el) el.textContent = e.data.words; }
+      if (e.event === 'choose') { const el = document.getElementById('listen-state'); if (el) el.textContent = 'Say it, or pick'; }
+    },
+    close() { S.mode = 'closed'; panel.classList.remove('open'); size(); },
+    look(l) { S.look = Object.assign(S.look, l); },
+    phone(on) { S.phone = on; if (S.mode === 'idle') render(); },
+  };
+
+  /* the field: the same shader as the phone */
+  const canvas = document.getElementById('gl');
+  const gl = canvas.getContext('webgl', { antialias: false, premultipliedAlpha: true });
+  if (gl) {
+    const FRAG = `precision highp float;
+uniform vec2 uRes; uniform float uT; uniform float uRT; uniform vec3 uC0; uniform vec3 uC1; uniform vec3 uC2; uniform vec3 uC3; uniform float uWarp;
+float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float noise(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f); return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y); }
+float fbm(vec2 p){ float v = 0.0; float a = 0.5; mat2 m = mat2(1.6, 1.2, -1.2, 1.6); for (int i = 0; i < 5; i++) { v += a * noise(p); p = m * p; a *= 0.5; } return v; }
+mat2 rot(float a){ float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }
+vec3 paint(vec2 p, float t){ vec2 q = vec2(fbm(p * 1.1 + vec2(0.0, t * 0.12)), fbm(p * 1.1 + vec2(5.2, 1.3) - t * 0.10)); vec2 r = vec2(fbm(p + uWarp * q + vec2(1.7, 9.2) + t * 0.15), fbm(p + uWarp * q + vec2(8.3, 2.8) - t * 0.13)); float f = fbm(p + uWarp * r); vec3 col = mix(uC0, uC1, smoothstep(0.18, 0.62, f)); col = mix(col, uC3, smoothstep(0.35, 0.75, r.y) * 0.7); col = mix(col, uC2, smoothstep(0.45, 0.95, length(q)) * 0.9); return col; }
+void main(){ vec2 frag = gl_FragCoord.xy; vec2 uv = (frag - 0.5 * uRes) / min(uRes.x, uRes.y); float t = uT; vec2 p = rot(0.5) * uv; p = vec2(p.x * 0.38 + t * 0.06, p.y * 1.5) * 1.6; vec3 col = paint(p, t); col *= 1.0 - 0.32 * dot(uv, uv); col += (hash(frag + fract(uRT) * 61.0) - 0.5) * 0.035; gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0); }`;
+    const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }'));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FRAG));
+    gl.linkProgram(prog); gl.useProgram(prog);
+    const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'a'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    const U = {}; ['uRes', 'uT', 'uRT', 'uC0', 'uC1', 'uC2', 'uC3', 'uWarp'].forEach((n) => (U[n] = gl.getUniformLocation(prog, n)));
+    const hex = (x) => [1, 3, 5].map((i) => parseInt(x.slice(i, i + 2), 16) / 255);
+    let C = S.look.stops.map(hex), clock = 0, last = performance.now(), flow = 1, speed = S.look.speed, warp = S.look.warp;
+    const frame = (now) => {
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      if (panel.classList.contains('open')) {
+        const k = Math.min(1, dt * 2.5), target = S.look.stops.map(hex);
+        C = C.map((c, i) => c.map((v, j) => v + (target[i][j] - v) * k));
+        speed += (S.look.speed - speed) * k; warp += (S.look.warp - warp) * k;
+        flow += (S.flow - flow) * Math.min(1, dt * 3);
+        clock += dt * speed * flow;
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
+        if (w > 0 && h > 0) {
+          if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+          gl.viewport(0, 0, w, h);
+          gl.uniform2f(U.uRes, w, h * 1.6); gl.uniform1f(U.uT, clock); gl.uniform1f(U.uRT, now / 1000);
+          gl.uniform3fv(U.uC0, C[0]); gl.uniform3fv(U.uC1, C[1]); gl.uniform3fv(U.uC2, C[2]); gl.uniform3fv(U.uC3, C[3]);
+          gl.uniform1f(U.uWarp, warp);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+        }
+      }
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  }
+})();
+</script>
+</body>
+</html>

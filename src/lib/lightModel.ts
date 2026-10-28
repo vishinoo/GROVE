@@ -1160,3 +1160,48 @@ Use the exact names from KNOWN when it is the same person or thing. Never write 
     2000
   );
 }
+
+/**
+ * ⌘K on the Mac: what to do with some highlighted text.
+ *
+ * The Mac asks the phone (mac.ts), because the phone is Grove — its manner,
+ * and the memory of who someone is writing to — and the laptop is meant to be
+ * its hands rather than a second assistant. The brief is the same one the Mac
+ * uses when the phone cannot answer (Thinking.swift), so the two read alike.
+ *
+ * A rewrite comes back as only the new text, because it goes straight back
+ * into somebody's document; it may polish but never add, for the same reason
+ * lightEmail may not — nobody rereads a sentence they just asked to have made
+ * more casual for a promise it did not have before.
+ */
+export async function lightSelection(
+  instruction: string,
+  text: string,
+  manner = ''
+): Promise<{ kind: 'rewrite' | 'answer'; text: string } | null> {
+  const brief =
+    `Someone highlighted some text on their computer and told you what to do with it.
+If the instruction asks to change the text — rewrite, shorten, fix, translate, change the tone — reply with kind "rewrite" and text set to only the new text, in the same language, with no quotes and no comment.
+Otherwise reply with kind "answer" and text set to a clear answer in two to four plain sentences, no markdown.
+Never add facts, promises or names that are not in the text.
+Reply as JSON: {"kind":"rewrite"|"answer","text":"..."}` +
+    (manner.trim() ? `\n\nFor answers only, not rewrites, speak in this manner: ${manner.trim().slice(0, 400)}` : '');
+  const raw = await complete(
+    brief,
+    [{ role: 'user', content: `Instruction: ${instruction.slice(0, 500)}\n\nHighlighted text:\n${text.slice(0, 8000)}` }],
+    true,
+    false,
+    false,
+    1200
+  );
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { kind?: string; text?: string };
+    const out = (parsed.text ?? '').trim();
+    if (!out) return null;
+    return { kind: parsed.kind === 'rewrite' ? 'rewrite' : 'answer', text: out };
+  } catch {
+    const plain = raw.trim();
+    return plain ? { kind: 'answer', text: plain } : null;
+  }
+}

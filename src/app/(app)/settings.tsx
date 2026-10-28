@@ -29,6 +29,7 @@ import { Icon } from '@/components/icon';
 import { Button, Card, Dot, Mono, Notice, Peek, Row, Screen, Section } from '@/components/ui';
 import { FIELD_COLOURS, fieldColour } from '@/components/field-shader';
 import { Glass } from '@/components/glass';
+import { MacPanel } from '@/components/mac-panel';
 import { Radius, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import {
@@ -470,6 +471,11 @@ function SettingsBody() {
 
       {/* What it did, and through which connection: the place you check
           whether a reminder actually got set. */}
+      {/* The laptop, as the phone's hands. See mac.ts. */}
+      <Section label="Your Mac">
+        <MacPanel />
+      </Section>
+
       <Section label="Logs">
         <Card style={{ paddingVertical: 2 }}>
           <Row

@@ -7,10 +7,12 @@ import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from '
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Field, useField } from '@/components/field';
+import { fieldColour } from '@/components/field-shader';
 import { Icon, type IconName } from '@/components/icon';
 import { useAgent } from '@/context/agent';
 import { capabilities } from '@/lib/capabilities';
 import { useDevMode } from '@/lib/devMode';
+import { sendLook, startMac } from '@/lib/mac';
 import { rememberIntro } from '@/lib/consolidate';
 import { takeIntro } from '@/lib/firstRun';
 import { Elevation, Fonts, Radius } from '@/constants/theme';
@@ -87,6 +89,27 @@ function OnTheField() {
     void keep.activateKeepAwakeAsync('grove').catch(() => undefined);
     return () => void keep.deactivateKeepAwake('grove').catch(() => undefined);
   }, []);
+
+  /*
+    The Mac, if one is paired: connect, and keep it in the phone's colours.
+    Sent on every change of colour, name or manner, so choosing Ember here
+    repaints the notch on the laptop a moment later.
+  */
+  useEffect(() => {
+    void startMac();
+  }, []);
+  useEffect(() => {
+    const colour = fieldColour(persona.sky);
+    sendLook({
+      colour: colour.key,
+      label: colour.label,
+      stops: colour.c,
+      speed: colour.speed,
+      warp: colour.warp,
+      name: persona.name,
+      manner: persona.manner,
+    });
+  }, [persona.sky, persona.name, persona.manner]);
 
   // What someone wrote in the intro before there was an account to keep it in.
   useEffect(() => {
