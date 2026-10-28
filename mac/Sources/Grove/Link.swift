@@ -23,8 +23,9 @@
     mac → phone   welcome {mac}                      done {id, ok, spoken}
                   think {id, instruction, text}
 
-  "Connected" means heard from the phone in the last 75 seconds; it says
-  hello every 30.
+  "Connected" means heard from the phone in the last two and a half minutes;
+  it says hello once a minute — about 90,000 messages a month, well inside
+  Realtime's free two million.
 
   Realtime speaks the Phoenix channel protocol over a WebSocket, written by
   hand here so the app needs no packages: join with the access token, a
@@ -59,7 +60,7 @@ final class Link {
     watch?.invalidate()
     watch = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
       guard let self else { return }
-      self.setConnected(self.joined && Date().timeIntervalSince(self.lastHeard) < 75)
+      self.setConnected(self.joined && Date().timeIntervalSince(self.lastHeard) < 150)
     }
     connect()
   }

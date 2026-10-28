@@ -77,7 +77,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       self.notch.close()
       return true
     }
-    notch.setAsks(Asks.top())
+    notch.setSuggestions(Suggestions.all())
+    Suggestions.refresh { [weak self] in self?.notch.setSuggestions(Suggestions.all()) }
     shortcut.start()
 
     makeMenu()
@@ -148,8 +149,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     switch message["t"] as? String {
     case "ask":
       guard let text = message["instruction"] as? String else { break }
-      Asks.count(text)
-      notch.setAsks(Asks.top())
       if captured != nil { think(text) } else { askFree(text) }
     case "replace":
       if let captured, let result = captured.result {
@@ -166,6 +165,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       voice.stop()
       captured = nil
       notch.close()
+    case "run":
+      let kind = (message["kind"] as? String) ?? ""
+      let args = (message["args"] as? [String: Any] ?? [:]).compactMapValues { "\($0)" }
+      run(Job(id: UUID().uuidString, kind: kind, args: args, fromPhone: false)) { _, _ in }
     case "music":
       let action = (message["action"] as? String) ?? "play"
       run(Job(id: UUID().uuidString, kind: "music.\(action)", args: [:], fromPhone: false)) { _, _ in }

@@ -43,7 +43,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
 .quote { border-left: 2px solid rgba(255,255,255,0.5); padding: 2px 0 2px 10px; font-size: 13px; line-height: 1.45; color: rgba(255,255,255,0.88); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .heard { font-size: 19px; line-height: 1.35; font-weight: 300; letter-spacing: -0.02em; min-height: 26px; color: #FFFFFF; }
 .answer, .quote { font-weight: 400; letter-spacing: -0.005em; }
-.x { position: absolute; top: calc(var(--notch-h) + 10px); right: 12px; width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.22); background: rgba(255,255,255,0.12); color: #FFFFFF; font: 400 15px var(--sans); line-height: 24px; text-align: center; cursor: pointer; z-index: 4; padding: 0; }
+.x { position: absolute; top: 8px; right: 12px; width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.22); background: rgba(255,255,255,0.12); color: #FFFFFF; font: 400 15px var(--sans); line-height: 24px; text-align: center; cursor: pointer; z-index: 4; padding: 0; }
 .x:hover { background: rgba(255,255,255,0.24); }
 .ask { display: flex; gap: 8px; }
 .ask input { flex: 1; min-width: 0; background: rgba(8,10,16,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; color: #FFFFFF; font: 400 13.5px var(--sans); padding: 9px 12px; outline: none; -webkit-user-select: text; user-select: text; }
@@ -94,6 +94,21 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
   window.addEventListener('error', (e) => post({ t: 'log', text: `${e.message} (${e.lineno})` }));
   const setH = (n) => { panel.style.setProperty('--h', (n + S.notchH) + 'px'); size(); };
 
+  // Two at a time, turning over through the list every few seconds.
+  let turn = 0;
+  const pair = () => {
+    const all = S.suggestions || [];
+    if (!all.length) return '';
+    return [0, 1].map((k) => all[(turn + k) % all.length]).filter((v, i, a) => a.indexOf(v) === i)
+      .map((s2) => `<button class="chip" data-run='${esc(JSON.stringify({ kind: s2.kind, args: s2.args }))}'>${esc(s2.label)}</button>`).join('');
+  };
+  setInterval(() => {
+    const el = document.getElementById('sugg');
+    if (!el || S.mode !== 'idle' || (S.suggestions || []).length < 3) return;
+    turn = (turn + 2) % S.suggestions.length;
+    el.style.transition = 'opacity 220ms ease'; el.style.opacity = '0';
+    setTimeout(() => { el.innerHTML = pair(); el.style.opacity = '1'; }, 230);
+  }, 6000);
   const wireAsk = () => {
     const input = document.getElementById('ask-input');
     if (!input) return;
@@ -107,13 +122,13 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     const m = S.mode, d = S.data;
     S.flow = m === 'thinking' ? 2.6 : m === 'listening' ? 1.7 : m === 'job' ? 2.2 : 1;
     if (m === 'idle') {
-      setH(S.signedIn ? 196 : 240);
+      setH(S.signedIn ? (S.phone ? 156 : 180) : 200);
       body.innerHTML = `
-        <div class="row space"><span class="hello">${greeting()}</span><span class="small row"><span class="dot ${S.phone ? 'on' : ''}"></span>${S.phone ? 'iPhone connected' : 'iPhone not connected'}</span></div>
+        <div class="row space"><span class="hello">${greeting()}</span><span class="small row" style="margin-right:34px"><span class="dot ${S.phone ? 'on' : ''}"></span>${S.phone ? 'iPhone connected' : 'iPhone not connected'}</span></div>
+        ${S.signedIn && !S.phone ? '<span class="small">Open Grove on your iPhone, signed in to Noctus with the same Google account, and it connects by itself.</span>' : ''}
         ${S.signedIn ? '' : '<span class="small">Sign in with Noctus on both devices and they find each other.</span>'}
         ${S.signedIn ? '' : '<div class="chips"><button class="chip solid" data-act="signin">Sign in with Noctus</button></div>'}
-        <span class="label">You ask these most</span>
-        <div class="chips">${(S.asks || []).map((a) => `<button class="chip" data-ask="${esc(a)}">${esc(a)}</button>`).join('')}</div>
+        <div class="chips" id="sugg">${pair()}</div>
         <form class="ask" id="ask"><input id="ask-input" placeholder="Ask Grove anything" autocomplete="off"><button class="chip" type="submit">Ask</button></form>`;
       wireAsk();
     }
@@ -175,6 +190,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
   body.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.ask) return post({ t: 'ask', instruction: b.dataset.ask });
+    if (b.dataset.run) { try { const r = JSON.parse(b.dataset.run); return post({ t: 'run', kind: r.kind, args: r.args }); } catch (err) { return; } }
     if (b.dataset.music) return post({ t: 'music', action: b.dataset.music });
     if (b.dataset.act === 'copy') return post({ t: 'copy', text: S.data.text });
     if (b.dataset.act) return post({ t: b.dataset.act });
@@ -194,7 +210,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     show(p) { S.mode = p.mode; S.data = p; panel.classList.add('open'); render(); closer(); },
     tuck() { panel.classList.remove('open'); size(); },
     untuck() { panel.classList.add('open'); size(); },
-    asks(list) { S.asks = list; if (S.mode === 'idle') render(); },
+    suggestions(list) { S.suggestions = list; if (S.mode === 'idle') render(); },
     event(e) {
       if (e.event === 'heard') { const el = document.getElementById('heard'); if (el) el.textContent = e.data.words; }
       if (e.event === 'choose') { const el = document.getElementById('listen-state'); if (el) el.textContent = 'Say it, or pick'; }

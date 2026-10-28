@@ -224,8 +224,8 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     js("grove.phone(\(connected ? "true" : "false"))")
   }
 
-  func setAsks(_ asks: [String]) {
-    js("grove.asks(\(json(asks)))")
+  func setSuggestions(_ list: [Suggestion]) {
+    js("grove.suggestions(\(json(list.map(\.json))))")
   }
 
   func setAccount(_ signedIn: Bool) {

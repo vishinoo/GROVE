@@ -137,13 +137,15 @@ export async function startMac(): Promise<void> {
     }
   });
 
-  // Hello every thirty seconds; the Mac answers. Not heard for seventy-five
-  // means it is asleep, closed or offline.
+  // Hello once a minute; the Mac answers. Not heard for two and a half
+  // minutes means it is asleep, closed or offline. A minute, not thirty
+  // seconds, to stay well inside Realtime's free two million messages a
+  // month: a hello and its answer, all day, is about 90,000.
   if (hello) clearInterval(hello);
   hello = setInterval(() => {
     send({ t: 'hello' });
-    if (status.state === 'connected' && Date.now() - lastHeard > 75_000) set({ ...status, state: 'waiting' });
-  }, 30_000);
+    if (status.state === 'connected' && Date.now() - lastHeard > 150_000) set({ ...status, state: 'waiting' });
+  }, 60_000);
 }
 
 /** Google, through Noctus. For the link only; see the note at the top. */
