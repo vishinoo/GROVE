@@ -1024,7 +1024,7 @@ section('A reply is finished before the microphone opens');
   // what it checks, and the kind of noise that gets a harness ignored.
   const after = between(agent, 'The tail has to finish', '}, SPEECH_TAIL_MS);', {
     min: 400,
-    max: 3000,
+    max: 3800,
   });
   check(after !== null, 'the automatic window is where it is expected to be');
   check(
@@ -1467,6 +1467,89 @@ section('Listening does not stop the music');
     'and exactly the same options, so the session never changes shape',
     `listen.ts has [${[...options].sort()}], the module has [${[...nativeOptions].sort()}]`
   );
+
+  /*
+   * And the music gets out of the way, because the session cannot.
+   *
+   * Mixable is not a free win. Bluetooth has two profiles: A2DP carries
+   * stereo and has **no microphone**, HFP has one and is mono. A headset does
+   * one or the other. So while a song plays, the glasses are in A2DP and
+   * there is no input for a recogniser to open — which is what "The audio
+   * input is busy" means, `inputNode.outputFormat` with a sample rate of
+   * nought.
+   *
+   * And Grove may not take it: a mixable session has promised not to
+   * interrupt anybody, and forcing the glasses off A2DP would. But it has to
+   * stay mixable, because a non-mixable session **cannot be activated from
+   * the background at all** (`!int`,
+   * `AVAudioSessionErrorCodeCannotInterruptOthers`) and that is where every
+   * ring press comes from.
+   *
+   * Neither option is available, so the track pauses instead. Asserted
+   * because the alternative is silent: the microphone simply never opens, and
+   * the only sign is a four-character code in Settings.
+   */
+  const agent = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
+  const opening = between(agent, 'Before the recogniser starts, because its engine', 'const started = startListening(', {
+    min: 100,
+    max: 2600,
+  });
+  check(opening !== null, 'the run-up to the recogniser is where it is expected to be');
+  check(
+    opening !== null && /await hushMusic\(\)/.test(opening),
+    'a playing track is paused before the recogniser starts',
+    'on Bluetooth glasses an A2DP route has no microphone, so the listen fails with nothing to show for it'
+  );
+
+  // Only ever a track Grove stopped. One somebody paused on purpose stays
+  // paused, and resuming it would be Grove starting music nobody asked for.
+  const hush = between(agent, 'const hushMusic = useCallback', 'const resumeMusic = useCallback', {
+    min: 100,
+    max: 800,
+  });
+  check(hush !== null, 'the pause is where it is expected to be');
+  check(
+    hush !== null && /pausedMusic\.current = true/.test(hush) && /trigger\.musicPlaying\(\)/.test(hush),
+    'and only a track that was actually playing is remembered as paused'
+  );
+  const resume = between(agent, 'const resumeMusic = useCallback', '}, []);', { min: 100, max: 800 });
+  check(
+    resume !== null && /if \(!pausedMusic\.current\) return;/.test(resume),
+    'so nothing Grove did not pause is ever started by it'
+  );
+
+  /*
+   * And the grace window does not chop the song.
+   *
+   * It is a microphone opened on spec, in case there is one more sentence.
+   * Opened while a track is paused mid-song it either fails for want of an
+   * input or succeeds and keeps the music stopped for another three seconds —
+   * so the song was interrupted for Grove to listen to silence.
+   */
+  const windowChoice = between(agent, 'A song Grove paused is a song', 'void beginListening(false, false,', {
+    min: 100,
+    max: 2500,
+  });
+  check(windowChoice !== null, 'the window decision is where it is expected to be');
+  check(
+    windowChoice !== null && /const playing = pausedMusic\.current/.test(windowChoice),
+    'the window knows whether a song is waiting'
+  );
+  /*
+   * The condition, not the variable. The first version of this check looked
+   * for `pausedMusic.current` anywhere in the region and passed with the
+   * value computed and then ignored — which is the whole bug wearing the
+   * costume of the fix. What has to be true is that the test guarding the
+   * window actually reads it.
+   */
+  const guard = /if \(([^)]*\([^)]*\)[^)]*|[^)]*)\) \{\s*$/m.exec(
+    (windowChoice ?? '').split('\n').filter((l) => l.includes('if (')).pop() ?? ''
+  );
+  check(
+    guard !== null && /\bplaying\b/.test(guard[1]),
+    'and will not open one over a paused song',
+    guard ? `the guard reads: ${guard[1]}` : 'no guard found before beginListening'
+  );
 }
 
 section('Enough means enough, and nothing else does');
@@ -1581,7 +1664,7 @@ section('Enough means enough, and nothing else does');
 
   const window = between(agent, 'A window that was asked not to open.', 'const window = listenAfter', {
     min: 100,
-    max: 1200,
+    max: 2200,
   });
   check(window !== null, 'the hush is read where the window is chosen');
   check(

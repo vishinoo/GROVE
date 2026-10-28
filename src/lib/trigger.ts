@@ -35,6 +35,8 @@ import {
   isVolumeTriggerOn,
   onRouteChange,
   setKeepAlive as setNativeKeepAlive,
+  controlMusic as nativeControlMusic,
+  nowPlaying as nativeNowPlaying,
   requestMicrophone,
   setVolumeTrigger as setNativeVolumeTrigger,
   type AudioRoute,
@@ -212,6 +214,27 @@ export function suppressVolumeTriggers(ms = 1400): void {
 export async function setKeepAlive(playing: boolean): Promise<void> {
   if (!isAvailable() || !canSetKeepAlive()) return;
   await setNativeKeepAlive(playing);
+}
+
+/**
+ * Whether a song is playing right now, and the means to stop it.
+ *
+ * Here rather than reached for directly, because the reason the listening
+ * code needs them is a property of the audio session rather than of music:
+ * Bluetooth glasses playing A2DP have no microphone to open, and a mixable
+ * session may not take the route off them. The track has to pause before the
+ * recogniser can start. See the note in agent.tsx.
+ *
+ * Both already degrade to "no" and "did nothing" on a build without the
+ * native half, so neither needs a guard of its own.
+ */
+export function musicPlaying(): boolean {
+  return isAvailable() && nativeNowPlaying().playing;
+}
+
+export async function controlMusic(action: 'play' | 'pause' | 'next' | 'previous'): Promise<boolean> {
+  if (!isAvailable()) return false;
+  return nativeControlMusic(action);
 }
 
 /**

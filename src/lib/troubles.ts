@@ -93,7 +93,18 @@ export function noteTrouble(uid: string, what: string, where?: string): Promise<
 
     const next = same
       ? current.map((t) =>
-          t.id === same.id ? { ...t, count: t.count + 1, lastAt: now, where: t.where ?? where } : t
+          /*
+            The newest context, to go with the newest time.
+
+            This kept the *first* `where` and the *last* `lastAt`, which was
+            harmless while `where` was a constant like "listening" and became
+            a lie the moment it carried state. The row says "Today 12:02, 4
+            times"; the circumstances printed under it have to be the ones
+            from 12:02, or they describe a failure that is not the one being
+            dated. Still falls back, so a later call that knows nothing does
+            not erase what an earlier one knew.
+          */
+          t.id === same.id ? { ...t, count: t.count + 1, lastAt: now, where: where ?? t.where } : t
         )
       : [
           {

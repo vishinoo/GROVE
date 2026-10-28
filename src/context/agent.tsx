@@ -1490,13 +1490,29 @@ function shortFailure(text: string): string {
           audibly draining — which is the same reason the tail exists at all.
         */
         const hushed = !listenAfter && hushAfter.current === turn;
+        /*
+          A song Grove paused is a song that gets the window instead.
+
+          The grace window is a microphone opened on spec, in case there is
+          one more sentence. Opening it while a track is paused mid-song is
+          the worst of both: on Bluetooth glasses the route has no input to
+          give it, so it fails for the reason in Settings and the music waits
+          three more seconds for nothing — and on anything else it works and
+          the track is still stopped. Either way the song has been chopped so
+          that Grove could listen to silence.
+
+          So a press still gets the microphone, and everything after it gets
+          the music back. The window is the one of the two that can wait: it
+          exists to save a press, and this costs exactly that one press.
+        */
+        const playing = pausedMusic.current;
         const window = listenAfter ? ANSWER_MS : GRACE_MS;
         setTimeout(() => {
           if (!mounted.current) return;
           // A newer press or a newer line owns the app now, and owns the
           // state with it.
           if (turn !== turnSeq.current || isSpeaking()) return;
-          if (!running.current && !hushed) {
+          if (!running.current && !hushed && !(playing && !listenAfter)) {
             void beginListening(false, false, { window, quiet: !listenAfter });
             return;
           }
@@ -1566,6 +1582,61 @@ function shortFailure(text: string): string {
     }
   }, []);
 
+  /*
+    A pair of Bluetooth glasses cannot play music and hear you at the same
+    time, and no amount of audio session is going to change that.
+
+    Bluetooth has two profiles. A2DP carries stereo in one direction and has
+    **no microphone at all**. HFP has a microphone and is mono, at telephone
+    quality. A headset does one or the other, and switching between them is a
+    route change that stops whatever was playing.
+
+    So while a song is going, the glasses are in A2DP and there is no input
+    anywhere for a recogniser to open. That is what "The audio input is busy"
+    in Settings actually means: not a device in use by someone else, but
+    `inputNode.outputFormat` coming back with a sample rate of nought, because
+    the current route has no input side.
+
+    And Grove may not simply take it. A mixable session is one that has
+    promised not to interrupt anybody, which is exactly what forcing the
+    glasses from A2DP to HFP would do — so the route switch is refused rather
+    than granted, and the microphone never opens.
+
+    Which is the other half of the error list: `!int`,
+    `AVAudioSessionErrorCodeCannotInterruptOthers`. The session must stay
+    mixable, because a non-mixable one **cannot be activated from the
+    background at all** and that is where every ring press comes from.
+
+    The way out is not an option on the session. It is to stop the music
+    first, the way every assistant on a phone does: the track pauses, the
+    route is free, the microphone opens, and the track comes back when Grove
+    has finished. Only ever a track Grove paused itself — a song somebody
+    stopped on purpose must stay stopped.
+  */
+  const pausedMusic = useRef(false);
+
+  const hushMusic = useCallback(async () => {
+    if (pausedMusic.current) return;
+    try {
+      if (!trigger.musicPlaying()) return;
+      pausedMusic.current = true;
+      await trigger.controlMusic('pause');
+    } catch {
+      // No music half on this build is not a reason to refuse to listen.
+    }
+  }, []);
+
+  const resumeMusic = useCallback(async () => {
+    if (!pausedMusic.current) return;
+    pausedMusic.current = false;
+    try {
+      await trigger.controlMusic('play');
+    } catch {
+      // As above. A song that does not come back is better than a turn that
+      // never finishes.
+    }
+  }, []);
+
   const beginListening = useCallback(
     async (
       continuous: boolean,
@@ -1616,6 +1687,11 @@ function shortFailure(text: string): string {
       // Before the recogniser starts, because its engine coming up is what
       // moves the volume and would otherwise read as a second press.
       trigger.suppressVolumeTriggers();
+
+      // And before that, the music, because on Bluetooth glasses there is no
+      // microphone to open until the track lets go of the route. See hushMusic.
+      await hushMusic();
+      if (turn !== listenSeq.current || !mounted.current) return;
 
       /**
        * Nothing said at all: close the recogniser rather than leave it holding
@@ -1724,7 +1800,7 @@ function shortFailure(text: string): string {
               actually run out of retries. Until then the last reply stays on
               screen, which is true, and the chimes say what happened.
             */
-            void noteTrouble(live.current.uid, message, 'listening');
+            void noteTrouble(live.current.uid, message, listeningContext());
           },
           onEnd: () => {
             clearSilence();
@@ -1807,6 +1883,26 @@ function shortFailure(text: string): string {
     coming back from the background, the state says listening for the whole
     session handover, which is honest and takes a moment.
   */
+  /*
+    The track comes back when Grove is finished, wherever it finished.
+
+    One place rather than three, because the ways a turn can end are not three
+    — a press that heard nothing, a question answered, a question answered
+    with nothing to say, an ability that failed, a window that timed out — and
+    threading a resume through each is how one of them gets missed. The one
+    that gets missed leaves somebody's music silently stopped, which is worse
+    than any of the paths that are easy to remember.
+
+    Settling is the signal: Grove is at rest, nothing is being said and
+    nothing is being listened for. `resumeMusic` is a no-op unless Grove was
+    the thing that paused it.
+  */
+  useEffect(() => {
+    if (state !== 'idle' && state !== 'asleep') return;
+    if (!pausedMusic.current) return;
+    void resumeMusic();
+  }, [state, resumeMusic]);
+
   useEffect(() => {
     if (state !== 'listening') return;
     const watch = setInterval(() => {
@@ -2340,6 +2436,41 @@ function buzz(kind: 'press' | 'open' | 'closed' | 'done' | 'failed' = 'press'): 
  * the acknowledgement that preceded it. Bounded, because a speech engine that
  * never reports done must not wedge the conversation.
  */
+/**
+ * Where a listening failure happened, not just that it did.
+ *
+ * Every one of these arrives as a four-character CoreAudio code and nothing
+ * else — `!int`, `what`, "The audio input is busy" — and the code alone does
+ * not separate the three causes this app actually has. They are all the same
+ * sentence on screen, and working out which one it was has twice meant
+ * reasoning from a screenshot rather than reading an answer off it.
+ *
+ * The three things that decide it are all free to ask for at the moment it
+ * fails: whether Grove was in the background (a session that cannot activate
+ * there is a different fault from one that cannot record), whether the route
+ * is Bluetooth, and whether that route has a microphone at all — which is the
+ * A2DP-versus-HFP split, and the difference between "no input" and "input
+ * refused".
+ *
+ * It rides in `where`, which the Settings list already prints under each
+ * line, so the next report says which of the three it was.
+ */
+function listeningContext(): string {
+  const parts = ['listening', AppState.currentState === 'active' ? 'foreground' : 'background'];
+  try {
+    const route = trigger.currentRoute();
+    parts.push(route.isBluetooth ? `bluetooth:${route.name}` : route.name || 'phone');
+    // The one that explains "the audio input is busy": a pair connected for
+    // playback only has nothing to record with.
+    parts.push(route.hasExternalMic ? 'has-mic' : 'playback-only');
+  } catch {
+    // A build with no native half has no route to report, and a diagnostic
+    // that throws is worse than one that is short.
+  }
+  if (trigger.musicPlaying()) parts.push('music-playing');
+  return parts.join(' · ');
+}
+
 async function whenQuiet(timeoutMs = 12_000): Promise<void> {
   const started = Date.now();
   while (isSpeaking() && Date.now() - started < timeoutMs) {

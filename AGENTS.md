@@ -394,6 +394,49 @@ that is not free. `npm run verify` compares the two files across the language
 boundary and fails if either changes alone, because no compiler reads them
 together.
 
+**Mixable is not a free win, and the first version of this fix bought one bug
+with another.** Bluetooth has two profiles: A2DP carries stereo and has **no
+microphone**, HFP has one and is mono. A headset does one or the other, and
+moving between them is a route change that stops whatever was playing. So
+while a song plays the glasses are in A2DP and there is no input anywhere for
+a recogniser to open — which is what *"The audio input is busy"* in Settings
+means: `inputNode.outputFormat` with a sample rate of nought, not a device
+somebody else is holding.
+
+And Grove may not simply take it. A mixable session is one that has promised
+not to interrupt anybody, which is exactly what forcing the glasses off A2DP
+would do. But it **has** to stay mixable, because a non-mixable session cannot
+be activated from the background at all — `!int`,
+`AVAudioSessionErrorCodeCannotInterruptOthers`, which is Apple's name for
+"went active in the background without `.mixWithOthers`" — and the background
+is where every ring press comes from.
+
+Neither option is available on the session, so **the track pauses instead**,
+the way every assistant on a phone does it: press, the song stops, the route
+frees, the microphone opens, and the song comes back when Grove has finished.
+Only ever a track Grove paused itself; one somebody stopped on purpose stays
+stopped. The resume lives in **one** place — Grove settling to rest — rather
+than at each of the five ways a turn can end, because the one that gets missed
+is the one that leaves somebody's music silently off.
+
+**And the grace window does not chop the song.** It is a microphone opened on
+spec in case there is one more sentence; opened over a paused track it either
+fails for want of an input or succeeds and keeps the music off for another
+three seconds, so the song was interrupted for Grove to listen to silence. A
+press still works. The window is the one of the two that can wait, and it
+costs exactly the one press it exists to save.
+
+**A listening failure now says where it happened.** Every one of these arrives
+as a four-character CoreAudio code and nothing else, and the code alone does
+not separate the three causes this app has. The three things that decide it
+are free to ask for at the moment it fails — foreground or background,
+Bluetooth or not, and whether the route has a microphone at all — so they ride
+in `where` and print under the line in Settings. Which also meant fixing
+`noteTrouble`, where a repeat kept the **first** `where` and the **last**
+`lastAt`: harmless while `where` was the constant "listening", a lie the
+moment it carried state, since the circumstances printed under "Today 12:02"
+were then from some other time entirely.
+
 **Grove's own sounds must never press the ring.** The J09 works through the
 volume fallback, and any sound Grove starts — a chime, the working pulse, speech
 starting or stopping — can move the volume on Bluetooth glasses, which the
