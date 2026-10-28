@@ -42,7 +42,9 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
 .chip.solid { background: #FFFFFF; color: #0B0C12; border-color: #FFFFFF; }
 .quote { border-left: 2px solid rgba(255,255,255,0.5); padding: 2px 0 2px 10px; font-size: 13px; line-height: 1.45; color: rgba(255,255,255,0.88); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .heard { font-size: 19px; line-height: 1.35; font-weight: 300; letter-spacing: -0.02em; min-height: 26px; color: #FFFFFF; }
-.answer, .quote { font-weight: 400; letter-spacing: -0.005em; }
+.answer { font-size: 16.5px; line-height: 1.45; font-weight: 300; letter-spacing: -0.015em; }
+.quote { font-weight: 300; letter-spacing: -0.005em; }
+.chip, .ask input { font-weight: 400; }
 .x { position: absolute; top: 8px; right: 12px; width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.22); background: rgba(255,255,255,0.12); color: #FFFFFF; font: 400 15px var(--sans); line-height: 24px; text-align: center; cursor: pointer; z-index: 4; padding: 0; }
 .x:hover { background: rgba(255,255,255,0.24); }
 .ask { display: flex; gap: 8px; }
@@ -176,9 +178,9 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     if (m === 'pair') {
       setH(190);
       body.innerHTML = `
-        <div class="row space"><span class="label">Pair your iPhone</span><button class="chip" data-act="close">Done</button></div>
+        <div class="row space"><span class="label">Connect your iPhone</span></div>
         <span class="code">${esc(d.code)}</span>
-        <span class="small">In Grove on your iPhone: Settings › Your Mac. Enter <b>${esc(d.host)}</b> and this code. Same Wi-Fi as this Mac.</span>`;
+        <span class="small">In Grove on your iPhone: Settings › Your Mac, and type this code. It works for five minutes.</span>`;
     }
     if (m === 'synced') {
       setH(100);

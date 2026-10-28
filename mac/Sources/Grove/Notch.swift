@@ -15,11 +15,22 @@
 import AppKit
 import WebKit
 
+/*
+  A borderless panel can never become key unless it says it may, so the
+  "Ask Grove anything" box could not be typed into. This one may — as a
+  non-activating panel, like Spotlight, so the app underneath stays the one
+  in front and the text ⌘K captured is still selected in it.
+*/
+final class KeyablePanel: NSPanel {
+  override var canBecomeKey: Bool { true }
+  override var canBecomeMain: Bool { false }
+}
+
 final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
   static let width: CGFloat = 640
   static let height: CGFloat = 360
 
-  let panel: NSPanel
+  let panel: KeyablePanel
   let web: WKWebView
   var onMessage: (([String: Any]) -> Void)?
 
@@ -44,7 +55,7 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
 
   init(look: Look) {
     self.look = look
-    panel = NSPanel(
+    panel = KeyablePanel(
       contentRect: NSRect(x: 0, y: 0, width: Notch.width, height: Notch.height),
       styleMask: [.borderless, .nonactivatingPanel],
       backing: .buffered,
@@ -66,7 +77,7 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     panel.ignoresMouseEvents = true
     panel.isMovable = false
     panel.hidesOnDeactivate = false
-    panel.becomesKeyOnlyIfNeeded = true
+    panel.becomesKeyOnlyIfNeeded = false
     panel.contentView = web
 
     place()
@@ -204,6 +215,7 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
 
   func close() {
     tucked = false
+    if panel.isKeyWindow { panel.resignKey() }
     closeTimer?.invalidate()
     leaveTimer?.invalidate()
     leaveTimer = nil

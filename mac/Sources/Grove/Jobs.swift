@@ -44,7 +44,7 @@ enum Jobs {
 
   static func run(_ job: Job, done: @escaping (Bool, String) -> Void) {
     switch job.kind {
-    case "music.play": Music.play(job.args["what"] ?? "", done: done)
+    case "music.play": Music.play(job.args["what"] ?? "", playlistOnly: job.args["playlist"] == "yes", done: done)
     case "music.pause": Music.simple("pause", spoken: "Paused.", done: done)
     case "music.resume": Music.simple("play", spoken: "Playing.", done: done)
     case "music.next": Music.simple("next track", spoken: "Skipped.", done: done)
@@ -93,7 +93,14 @@ enum Jobs {
   playlist wins, then a song or artist; nothing named shuffles the library.
 */
 enum Music {
-  static func play(_ what: String, done: @escaping (Bool, String) -> Void) {
+  /**
+    A playlist when one is asked for, and only a playlist: "play my agent
+    playlist" once found a song called "FREE AGENTS" instead, because the
+    library search ran when the playlist one should have answered. An exact
+    name beats a partial one (names carry stray spaces, so both are trimmed),
+    and Music is shown the playlist, not just the song it starts on.
+  */
+  static func play(_ what: String, playlistOnly: Bool = false, done: @escaping (Bool, String) -> Void) {
     let q = what.replacingOccurrences(of: "\"", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
     let script: String
     if q.isEmpty {
@@ -101,51 +108,57 @@ enum Music {
       tell application "Music"
         set shuffle enabled to true
         play library playlist 1
-        return name of current track & "|" & artist of current track
+        return "library|" & name of current track & "|" & artist of current track
       end tell
       """
     } else {
       script = """
       tell application "Music"
-        set lists to (every user playlist whose name contains "\(q)")
-        if (count of lists) > 0 then
-          play item 1 of lists
-          return name of current track & "|" & artist of current track
+        set wanted to "\(q)"
+        set found to missing value
+        repeat with p in (every user playlist)
+          set n to name of p
+          if n is wanted or n is (wanted & " ") or n is (" " & wanted) or n is (wanted & "  ") then
+            set found to p
+            exit repeat
+          end if
+        end repeat
+        if found is missing value then
+          set partial to (every user playlist whose name contains wanted)
+          if (count of partial) > 0 then set found to item 1 of partial
         end if
-        set hits to (every track of library playlist 1 whose name contains "\(q)" or artist contains "\(q)" or album contains "\(q)")
+        if found is not missing value then
+          reveal found
+          play found
+          return "playlist|" & name of found
+        end if
+        \(playlistOnly ? "return \"none\"" : """
+        set hits to (every track of library playlist 1 whose name contains wanted or artist contains wanted or album contains wanted)
         if (count of hits) > 0 then
           play item 1 of hits
-          return name of current track & "|" & artist of current track
+          return "song|" & name of current track & "|" & artist of current track
         end if
         return "none"
+        """)
       end tell
       """
     }
-    DispatchQueue.global(qos: .userInitiated).async {
-      let (ok, out) = runScript(script)
-      DispatchQueue.main.async {
-        if !ok { done(false, "Music wouldn't respond. Grove may need permission to control it, in System Settings › Privacy › Automation."); return }
-        if out == "none" { done(false, "I couldn't find \(q) in your music."); return }
-        let bits = out.split(separator: "|").map(String.init)
-        let title = bits.first ?? "music"
-        let artist = bits.count > 1 ? bits[1] : ""
+    Script.run(script) { ok, out in
+      if !ok { done(false, "Music wouldn't respond. Grove may need permission to control it, in the Grove menu's checklist."); return }
+      if out == "none" { done(false, playlistOnly ? "I couldn't find a playlist called \(q)." : "I couldn't find \(q) in your music."); return }
+      let bits = out.split(separator: "|", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
+      switch bits.first {
+      case "playlist": done(true, "Playing your \(bits.count > 1 ? bits[1] : q) playlist.")
+      case "library": done(true, "Shuffling your music.")
+      default:
+        let title = bits.count > 1 ? bits[1] : "it"
+        let artist = bits.count > 2 ? bits[2] : ""
         done(true, artist.isEmpty ? "Playing \(title)." : "Playing \(title) by \(artist).")
       }
     }
   }
 
   static func simple(_ command: String, spoken: String, done: @escaping (Bool, String) -> Void) {
-    DispatchQueue.global(qos: .userInitiated).async {
-      let (ok, _) = runScript("tell application \"Music\" to \(command)")
-      DispatchQueue.main.async { done(ok, ok ? spoken : "Music wouldn't respond.") }
-    }
-  }
-
-  private static func runScript(_ source: String) -> (Bool, String) {
-    var error: NSDictionary?
-    guard let script = NSAppleScript(source: source) else { return (false, "") }
-    let result = script.executeAndReturnError(&error)
-    if error != nil { return (false, "") }
-    return (true, result.stringValue ?? "")
+    Script.run("tell application \"Music\" to \(command)") { ok, _ in done(ok, ok ? spoken : "Music wouldn't respond.") }
   }
 }

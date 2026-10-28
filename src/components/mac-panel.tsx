@@ -7,24 +7,42 @@
  * with the same account, and they find each other (mac.ts).
  */
 
-import { useSyncExternalStore } from 'react';
-import { Text, View } from 'react-native';
+import { useState, useSyncExternalStore } from 'react';
+import { Text, TextInput, View } from 'react-native';
 
 import { Button, Card, Dot, Row } from '@/components/ui';
 import { Type } from '@/constants/theme';
 import { usePalette } from '@/hooks/use-palette';
-import { macStatus, signInForMac, stopMac, subscribeMac } from '@/lib/mac';
+import { macStatus, pairWithCode, signInForMac, stopMac, subscribeMac } from '@/lib/mac';
 
 export function MacPanel() {
   const palette = usePalette();
   const mac = useSyncExternalStore(subscribeMac, macStatus, macStatus);
+  const [code, setCode] = useState('');
 
   if (mac.state === 'signed-out') {
     return (
       <Card style={{ gap: 10 }}>
         <Text style={[Type.bodySm, { color: palette.inkSoft }]}>
-          Sign in with Noctus here and in Grove on your Mac, with the same Google account, and they find each other. Grove’s memory on this phone stays as it is.
+          On your Mac, open the Grove menu and choose Connect iPhone. Type the code it shows.
         </Text>
+        <TextInput
+          value={code}
+          onChangeText={(text) => setCode(text.replace(/\D/g, '').slice(0, 6))}
+          placeholder="Six-digit code"
+          placeholderTextColor={palette.muted}
+          keyboardType="number-pad"
+          accessibilityLabel="Code from your Mac"
+          style={{
+            fontFamily: Type.body.fontFamily,
+            fontSize: 22,
+            letterSpacing: 6,
+            color: palette.ink,
+            paddingVertical: 10,
+            borderBottomWidth: 1,
+            borderBottomColor: palette.line,
+          }}
+        />
         {mac.note ? (
           <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
             <Dot tone="alert" />
@@ -33,7 +51,8 @@ export function MacPanel() {
             </Text>
           </View>
         ) : null}
-        <Button label="Sign in with Google (Noctus)" onPress={() => void signInForMac()} />
+        <Button label="Connect" disabled={code.length !== 6} onPress={() => void pairWithCode(code)} />
+        <Button label="Or sign in with Google (Noctus)" tone="quiet" onPress={() => void signInForMac()} />
       </Card>
     );
   }

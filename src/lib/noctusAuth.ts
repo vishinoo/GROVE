@@ -245,7 +245,11 @@ export async function signInWithNoctus(): Promise<Session | null> {
       `Google signed you in, then Supabase sent you to Noctus's website instead of back here — this app's redirect isn't on its allowlist.\n\nFix it once: Supabase → Authentication → URL Configuration → Redirect URLs, add:\n${redirectTo}\n\nOr paste the address bar from that page below to finish this time.`
     );
   }
-  if (result.type !== 'success') return null;
+  // Never a silent nothing: a sign-in that ends without a session says why,
+  // or the button looks like it simply does not work.
+  if (result.type !== 'success') {
+    throw new SignInIncomplete('Sign-in did not come back to Grove. Try again, and if it keeps happening, check that this address is on Supabase’s Redirect URLs: ' + redirectTo);
+  }
   return setSessionFromUrl(result.url);
 }
 

@@ -52,6 +52,19 @@ final class Link {
   private var backoff: TimeInterval = 2
   private var pending: [String: CheckedContinuation<Reply?, Never>] = [:]
 
+  /*
+    Connecting a phone without its own sign-in.
+
+    Google sign-in on the phone depends on Supabase sending the browser back
+    to the app, which is easy to misconfigure and impossible to see from the
+    phone. So the Mac, already signed in, can show a six-digit code; the phone
+    types it, both meet briefly on `grove-pair-<code>`, and the Mac hands over
+    the account's channel secret. The code lasts five minutes and is used once.
+  */
+  private var pairTopic: String?
+  private var pairExpiry: Timer?
+  var onPaired: (() -> Void)?
+
   init(account: Account) {
     self.account = account
   }
@@ -163,6 +176,17 @@ final class Link {
       return
     }
     if event == "system", let message = payload["message"] as? String { Log.say("link: \(message)") }
+    if let pairTopic, (obj["topic"] as? String) == pairTopic, event == "broadcast",
+       let inner = payload["payload"] as? [String: Any], (inner["from"] as? String) == "phone", (inner["t"] as? String) == "pair",
+       let secret = account.session?.link {
+      ref += 1
+      write(["topic": pairTopic, "event": "broadcast", "ref": "\(ref)", "join_ref": "2", "payload": ["type": "broadcast", "event": "msg",
+        "payload": ["from": "mac", "t": "secret", "secret": secret, "mac": Host.current().localizedName ?? "Mac"]]])
+      Log.say("link: handed the channel to a phone")
+      endPairing()
+      onPaired?()
+      return
+    }
     guard event == "broadcast", let inner = payload["payload"] as? [String: Any], (inner["from"] as? String) == "phone" else { return }
     lastHeard = Date()
     setConnected(true)
@@ -216,6 +240,29 @@ final class Link {
       pending.removeAll()
     }
     onStatus?(value)
+  }
+
+  /** A fresh six-digit code, listened for on its own channel for five minutes. */
+  func startPairing() -> String? {
+    guard joined, account.session?.link != nil else { return nil }
+    endPairing()
+    let code = String(format: "%06d", Int.random(in: 0...999_999))
+    let topic = "realtime:grove-pair-\(code)"
+    pairTopic = topic
+    ref += 1
+    write(["topic": topic, "event": "phx_join", "ref": "\(ref)", "join_ref": "2",
+           "payload": ["config": ["broadcast": ["ack": false, "self": false], "presence": ["key": ""], "private": false]]])
+    pairExpiry = Timer.scheduledTimer(withTimeInterval: 300, repeats: false) { [weak self] _ in self?.endPairing() }
+    Log.say("link: waiting for a phone with a code")
+    return code
+  }
+
+  private func endPairing() {
+    pairExpiry?.invalidate()
+    guard let topic = pairTopic else { return }
+    ref += 1
+    write(["topic": topic, "event": "phx_leave", "payload": [:], "ref": "\(ref)", "join_ref": "2"])
+    pairTopic = nil
   }
 
   /** The phone's answer to a ⌘K, or nil after fifteen seconds. */

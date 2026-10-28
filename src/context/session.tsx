@@ -21,6 +21,7 @@ import * as api from '@/lib/noctusApi';
 import { grantDevice, isDevicePermission } from '@/lib/devicePermissions';
 import { connectGoogle, disconnectGoogle, isGoogleConnected } from '@/lib/googleAuth';
 import * as auth from '@/lib/noctusAuth';
+import { startMac } from '@/lib/mac';
 
 type Status = 'loading' | 'signed-out' | 'signed-in';
 
@@ -100,6 +101,24 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   /** Pulls the account, its connections and its tools after a session exists. */
   const hydrate = useCallback(async () => {
+    /*
+      Signed in with Noctus, but no Noctus server configured — which is the
+      ordinary case now Grove is standalone. The Google sign-in is still worth
+      having: it is what connects the Mac (mac.ts). It is not a reason to
+      switch Grove's own account, so the memory keeps its local id, and
+      nothing here waits on a server that does not exist. This used to call
+      syncAccount anyway, against an empty address, and the sign-in went
+      nowhere.
+    */
+    if (!(await api.hasNoctusConfigured())) {
+      const session = await auth.getSession().catch(() => null);
+      setUser(session ? { email: session.user.email ?? undefined, name: (session.user.user_metadata?.full_name as string | undefined) ?? null } : null);
+      setUid(await localIdentity());
+      setStatus('signed-in');
+      setNotice(null);
+      void startMac();
+      return;
+    }
     try {
       const { user: account } = await api.syncAccount();
       setUser(account);

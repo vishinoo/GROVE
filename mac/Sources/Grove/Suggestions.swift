@@ -27,7 +27,8 @@ enum Suggestions {
     var out: [Suggestion] = []
     let lists = UserDefaults.standard.stringArray(forKey: key) ?? []
     for name in lists.prefix(3) {
-      out.append(Suggestion(label: "Play my \(name) playlist", kind: "music.play", args: ["what": name]))
+      let clean = name.trimmingCharacters(in: .whitespaces)
+      out.append(Suggestion(label: "Play my \(clean) playlist", kind: "music.play", args: ["what": clean, "playlist": "yes"]))
     }
     out.append(Suggestion(label: "Shuffle my music", kind: "music.play", args: [:]))
     out.append(Suggestion(label: "Open Calendar", kind: "open.app", args: ["app": "Calendar"]))
@@ -37,7 +38,7 @@ enum Suggestions {
 
   /** Reads the playlist names from Music in the background, then calls back. */
   static func refresh(done: @escaping () -> Void) {
-    DispatchQueue.global(qos: .utility).async {
+    do {
       let source = """
       tell application "Music"
         set out to {}
@@ -48,11 +49,10 @@ enum Suggestions {
         return out as text
       end tell
       """
-      var error: NSDictionary?
-      let result = NSAppleScript(source: source)?.executeAndReturnError(&error)
-      guard error == nil, let text = result?.stringValue else { return }
-      let names = text.split(separator: "|").map(String.init).filter { !$0.isEmpty && $0.count <= 28 }
-      DispatchQueue.main.async {
+      Script.run(source) { ok, text in
+        guard ok else { return }
+        let names = text.split(separator: "|").map(String.init).filter { !$0.isEmpty && $0.count <= 28 }
+        Log.say("music: \(names.count) playlists")
         UserDefaults.standard.set(Array(names.prefix(8)), forKey: key)
         done()
       }

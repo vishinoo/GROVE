@@ -21,14 +21,23 @@
  * and make Grove depend on the Noctus server being up, neither of which the
  * link needs.
  *
+ * Or without signing in here at all: the Mac, already signed in, shows a
+ * six-digit code (Connect iPhone…), and typing it hands this phone the
+ * account's channel secret (pairWithCode), which is kept in the Keychain.
+ * Google sign-in on the phone depends on Supabase sending the browser back to
+ * the app, and when it does not there is nothing on the phone to say why.
+ *
  * No React in this file, so the harness can load it; screens subscribe with
  * subscribeMac.
  */
 
 import type { RealtimeChannel } from '@supabase/supabase-js';
+import * as SecureStore from 'expo-secure-store';
 
 import { lightSelection } from './lightModel';
 import * as auth from './noctusAuth';
+
+const SECRET_KEY = 'grove.mac.secret';
 
 export type MacStatus = {
   state: 'signed-out' | 'waiting' | 'connected' | 'refused';
@@ -101,14 +110,15 @@ async function answer(id: string, instruction: string, text: string) {
 /** Joins the account's channel if there is a Noctus session. Safe to call more than once. */
 export async function startMac(): Promise<void> {
   if (channel || !auth.isSupabaseConfigured()) return;
-  const session = await auth.getSession().catch(() => null);
-  if (!session) {
+  const client = auth.supabase();
+  const kept = await SecureStore.getItemAsync(SECRET_KEY).catch(() => null);
+  const session = kept ? null : await auth.getSession().catch(() => null);
+  if (!kept && !session) {
     set({ state: 'signed-out' });
     return;
   }
-  const client = auth.supabase();
-  let secret = String(session.user.user_metadata?.grove_link ?? '');
-  if (secret.length < 32) {
+  let secret = kept ?? String(session?.user.user_metadata?.grove_link ?? '');
+  if (!kept && session && secret.length < 32) {
     // First device on this account: make the secret and keep it in the account.
     const bytes = Array.from({ length: 48 }, () => 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[Math.floor(Math.random() * 62)]);
     secret = bytes.join('');
@@ -118,7 +128,7 @@ export async function startMac(): Promise<void> {
       return;
     }
   }
-  set({ state: 'waiting', email: session.user.email ?? undefined });
+  set({ state: 'waiting', email: session?.user.email ?? undefined });
 
   const joined = client.channel(`grove-link-${secret}`, {
     config: { broadcast: { self: false, ack: false } },
@@ -148,6 +158,38 @@ export async function startMac(): Promise<void> {
   }, 60_000);
 }
 
+/** The code the Mac is showing: the Mac hands over the account's channel. */
+export async function pairWithCode(code: string): Promise<void> {
+  const clean = code.replace(/\D/g, '');
+  if (clean.length !== 6 || !auth.isSupabaseConfigured()) {
+    set({ state: 'signed-out', note: 'Type the six digits your Mac is showing.' });
+    return;
+  }
+  const client = auth.supabase();
+  const meet = client.channel(`grove-pair-${clean}`, { config: { broadcast: { self: false, ack: false } } });
+  set({ state: 'signed-out', note: 'Connecting…' });
+  const secret = await new Promise<{ secret: string; mac: string } | null>((resolve) => {
+    const timer = setTimeout(() => resolve(null), 10_000);
+    meet.on('broadcast', { event: 'msg' }, ({ payload }) => {
+      const m = payload as Record<string, unknown>;
+      if (m.from === 'mac' && m.t === 'secret' && typeof m.secret === 'string') {
+        clearTimeout(timer);
+        resolve({ secret: m.secret, mac: String(m.mac ?? 'Mac') });
+      }
+    });
+    meet.subscribe((state) => {
+      if (state === 'SUBSCRIBED') void meet.send({ type: 'broadcast', event: 'msg', payload: { from: 'phone', t: 'pair' } });
+    });
+  });
+  await client.removeChannel(meet).catch(() => {});
+  if (!secret) {
+    set({ state: 'signed-out', note: 'Your Mac didn’t answer. Check the code, and that Grove on the Mac is showing it.' });
+    return;
+  }
+  await SecureStore.setItemAsync(SECRET_KEY, secret.secret).catch(() => {});
+  await startMac();
+}
+
 /** Google, through Noctus. For the link only; see the note at the top. */
 export async function signInForMac(): Promise<void> {
   try {
@@ -163,6 +205,7 @@ export async function stopMac(): Promise<void> {
   hello = null;
   if (channel) await auth.supabase().removeChannel(channel).catch(() => {});
   channel = null;
+  await SecureStore.deleteItemAsync(SECRET_KEY).catch(() => {});
   set({ state: 'signed-out' });
 }
 

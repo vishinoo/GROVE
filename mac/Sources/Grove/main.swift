@@ -58,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       self.refreshMenu()
     }
     link.onJob = { [weak self] job, reply in self?.run(job, reply: reply) }
+    link.onPaired = { [weak self] in self?.notch.show("done", ["title": "iPhone connected", "text": "Your phone and this Mac are one Grove now.", "ok": true], pin: false, closeAfter: 3) }
     account.onChange = { [weak self] session in
       guard let self else { return }
       self.notch.setAccount(session != nil)
@@ -88,6 +89,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     if !UserDefaults.standard.bool(forKey: "grove.asked.permissions") {
       UserDefaults.standard.set(true, forKey: "grove.asked.permissions")
       DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Permission.requestAll { [weak self] in self?.refreshMenu() } }
+    }
+
+    // `open Grove.app --args --pair` starts a pairing and logs the code, to test the hand-off.
+    if CommandLine.arguments.contains("--pair") {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 4) { Log.say("test: pairing code \(self.link.startPairing() ?? "none")") }
     }
 
     // `open Grove.app --args --peek` opens the panel once at launch, to check it draws.
@@ -139,6 +145,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     copied" — the commonest reason to ask from the notch at all.
   */
   private func askFree(_ instruction: String) {
+    // A command is done, not discussed: the model cannot press play, and
+    // asked to, it says so politely, which is the worst answer there is.
+    if let job = Commands.job(for: instruction) {
+      notch.close()
+      run(job) { _, _ in }
+      return
+    }
     let clip = NSPasteboard.general.string(forType: .string) ?? ""
     let aboutClip = instruction.lowercased().contains("copied") || instruction.lowercased().contains("this")
     captured = Captured(text: aboutClip ? clip : "", app: nil, element: nil, viaClipboard: true)
@@ -188,7 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     if job.fromPhone { notch.show("job", ["title": title, "from": "From your iPhone", "steps": Jobs.steps(for: job), "at": 0], pin: true) }
     Jobs.run(job) { [weak self] ok, spoken in
       guard let self else { return }
-      if job.fromPhone || job.kind.hasPrefix("music.") {
+      if job.fromPhone || job.kind.hasPrefix("music.") || job.kind.hasPrefix("open.") {
         self.notch.show("done", ["title": title, "text": spoken, "ok": ok], pin: false, closeAfter: 2.8)
       }
       reply(ok, spoken)
@@ -219,6 +232,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     if let session = account.session {
       menu.addItem(disabled("Signed in as \(session.email.isEmpty ? "your Noctus account" : session.email)"))
       menu.addItem(disabled(link.connected ? "iPhone connected" : "iPhone not connected yet"))
+      if !link.connected { menu.addItem(item("Connect iPhone…", #selector(connectPhone))) }
       menu.addItem(item("Sign out", #selector(signOut)))
     } else {
       menu.addItem(item("Sign in with Google (Noctus)…", #selector(signIn)))
@@ -263,6 +277,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   @objc private func signIn() { account.signIn() }
+  @objc private func connectPhone() {
+    guard let code = link.startPairing() else {
+      notch.show("answer", ["ask": "Connect iPhone", "text": "Still connecting to Noctus. Try again in a moment.", "failed": true], pin: true)
+      return
+    }
+    notch.show("pair", ["code": code], pin: true)
+  }
   @objc private func signOut() { account.signOut() }
   @objc private func askPermission(_ sender: NSMenuItem) {
     guard let title = sender.representedObject as? String, let p = Permission.allCases.first(where: { $0.title == title }) else { return }

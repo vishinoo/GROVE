@@ -58,13 +58,10 @@ enum Permission: CaseIterable {
       }
     case .music:
       // A harmless question to Music is what makes macOS ask.
-      DispatchQueue.global(qos: .userInitiated).async {
-        var error: NSDictionary?
-        _ = NSAppleScript(source: "tell application \"Music\" to get player state")?.executeAndReturnError(&error)
-        DispatchQueue.main.async {
-          if error == nil { UserDefaults.standard.set(true, forKey: "grove.permission.music") } else { Permission.open("Privacy_Automation") }
-          done()
-        }
+      Script.run("tell application \"Music\" to get player state") { ok, _ in
+        Log.say("permission: music \(ok ? "allowed" : "not allowed")")
+        if ok { UserDefaults.standard.set(true, forKey: "grove.permission.music") } else { Permission.open("Privacy_Automation") }
+        done()
       }
     }
   }
