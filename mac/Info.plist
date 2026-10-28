@@ -16,6 +16,20 @@
   <string>0.1.0</string>
   <key>CFBundleVersion</key>
   <string>1</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <!-- grove-mac://auth-callback: where Google, through Noctus, comes back to. -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>org.noctusai.grove.mac.auth</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>grove-mac</string>
+      </array>
+    </dict>
+  </array>
   <key>LSMinimumSystemVersion</key>
   <string>14.0</string>
   <!-- Lives in the notch and the menu bar, never the Dock. -->

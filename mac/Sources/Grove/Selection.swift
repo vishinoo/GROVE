@@ -26,6 +26,14 @@ enum Read {
   case none
   /** The app did not say. Try a copy. */
   case unknown(NSRunningApplication?)
+
+  var summary: String {
+    switch self {
+    case .text(let c): return "\(c.text.count) characters"
+    case .none: return "empty, passing it on"
+    case .unknown: return "not reported, trying a copy"
+    }
+  }
 }
 
 enum Selection {

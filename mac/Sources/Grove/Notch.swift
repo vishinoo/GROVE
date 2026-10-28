@@ -110,7 +110,7 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     shrinkTimer?.invalidate()
     if width <= 0 || height <= 0 {
       // After the closing animation, so the panel is not clipped mid-shrink.
-      shrinkTimer = Timer.scheduledTimer(withTimeInterval: 0.45, repeats: false) { [weak self] _ in
+      shrinkTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
         guard let self, !self.isOpen else { return }
         self.fullFrame()
       }
@@ -131,12 +131,17 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
       return
     }
     guard !pinned else { return }
+    // No size reported yet means the panel is still growing: never treat
+    // that as the pointer having left, or it closes as it opens.
+    guard visible > 0, visibleWidth > 0 else { return }
     let shown = NSRect(x: notchRect.midX - visibleWidth / 2, y: top - visible, width: visibleWidth, height: visible)
-    if shown.insetBy(dx: -10, dy: -10).contains(p) {
+    if shown.insetBy(dx: -4, dy: -4).contains(p) {
       leaveTimer?.invalidate()
       leaveTimer = nil
     } else if leaveTimer == nil {
-      leaveTimer = Timer.scheduledTimer(withTimeInterval: 0.45, repeats: false) { [weak self] _ in
+      // Short: the panel should feel like it follows the pointer, not like
+      // it is deciding whether to.
+      leaveTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: false) { [weak self] _ in
         self?.leaveTimer = nil
         self?.close()
       }
@@ -145,6 +150,10 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
 
   func show(_ mode: String, _ data: [String: Any], pin: Bool, closeAfter: TimeInterval? = nil) {
     closeTimer?.invalidate()
+    leaveTimer?.invalidate()
+    leaveTimer = nil
+    shrinkTimer?.invalidate()
+    if !isOpen { Log.say("notch: open (\(mode))") }
     isOpen = true
     pinned = pin
     panel.ignoresMouseEvents = false
@@ -167,6 +176,10 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
 
   func close() {
     closeTimer?.invalidate()
+    leaveTimer?.invalidate()
+    leaveTimer = nil
+    visible = 0
+    visibleWidth = 0
     isOpen = false
     pinned = false
     panel.ignoresMouseEvents = true
@@ -180,6 +193,10 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
 
   func setPhone(_ connected: Bool) {
     js("grove.phone(\(connected ? "true" : "false"))")
+  }
+
+  func setAccount(_ signedIn: Bool) {
+    js("grove.account(\(signedIn ? "true" : "false"))")
   }
 
   // MARK: the page

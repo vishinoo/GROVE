@@ -31,11 +31,27 @@ if [ -f "$root/.env" ]; then
   model="$(grep -E '^EXPO_PUBLIC_GEMINI_MODEL=' "$root/.env" | head -1 | cut -d= -f2- | tr -d '"' || true)"
   [ -n "${key:-}" ] && /usr/libexec/PlistBuddy -c "Add :GroveGeminiKey string $key" "$app/Contents/Info.plist"
   [ -n "${model:-}" ] && /usr/libexec/PlistBuddy -c "Add :GroveModel string $model" "$app/Contents/Info.plist"
+  # Noctus's Supabase project, for signing in. The anon key is a public key by
+  # design; the account's own token is what opens anything.
+  supa="$(grep -E '^EXPO_PUBLIC_NOCTUS_SUPABASE_URL=' "$root/.env" | head -1 | cut -d= -f2- | tr -d '"' || true)"
+  anon="$(grep -E '^EXPO_PUBLIC_NOCTUS_SUPABASE_ANON_KEY=' "$root/.env" | head -1 | cut -d= -f2- | tr -d '"' || true)"
+  [ -n "${supa:-}" ] && /usr/libexec/PlistBuddy -c "Add :GroveSupabaseURL string $supa" "$app/Contents/Info.plist"
+  [ -n "${anon:-}" ] && /usr/libexec/PlistBuddy -c "Add :GroveSupabaseAnon string $anon" "$app/Contents/Info.plist"
 fi
+cp AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 
-# Ad-hoc signed: enough for this Mac. macOS may ask for permissions again
-# after a rebuild, because the signature changes.
-codesign --force --deep --sign - "$app"
+# Signed with a local certificate when there is one, so the signature names
+# the same certificate every build. macOS ties Accessibility, the microphone
+# and Automation to that: ad-hoc signing changes on every rebuild, and a grant
+# made before one silently stops applying while Settings still shows it on —
+# which is exactly how ⌘K stopped working. Make the identity once with
+# mac/make-signing-identity.sh.
+if security find-identity -p codesigning 2>/dev/null | grep -q "Grove Local Signing"; then
+  codesign --force --deep --sign "Grove Local Signing" "$app"
+else
+  echo "No Grove Local Signing identity: signing ad-hoc. Permissions will reset on each rebuild."
+  codesign --force --deep --sign - "$app"
+fi
 echo "Built $app"
 
 if [ "${1:-}" = "--run" ]; then

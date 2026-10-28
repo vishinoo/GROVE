@@ -1,37 +1,40 @@
 /**
  * The Mac, as the phone's hands.
  *
- * Grove on a Mac (the `mac/` folder) listens on the local network, and this is
- * the phone's end of that conversation. The phone stays the brain — memory,
- * accounts, the decision about what to do — and the Mac is a computer it can
- * drive: music in Apple Music, a link or an app opened, and whatever comes
- * after. Nothing the phone remembers is copied over; what crosses is the
- * colour, name and manner, jobs, and the Mac's ⌘K questions, which the phone
- * answers in its own voice (lightSelection) so the laptop sounds like the same
- * Grove rather than a second one.
+ * Grove on a Mac (the `mac/` folder) and this phone find each other through
+ * the person's Noctus account: both sign in with Google through Noctus's
+ * Supabase project and join one Realtime broadcast channel named by a secret
+ * kept in that account's metadata (`grove_link`), which only that account's
+ * sign-in can read. Whichever device signs in first makes the secret. No
+ * pairing code, no server of ours, and no need to share a Wi-Fi network. Why
+ * not a private channel, and the protocol, are at the top of
+ * mac/Sources/Grove/Link.swift.
  *
- * No server. Pairing is a six-digit code shown by the Mac's menu bar icon, and
- * the Mac answers it with a token kept in the Keychain here, so every later
- * connection needs nothing typed. The same Wi-Fi is the one requirement; off
- * it, jobs say plainly that the Mac is not reachable.
+ * The phone stays the brain — memory, accounts, the decision about what to
+ * do — and the Mac is a computer it can drive. Nothing the phone remembers is
+ * copied over; what crosses is the colour, name and manner, jobs, and the
+ * Mac's ⌘K questions, which the phone answers in its own voice
+ * (lightSelection) so the laptop sounds like the same Grove.
  *
- * WebSocket, because React Native carries one and it needs no native code:
- * this works on a binary that predates it, given the address. Finding the Mac
- * without typing its name needs Bonjour, which is native, and comes later.
+ * Signing in here is only for the link. It does not switch Grove's own
+ * account on this phone: that would key the memory to a different account
+ * and make Grove depend on the Noctus server being up, neither of which the
+ * link needs.
+ *
+ * No React in this file, so the harness can load it; screens subscribe with
+ * subscribeMac.
  */
 
-import * as SecureStore from 'expo-secure-store';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 import { lightSelection } from './lightModel';
+import * as auth from './noctusAuth';
 
-const KEY = 'grove.mac.pairing';
-const PORT = 47321;
-
-type Pairing = { host: string; token: string; mac: string };
 export type MacStatus = {
-  state: 'unpaired' | 'connecting' | 'connected' | 'away' | 'refused';
+  state: 'signed-out' | 'waiting' | 'connected' | 'refused';
+  /** The Mac's name, once it has said hello. */
   mac?: string;
-  host?: string;
+  email?: string;
   note?: string;
 };
 export type Look = {
@@ -44,13 +47,12 @@ export type Look = {
   manner: string;
 };
 
-let status: MacStatus = { state: 'unpaired' };
+let status: MacStatus = { state: 'signed-out' };
 const listeners = new Set<() => void>();
-let socket: WebSocket | null = null;
-let pairing: Pairing | null = null;
-let retry: ReturnType<typeof setTimeout> | null = null;
-let backoff = 3000;
+let channel: RealtimeChannel | null = null;
 let look: Look | null = null;
+let lastHeard = 0;
+let hello: ReturnType<typeof setInterval> | null = null;
 const jobs = new Map<string, (result: { ok: boolean; spoken: string }) => void>();
 
 function set(next: MacStatus) {
@@ -62,7 +64,6 @@ export function macStatus(): MacStatus {
   return status;
 }
 
-/** For a screen that shows the status; see MacPanel. No React in here, so the harness can load it. */
 export function subscribeMac(listener: () => void): () => void {
   listeners.add(listener);
   return () => {
@@ -70,68 +71,26 @@ export function subscribeMac(listener: () => void): () => void {
   };
 }
 
-/** "vishnus-macbook-air" and "vishnus-macbook-air.local" both mean the same Mac. */
-function normaliseHost(raw: string): string {
-  let host = raw.trim().replace(/^wss?:\/\//i, '').replace(/[/:].*$/, '');
-  if (host && !host.includes('.') && !/^\d+$/.test(host)) host += '.local';
-  return host;
-}
-
 function send(message: Record<string, unknown>): boolean {
-  if (!socket || socket.readyState !== 1) return false;
-  socket.send(JSON.stringify(message));
+  if (!channel) return false;
+  void channel.send({ type: 'broadcast', event: 'msg', payload: { from: 'phone', ...message } });
   return true;
 }
 
-function open(host: string, hello: Record<string, unknown>, onWelcome?: (token: string, mac: string) => void) {
-  socket?.close();
-  set({ ...status, state: 'connecting', host });
-  let ws: WebSocket;
-  try {
-    ws = new WebSocket(`ws://${host}:${PORT}`);
-  } catch {
-    set({ state: pairing ? 'away' : 'unpaired', host, note: 'That address did not work.' });
-    return;
+function heard(m: Record<string, unknown>) {
+  if (m.from !== 'mac') return;
+  lastHeard = Date.now();
+  if (m.t === 'welcome') {
+    const first = status.state !== 'connected';
+    set({ ...status, state: 'connected', mac: String(m.mac ?? 'Mac'), note: undefined });
+    if (first && look) send({ t: 'settings', ...look });
+  } else if (m.t === 'done') {
+    const id = String(m.id ?? '');
+    jobs.get(id)?.({ ok: Boolean(m.ok), spoken: String(m.spoken ?? '') });
+    jobs.delete(id);
+  } else if (m.t === 'think') {
+    void answer(String(m.id ?? ''), String(m.instruction ?? ''), String(m.text ?? ''));
   }
-  socket = ws;
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'hello', device: 'iPhone', ...hello }));
-  ws.onmessage = (event) => {
-    let m: Record<string, unknown>;
-    try {
-      m = JSON.parse(String(event.data));
-    } catch {
-      return;
-    }
-    if (m.t === 'welcome') {
-      backoff = 3000;
-      const mac = String(m.mac ?? 'Mac');
-      onWelcome?.(String(m.token ?? ''), mac);
-      set({ state: 'connected', mac, host });
-      if (look) send({ t: 'settings', ...look });
-    } else if (m.t === 'refused') {
-      set({ state: 'refused', host, note: String(m.why ?? 'The Mac refused the code.') });
-    } else if (m.t === 'done') {
-      const id = String(m.id ?? '');
-      jobs.get(id)?.({ ok: Boolean(m.ok), spoken: String(m.spoken ?? '') });
-      jobs.delete(id);
-    } else if (m.t === 'think') {
-      void answer(String(m.id ?? ''), String(m.instruction ?? ''), String(m.text ?? ''));
-    }
-  };
-  ws.onclose = () => {
-    if (socket !== ws) return;
-    socket = null;
-    jobs.forEach((resolve) => resolve({ ok: false, spoken: 'Your Mac stopped answering.' }));
-    jobs.clear();
-    if (status.state === 'refused') return;
-    set({ state: pairing ? 'away' : 'unpaired', mac: status.mac, host });
-    if (pairing) {
-      // Keep trying, gently: the Mac asleep or off the Wi-Fi is the ordinary case.
-      if (retry) clearTimeout(retry);
-      retry = setTimeout(() => connect(), backoff);
-      backoff = Math.min(backoff * 2, 60_000);
-    }
-  };
 }
 
 async function answer(id: string, instruction: string, text: string) {
@@ -139,52 +98,76 @@ async function answer(id: string, instruction: string, text: string) {
   send({ t: 'thought', id, kind: reply?.kind ?? 'answer', text: reply?.text ?? '' });
 }
 
-function connect() {
-  if (!pairing) return;
-  open(pairing.host, { token: pairing.token });
-}
-
-/** Reads the saved pairing and connects. Safe to call more than once. */
+/** Joins the account's channel if there is a Noctus session. Safe to call more than once. */
 export async function startMac(): Promise<void> {
-  if (pairing) {
-    if (!socket) connect();
+  if (channel || !auth.isSupabaseConfigured()) return;
+  const session = await auth.getSession().catch(() => null);
+  if (!session) {
+    set({ state: 'signed-out' });
     return;
   }
-  try {
-    const raw = await SecureStore.getItemAsync(KEY);
-    pairing = raw ? (JSON.parse(raw) as Pairing) : null;
-  } catch {
-    pairing = null;
+  const client = auth.supabase();
+  let secret = String(session.user.user_metadata?.grove_link ?? '');
+  if (secret.length < 32) {
+    // First device on this account: make the secret and keep it in the account.
+    const bytes = Array.from({ length: 48 }, () => 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[Math.floor(Math.random() * 62)]);
+    secret = bytes.join('');
+    const { error } = await client.auth.updateUser({ data: { grove_link: secret } });
+    if (error) {
+      set({ state: 'refused', note: `Could not set up the link on your Noctus account: ${error.message}` });
+      return;
+    }
   }
-  if (pairing) connect();
-}
+  set({ state: 'waiting', email: session.user.email ?? undefined });
 
-/** The first time: the Mac's name and the code it is showing. */
-export function pairMac(rawHost: string, code: string): void {
-  const host = normaliseHost(rawHost);
-  if (!host || !/^\d{6}$/.test(code.trim())) {
-    set({ state: 'unpaired', note: 'Enter the Mac’s name and the six-digit code it shows.' });
-    return;
-  }
-  open(host, { code: code.trim() }, (token, mac) => {
-    pairing = { host, token, mac };
-    void SecureStore.setItemAsync(KEY, JSON.stringify(pairing)).catch(() => {});
+  const joined = client.channel(`grove-link-${secret}`, {
+    config: { broadcast: { self: false, ack: false } },
   });
+  channel = joined;
+  joined.on('broadcast', { event: 'msg' }, ({ payload }) => heard(payload as Record<string, unknown>));
+  joined.subscribe((state, error) => {
+    if (state === 'SUBSCRIBED') {
+      send({ t: 'hello' });
+    } else if (state === 'CHANNEL_ERROR' || state === 'TIMED_OUT') {
+      set({
+        ...status,
+        state: 'refused',
+        note: error?.message ? `Could not reach Noctus: ${error.message}` : 'Could not reach Noctus.',
+      });
+    }
+  });
+
+  // Hello every thirty seconds; the Mac answers. Not heard for seventy-five
+  // means it is asleep, closed or offline.
+  if (hello) clearInterval(hello);
+  hello = setInterval(() => {
+    send({ t: 'hello' });
+    if (status.state === 'connected' && Date.now() - lastHeard > 75_000) set({ ...status, state: 'waiting' });
+  }, 30_000);
 }
 
-export async function forgetMac(): Promise<void> {
-  pairing = null;
-  if (retry) clearTimeout(retry);
-  socket?.close();
-  socket = null;
-  await SecureStore.deleteItemAsync(KEY).catch(() => {});
-  set({ state: 'unpaired' });
+/** Google, through Noctus. For the link only; see the note at the top. */
+export async function signInForMac(): Promise<void> {
+  try {
+    const session = await auth.signInWithNoctus();
+    if (session) await startMac();
+  } catch (error) {
+    set({ state: 'signed-out', note: error instanceof Error ? error.message : 'Sign-in did not finish.' });
+  }
+}
+
+export async function stopMac(): Promise<void> {
+  if (hello) clearInterval(hello);
+  hello = null;
+  if (channel) await auth.supabase().removeChannel(channel).catch(() => {});
+  channel = null;
+  set({ state: 'signed-out' });
 }
 
 /** The phone's colour, name and manner, sent now and whenever they change. */
 export function sendLook(next: Look): void {
   look = next;
-  send({ t: 'settings', ...next });
+  if (status.state === 'connected') send({ t: 'settings', ...next });
 }
 
 /**
@@ -195,7 +178,10 @@ export function macJob(kind: string, args: Record<string, string>, timeoutMs = 2
   if (status.state !== 'connected') {
     return Promise.resolve({
       ok: false,
-      spoken: pairing ? 'Your Mac isn’t reachable right now. It needs to be awake and on the same Wi-Fi.' : 'No Mac is paired yet. Settings, Your Mac.',
+      spoken:
+        status.state === 'signed-out'
+          ? 'Your Mac isn’t connected yet. Sign in with Noctus in Settings, Your Mac, and on the Mac.'
+          : 'Your Mac isn’t answering. It needs to be awake with Grove open and signed in.',
     });
   }
   const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;

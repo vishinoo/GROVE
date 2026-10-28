@@ -3,19 +3,21 @@
 
   Two jobs in one small app. It is the phone's hands: Grove on the iPhone stays
   the brain — memory, accounts, voice, the decision about what to do — and when
-  a job needs a computer it hands it here over the local network (Link.swift).
-  And it is a quicker Grove at the keyboard: it lives in the notch, opens when
-  the pointer reaches it, and ⌘K on highlighted text in any app hands that text
-  to Grove with a spoken instruction (Shortcut.swift, Selection.swift).
+  a job needs a computer it hands it here, over a private channel on the
+  person's Noctus account (Link.swift). And it is a quicker Grove at the
+  keyboard: it lives in the notch, opens when the pointer reaches it, and ⌘K
+  on highlighted text in any app hands that text to Grove with a spoken
+  instruction (Shortcut.swift, Selection.swift).
 
-  It never appears in the Dock (LSUIElement). The menu bar icon is for pairing,
-  the shortcut, permissions and quitting.
+  It never appears in the Dock (LSUIElement). The menu bar icon is for signing
+  in, the permissions, the shortcut and quitting.
 */
 
 import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
   let look = Look.load()
+  let account = Account()
   var notch: Notch!
   var link: Link!
   var shortcut: Shortcut!
@@ -25,16 +27,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   /** What ⌘K captured, held until the answer comes back. */
   var captured: Captured?
 
+  func applicationWillFinishLaunching(_ notification: Notification) {
+    // grove-mac://auth-callback, from the browser after Google.
+    NSAppleEventManager.shared().setEventHandler(
+      self, andSelector: #selector(openURL(_:reply:)),
+      forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
+  }
+
   func applicationDidFinishLaunching(_ notification: Notification) {
+    Log.trim()
+    Log.say("launch: accessibility \(AXIsProcessTrusted() ? "granted" : "not granted"), signed in \(account.session != nil)")
+
     notch = Notch(look: look)
-    link = Link()
+    link = Link(account: account)
     shortcut = Shortcut()
 
     notch.onMessage = { [weak self] message in self?.fromPanel(message) }
 
     link.onLook = { [weak self] incoming in
       guard let self else { return }
-      let changedColour = incoming.colour != self.look.colour
+      let changedColour = incoming.colour != nil && incoming.colour != self.look.colour
       self.look.apply(incoming)
       self.notch.setLook(self.look)
       if changedColour { self.notch.show("synced", ["label": self.look.colourLabel], pin: false, closeAfter: 2.2) }
@@ -46,13 +58,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       self.refreshMenu()
     }
     link.onJob = { [weak self] job, reply in self?.run(job, reply: reply) }
-    link.start()
+    account.onChange = { [weak self] session in
+      guard let self else { return }
+      self.notch.setAccount(session != nil)
+      if session != nil { self.link.start() } else { self.link.stop() }
+      self.refreshMenu()
+    }
+    notch.setAccount(account.session != nil)
+    if account.session != nil { link.start() }
 
     shortcut.useOption = UserDefaults.standard.bool(forKey: "grove.shortcut.option")
     shortcut.onTrigger = { [weak self] captured in self?.begin(captured) }
+    shortcut.onReady = { [weak self] in self?.refreshMenu() }
     shortcut.start()
 
     makeMenu()
+
+    // The first launch asks for everything at once, in order, rather than one
+    // prompt at a time at odd moments later.
+    if !UserDefaults.standard.bool(forKey: "grove.asked.permissions") {
+      UserDefaults.standard.set(true, forKey: "grove.asked.permissions")
+      DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Permission.requestAll { [weak self] in self?.refreshMenu() } }
+    }
 
     // `open Grove.app --args --peek` opens the panel once at launch, to check it draws.
     if CommandLine.arguments.contains("--peek") {
@@ -60,9 +87,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
+  func applicationDidBecomeActive(_ notification: Notification) { refreshMenu() }
+
+  @objc private func openURL(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
+    guard let text = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue, let url = URL(string: text) else { return }
+    if url.scheme == "grove-mac" { account.handle(url) }
+  }
+
   // MARK: ⌘K
 
   private func begin(_ captured: Captured) {
+    Log.say("⌘K: \(captured.text.count) characters from \(captured.app?.localizedName ?? "an app")")
     self.captured = captured
     notch.show("listening", ["text": captured.text], pin: true)
     voice.listen(
@@ -111,6 +146,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     case "music":
       let action = (message["action"] as? String) ?? "play"
       run(Job(id: UUID().uuidString, kind: "music.\(action)", args: [:], fromPhone: false)) { _, _ in }
+    case "signin":
+      account.signIn()
+    case "log":
+      Log.say("panel: \(message["text"] ?? "")")
     default:
       break
     }
@@ -135,36 +174,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func makeMenu() {
     status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     if let button = status.button {
-      button.image = NSImage(systemSymbolName: "circle.hexagongrid", accessibilityDescription: "Grove")
+      // The g, as a template so the menu bar tints it for light and dark.
+      if let url = Bundle.module.url(forResource: "menubar", withExtension: "png"), let image = NSImage(contentsOf: url) {
+        image.isTemplate = true
+        image.size = NSSize(width: 15, height: 18)
+        button.image = image
+      } else {
+        button.title = "g"
+      }
     }
     refreshMenu()
   }
 
   private func refreshMenu() {
-    guard let status else { return }
+    guard let status, let link, let shortcut else { return }
     let menu = NSMenu()
-    let phone = NSMenuItem(title: link.connected ? "iPhone connected" : "iPhone not connected", action: nil, keyEquivalent: "")
-    phone.isEnabled = false
-    menu.addItem(phone)
-    menu.addItem(NSMenuItem(title: "Pair an iPhone…", action: #selector(pair), keyEquivalent: ""))
+
+    if let session = account.session {
+      menu.addItem(disabled("Signed in as \(session.email.isEmpty ? "your Noctus account" : session.email)"))
+      menu.addItem(disabled(link.connected ? "iPhone connected" : "iPhone not connected yet"))
+      menu.addItem(item("Sign out", #selector(signOut)))
+    } else {
+      menu.addItem(item("Sign in with Google (Noctus)…", #selector(signIn)))
+    }
+
     menu.addItem(.separator())
-    let k = NSMenuItem(title: "Shortcut: ⌘K", action: #selector(useCommandK), keyEquivalent: "")
+    menu.addItem(disabled("Permissions"))
+    for p in Permission.allCases {
+      let row = NSMenuItem(title: p.title, action: #selector(askPermission(_:)), keyEquivalent: "")
+      row.representedObject = p.title
+      row.state = p.granted == true ? .on : .off
+      row.indentationLevel = 1
+      menu.addItem(row)
+    }
+    menu.addItem(item("Ask for all of them again", #selector(askAll)))
+
+    menu.addItem(.separator())
+    menu.addItem(disabled(shortcut.ready ? "⌘K is ready" : "⌘K needs Accessibility"))
+    let k = item("Shortcut: ⌘K", #selector(useCommandK))
     k.state = shortcut.useOption ? .off : .on
     menu.addItem(k)
-    let ok = NSMenuItem(title: "Shortcut: ⌥⌘K", action: #selector(useOptionCommandK), keyEquivalent: "")
+    let ok = item("Shortcut: ⌥⌘K", #selector(useOptionCommandK))
     ok.state = shortcut.useOption ? .on : .off
     menu.addItem(ok)
+
     menu.addItem(.separator())
-    menu.addItem(NSMenuItem(title: "Accessibility settings…", action: #selector(openAccessibility), keyEquivalent: ""))
-    menu.addItem(NSMenuItem(title: "Quit Grove", action: #selector(quit), keyEquivalent: "q"))
-    menu.items.forEach { $0.target = self }
+    menu.addItem(item("Show the log", #selector(showLog)))
+    menu.addItem(item("Quit Grove", #selector(quit), key: "q"))
     status.menu = menu
   }
 
-  @objc private func pair() {
-    let code = link.newPairingCode()
-    notch.show("pair", ["host": Link.hostName, "code": code], pin: true)
+  private func item(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
+    let i = NSMenuItem(title: title, action: action, keyEquivalent: key)
+    i.target = self
+    return i
   }
+
+  private func disabled(_ title: String) -> NSMenuItem {
+    let i = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+    i.isEnabled = false
+    return i
+  }
+
+  @objc private func signIn() { account.signIn() }
+  @objc private func signOut() { account.signOut() }
+  @objc private func askPermission(_ sender: NSMenuItem) {
+    guard let title = sender.representedObject as? String, let p = Permission.allCases.first(where: { $0.title == title }) else { return }
+    p.request { [weak self] in self?.refreshMenu() }
+  }
+  @objc private func askAll() { Permission.requestAll { [weak self] in self?.refreshMenu() } }
   @objc private func useCommandK() { setShortcut(option: false) }
   @objc private func useOptionCommandK() { setShortcut(option: true) }
   private func setShortcut(option: Bool) {
@@ -172,9 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     UserDefaults.standard.set(option, forKey: "grove.shortcut.option")
     refreshMenu()
   }
-  @objc private func openAccessibility() {
-    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-  }
+  @objc private func showLog() { NSWorkspace.shared.open(Log.url) }
   @objc private func quit() { NSApp.terminate(nil) }
 }
 

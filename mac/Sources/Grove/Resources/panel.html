@@ -18,9 +18,9 @@
 }
 html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; -webkit-user-select: none; user-select: none; }
 body { font-family: var(--sans); color: #FFFFFF; }
-.panel { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: var(--notch-w); height: var(--notch-h); border-radius: 0 0 14px 14px; overflow: hidden; background: #000; opacity: 0; transition: width 420ms cubic-bezier(.2,.9,.2,1), height 420ms cubic-bezier(.2,.9,.2,1), border-radius 420ms ease, opacity 200ms ease; }
+.panel { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: var(--notch-w); height: var(--notch-h); border-radius: 0 0 14px 14px; overflow: hidden; background: #000; opacity: 0; transition: width 220ms cubic-bezier(.4,0,.6,1), height 220ms cubic-bezier(.4,0,.6,1), border-radius 220ms ease, opacity 160ms ease; }
 .panel.fake { opacity: 1; }
-.panel.open { opacity: 1; width: 560px; height: var(--h, 200px); border-radius: 0 0 28px 28px; background: transparent; box-shadow: 0 30px 80px rgba(0,0,0,0.45); }
+.panel.open { opacity: 1; width: 560px; height: var(--h, 200px); border-radius: 0 0 28px 28px; background: transparent; box-shadow: 0 30px 80px rgba(0,0,0,0.45); transition: width 300ms cubic-bezier(.2,.9,.2,1), height 300ms cubic-bezier(.2,.9,.2,1), border-radius 300ms ease, opacity 120ms ease; }
 canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; transition: opacity 360ms ease 60ms; }
 .panel.open canvas { opacity: 1; }
 .scrim { position: absolute; inset: 0; background: rgba(8,10,16,0.16); opacity: 0; transition: opacity 360ms ease; pointer-events: none; }
@@ -28,7 +28,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
 /* The camera housing is hardware: black, and only it. */
 .cut { position: absolute; top: 0; left: 50%; width: var(--notch-w); height: var(--notch-h); transform: translateX(-50%); background: #000; border-radius: 0 0 14px 14px; z-index: 2; }
 .body { position: absolute; left: 0; right: 0; top: var(--notch-h); bottom: 0; padding: 14px 18px 16px; display: flex; flex-direction: column; gap: 10px; opacity: 0; transform: translateY(-6px); transition: opacity 240ms ease, transform 340ms ease; z-index: 3; }
-.panel.open .body { opacity: 1; transform: none; transition-delay: 140ms; }
+.panel.open .body { opacity: 1; transform: none; transition-delay: 90ms; }
 .row { display: flex; align-items: center; gap: 10px; }
 .space { justify-content: space-between; }
 .hello { font-size: 22px; font-weight: 300; letter-spacing: -0.03em; }
@@ -79,12 +79,14 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     return h < 5 ? 'Still up?' : h < 12 ? 'Morning.' : h < 18 ? 'Afternoon.' : h < 22 ? 'Evening.' : 'Late one.';
   };
 
+  // Straight away, not on an animation frame: a panel window in the
+  // background can have its frames throttled, and a size that never arrives
+  // read as a panel of nothing, which closed the moment the pointer moved.
   const size = () => {
-    requestAnimationFrame(() => {
-      const open = panel.classList.contains('open');
-      post({ t: 'size', w: open ? 560 : 0, h: open ? parseFloat(getComputedStyle(panel).getPropertyValue('--h')) || 200 : 0 });
-    });
+    const open = panel.classList.contains('open');
+    post({ t: 'size', w: open ? 560 : 0, h: open ? parseFloat(panel.style.getPropertyValue('--h')) || 200 : 0 });
   };
+  window.addEventListener('error', (e) => post({ t: 'log', text: `${e.message} (${e.lineno})` }));
   const setH = (n) => { panel.style.setProperty('--h', (n + S.notchH) + 'px'); size(); };
 
   const render = () => {
@@ -94,10 +96,12 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
       setH(150);
       body.innerHTML = `
         <div class="row space"><span class="hello">${greeting()}</span><span class="small row"><span class="dot ${S.phone ? 'on' : ''}"></span>${S.phone ? 'iPhone connected' : 'iPhone not connected'}</span></div>
+        ${S.signedIn ? '' : '<span class="small">Sign in with Noctus on both devices and they find each other.</span>'}
         <div class="chips">
           <button class="chip" data-music="play">Play music</button>
           <button class="chip" data-music="pause">Pause</button>
           <button class="chip" data-music="next">Next song</button>
+          ${S.signedIn ? '' : '<button class="chip solid" data-act="signin">Sign in with Google</button>'}
         </div>`;
     }
     if (m === 'listening') {
@@ -183,6 +187,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     close() { S.mode = 'closed'; panel.classList.remove('open'); size(); },
     look(l) { S.look = Object.assign(S.look, l); },
     phone(on) { S.phone = on; if (S.mode === 'idle') render(); },
+    account(signedIn) { S.signedIn = signedIn; if (S.mode === 'idle') render(); },
   };
 
   /* the field: the same shader as the phone */

@@ -1432,14 +1432,35 @@ text so the answer comes in the same Grove's voice (`lightSelection`). If the
 phone is not there, the Mac falls back to the model with a key `build.sh`
 writes into the built Info.plist only — never into a tracked file.
 
-**The link is a WebSocket on the local network**, port 47321, advertised over
-Bonjour as `_grove._tcp`, no server. The phone's end is `src/lib/mac.ts`; it
-needs no native code, which is why it reaches a phone by an update. Pairing is
-a six-digit code from the Mac's menu (Pair an iPhone…) typed into Settings ›
-Your Mac with the Mac's `.local` name; the Mac answers with a token the phone
-keeps in the Keychain. Finding the Mac without typing its name needs Bonjour
-on the phone, which is native and not built yet. The protocol is written out
-at the top of `mac/Sources/Grove/Link.swift`.
+**The link is the person's Noctus account.** Both devices sign in with Google
+through Noctus's Supabase project — the Mac from its menu bar icon
+(`Account.swift`, Supabase PKCE back to `grove-mac://auth-callback`), the phone
+from Settings › Your Mac (`src/lib/mac.ts`) — and join one Realtime broadcast
+channel named by a 48-character secret kept in the account's own
+`user_metadata.grove_link`, which only that account's sign-in can read. No
+pairing code, no server of ours, no shared Wi-Fi needed. The protocol is at
+the top of `mac/Sources/Grove/Link.swift`.
+
+- **Not a private channel**, on purpose: those are authorised through
+  `realtime.messages`, which Noctus's project does not have set up — a private
+  join is refused with "MissingPartition". A broadcast channel never touches
+  the database.
+- **Signing in on the phone is for the link only.** It does not switch
+  Grove's own account: that would key the memory to a different account and
+  make Grove depend on the Noctus server, and the link needs neither.
+- **Both redirects must be on Supabase's allowlist** (Authentication › URL
+  Configuration › Redirect URLs): `grove://auth-callback` for the phone and
+  `grove-mac://auth-callback` for the Mac. Without them Supabase sends the
+  browser to the Noctus website and nothing comes back.
+
+**Permissions survive rebuilds only with a stable signature.** macOS ties
+Accessibility, the microphone and Automation to the code signature, and ad-hoc
+signing changes on every build — a grant made before one silently stops
+applying while System Settings still shows it on, which is how ⌘K stopped
+working. `mac/make-signing-identity.sh` makes a local certificate once and
+`build.sh` signs with it. The menu bar has a checklist of all four
+permissions, and `~/Library/Logs/Grove/grove.log` says what happened to every
+⌘K.
 
 **⌘K is taken only when text is highlighted.** macOS does not use it, but
 Notes, Pages, Docs, Mail, Slack, Notion and Terminal all do, mostly exactly

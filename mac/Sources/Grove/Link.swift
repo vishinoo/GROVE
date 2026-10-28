@@ -1,126 +1,191 @@
 /*
-  The connection to the phone.
+  The connection to the phone, through the person's Noctus account.
 
-  Grove on the iPhone connects to this Mac over the local network — a
-  WebSocket on port 47321, advertised over Bonjour as _grove._tcp — and there
-  is no server anywhere in between. The phone keeps the memory and the
-  accounts; nothing it knows is copied here. What crosses is small: the phone's
-  colour, name and manner when they change, jobs for the Mac to do, and the
-  Mac's ⌘K questions for the phone to answer in its own voice.
+  Both devices sign in with Google through Noctus (Account.swift on the Mac,
+  noctusAuth on the phone) and join one Supabase Realtime broadcast channel,
+  `grove-link-<secret>`, where the secret is 48 random characters kept in the
+  account's own metadata — readable only with that account's sign-in. So only
+  that account's devices can find the channel. No pairing code, nothing to
+  keep running, and no need to share a Wi-Fi network; the earlier version was
+  a WebSocket on the local network with a six-digit code.
 
-  PAIRING
+  Not a private channel, deliberately: those are authorised through a
+  realtime.messages table that Noctus's project does not have set up
+  ("MissingPartition" on join), and a broadcast channel never touches the
+  database at all.
 
-  The first time, the phone sends the six-digit code this Mac shows from the
-  menu bar (Pair an iPhone…). The Mac answers with a long random token, which
-  the phone keeps and presents every time after, and the code is spent. Anyone
-  else on the same Wi-Fi can see the service but not use it.
+  The phone keeps the memory and the accounts; nothing it knows is copied
+  here. What crosses is small, one JSON object per broadcast, each with a
+  "from" and a "t":
 
-  Messages are JSON, one per WebSocket text frame, each with a "t":
-
-    phone → mac   hello {code | token, device}     settings {colour, label, stops, speed, warp, name, manner}
+    phone → mac   hello {}                           settings {colour, label, stops, speed, warp, name, manner}
                   job {id, kind, args}               thought {id, kind, text}
-    mac → phone   welcome {token, mac}  refused {why}
-                  done {id, ok, spoken}              think {id, instruction, text}
+    mac → phone   welcome {mac}                      done {id, ok, spoken}
+                  think {id, instruction, text}
+
+  "Connected" means heard from the phone in the last 75 seconds; it says
+  hello every 30.
+
+  Realtime speaks the Phoenix channel protocol over a WebSocket, written by
+  hand here so the app needs no packages: join with the access token, a
+  heartbeat every 25 seconds, the token renewed before it expires.
 */
 
 import Foundation
-import Network
 
 final class Link {
-  static let port: UInt16 = 47321
-  static var hostName: String {
-    // "Vishnus-MacBook-Air.local": what the phone types, and what Bonjour resolves.
-    let name = ProcessInfo.processInfo.hostName
-    return name.hasSuffix(".local") ? name : name + ".local"
-  }
-
   var onLook: ((LookUpdate) -> Void)?
   var onJob: ((Job, @escaping (Bool, String) -> Void) -> Void)?
   var onStatus: ((Bool) -> Void)?
 
   private(set) var connected = false
-  private var listener: NWListener?
-  private var phone: NWConnection?
-  private var code: String?
+  private let account: Account
+  private var socket: URLSessionWebSocketTask?
+  private var topic = ""
+  private var ref = 0
+  private var joined = false
+  private var heartbeat: Timer?
+  private var renew: Timer?
+  private var lastHeard = Date.distantPast
+  private var watch: Timer?
+  private var backoff: TimeInterval = 2
   private var pending: [String: CheckedContinuation<Reply?, Never>] = [:]
 
-  private var tokens: [String] {
-    get { UserDefaults.standard.stringArray(forKey: "grove.link.tokens") ?? [] }
-    set { UserDefaults.standard.set(Array(newValue.suffix(4)), forKey: "grove.link.tokens") }
+  init(account: Account) {
+    self.account = account
   }
 
   func start() {
-    let params = NWParameters.tcp
-    let ws = NWProtocolWebSocket.Options()
-    ws.autoReplyPing = true
-    params.defaultProtocolStack.applicationProtocols.insert(ws, at: 0)
-    params.includePeerToPeer = false
-    guard let port = NWEndpoint.Port(rawValue: Link.port), let listener = try? NWListener(using: params, on: port) else { return }
-    listener.service = NWListener.Service(name: Host.current().localizedName ?? "Grove", type: "_grove._tcp")
-    listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
-    listener.stateUpdateHandler = { [weak self] state in
-      if case .failed = state {
-        // Port taken or network gone: try again shortly rather than give up for the session.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self?.start() }
+    watch?.invalidate()
+    watch = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+      guard let self else { return }
+      self.setConnected(self.joined && Date().timeIntervalSince(self.lastHeard) < 75)
+    }
+    connect()
+  }
+
+  func stop() {
+    joined = false
+    heartbeat?.invalidate()
+    renew?.invalidate()
+    socket?.cancel(with: .goingAway, reason: nil)
+    socket = nil
+    setConnected(false)
+  }
+
+  // MARK: the socket
+
+  private func connect() {
+    guard let session = account.session, let url = account.realtimeURL else {
+      Log.say("link: not signed in, not connecting")
+      return
+    }
+    guard let secret = session.link else {
+      Log.say("link: the account has no channel secret yet")
+      return
+    }
+    stop()
+    topic = "realtime:grove-link-\(secret)"
+    let task = URLSession.shared.webSocketTask(with: url)
+    socket = task
+    task.resume()
+    receive(on: task)
+    Task { @MainActor in
+      let token = await self.account.freshAccess() ?? session.access
+      self.ref += 1
+      self.write([
+        "topic": self.topic, "event": "phx_join", "ref": "\(self.ref)", "join_ref": "1",
+        "payload": [
+          "config": ["broadcast": ["ack": false, "self": false], "presence": ["key": ""], "private": false],
+          "access_token": token,
+        ],
+      ])
+      Log.say("link: joining \(self.topic)")
+    }
+    heartbeat = Timer.scheduledTimer(withTimeInterval: 25, repeats: true) { [weak self] _ in
+      guard let self else { return }
+      self.ref += 1
+      self.write(["topic": "phoenix", "event": "heartbeat", "payload": [:], "ref": "\(self.ref)"])
+    }
+    renew = Timer.scheduledTimer(withTimeInterval: 50 * 60, repeats: true) { [weak self] _ in
+      guard let self else { return }
+      Task { @MainActor in
+        guard let token = await self.account.freshAccess() else { return }
+        self.ref += 1
+        self.write(["topic": self.topic, "event": "access_token", "payload": ["access_token": token], "ref": "\(self.ref)", "join_ref": "1"])
       }
     }
-    listener.start(queue: .main)
-    self.listener = listener
   }
 
-  /** A fresh code, good until it is used once. */
-  func newPairingCode() -> String {
-    let fresh = String(format: "%06d", Int.random(in: 0...999_999))
-    code = fresh
-    return fresh
-  }
-
-  // MARK: connections
-
-  private func accept(_ connection: NWConnection) {
-    connection.stateUpdateHandler = { [weak self, weak connection] state in
-      guard let self, let connection else { return }
-      switch state {
-      case .failed, .cancelled:
-        if connection === self.phone { self.phone = nil; self.setConnected(false) }
-      default: break
+  private func receive(on task: URLSessionWebSocketTask) {
+    task.receive { [weak self] result in
+      DispatchQueue.main.async {
+        guard let self, task === self.socket else { return }
+        switch result {
+        case .success(let message):
+          if case .string(let text) = message, let data = text.data(using: .utf8),
+             let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            self.frame(obj)
+          }
+          self.receive(on: task)
+        case .failure(let error):
+          Log.say("link: socket closed: \(error.localizedDescription)")
+          self.joined = false
+          self.setConnected(false)
+          self.retry()
+        }
       }
     }
-    connection.start(queue: .main)
-    receive(on: connection)
   }
 
-  private func receive(on connection: NWConnection) {
-    connection.receiveMessage { [weak self, weak connection] data, _, _, error in
-      guard let self, let connection else { return }
-      if let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-        self.handle(obj, from: connection)
-      }
-      if error == nil { self.receive(on: connection) } else { connection.cancel() }
+  private func retry() {
+    let wait = backoff
+    backoff = min(backoff * 2, 60)
+    DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
+      guard let self, self.account.session != nil, !self.joined else { return }
+      self.connect()
     }
   }
 
-  private func handle(_ m: [String: Any], from connection: NWConnection) {
-    let type = m["t"] as? String
-    if type == "hello" {
-      if let token = m["token"] as? String, tokens.contains(token) {
-        adopt(connection)
-        send(["t": "welcome", "token": token, "mac": Host.current().localizedName ?? "Mac"], on: connection)
-      } else if let given = m["code"] as? String, let code, given == code {
-        let token = UUID().uuidString + UUID().uuidString
-        tokens = tokens + [token]
-        self.code = nil
-        adopt(connection)
-        send(["t": "welcome", "token": token, "mac": Host.current().localizedName ?? "Mac"], on: connection)
+  private func frame(_ obj: [String: Any]) {
+    let event = obj["event"] as? String
+    let payload = obj["payload"] as? [String: Any] ?? [:]
+    if event == "phx_reply", (obj["topic"] as? String) == topic, !joined {
+      if (payload["status"] as? String) == "ok" {
+        joined = true
+        backoff = 2
+        Log.say("link: joined")
+        broadcast(["t": "welcome", "mac": Host.current().localizedName ?? "Mac"])
       } else {
-        send(["t": "refused", "why": "That code doesn't match. Get a new one from the Grove menu on your Mac."], on: connection)
-        connection.cancel()
+        Log.say("link: join refused: \(payload["response"] ?? "")")
       }
       return
     }
-    // Everything else only from the paired phone.
-    guard connection === phone else { return }
-    switch type {
+    if event == "system", let message = payload["message"] as? String { Log.say("link: \(message)") }
+    guard event == "broadcast", let inner = payload["payload"] as? [String: Any], (inner["from"] as? String) == "phone" else { return }
+    lastHeard = Date()
+    setConnected(true)
+    handle(inner)
+  }
+
+  private func write(_ obj: [String: Any]) {
+    guard let socket, let data = try? JSONSerialization.data(withJSONObject: obj), let text = String(data: data, encoding: .utf8) else { return }
+    socket.send(.string(text)) { error in if let error { Log.say("link: send failed: \(error.localizedDescription)") } }
+  }
+
+  private func broadcast(_ message: [String: Any]) {
+    var m = message
+    m["from"] = "mac"
+    ref += 1
+    write(["topic": topic, "event": "broadcast", "ref": "\(ref)", "join_ref": "1", "payload": ["type": "broadcast", "event": "msg", "payload": m]])
+  }
+
+  // MARK: messages from the phone
+
+  private func handle(_ m: [String: Any]) {
+    switch m["t"] as? String {
+    case "hello":
+      broadcast(["t": "welcome", "mac": Host.current().localizedName ?? "Mac"])
     case "settings":
       onLook?(LookUpdate(
         colour: m["colour"] as? String, label: m["label"] as? String, stops: m["stops"] as? [String],
@@ -128,9 +193,9 @@ final class Link {
     case "job":
       let id = (m["id"] as? String) ?? UUID().uuidString
       let args = (m["args"] as? [String: Any] ?? [:]).compactMapValues { "\($0)" }
-      let job = Job(id: id, kind: (m["kind"] as? String) ?? "", args: args, fromPhone: true)
-      onJob?(job) { [weak self] ok, spoken in
-        self?.send(["t": "done", "id": id, "ok": ok, "spoken": spoken], on: connection)
+      Log.say("link: job \(m["kind"] ?? "")")
+      onJob?(Job(id: id, kind: (m["kind"] as? String) ?? "", args: args, fromPhone: true)) { [weak self] ok, spoken in
+        self?.broadcast(["t": "done", "id": id, "ok": ok, "spoken": spoken])
       }
     case "thought":
       guard let id = m["id"] as? String, let waiting = pending.removeValue(forKey: id) else { return }
@@ -141,15 +206,10 @@ final class Link {
     }
   }
 
-  private func adopt(_ connection: NWConnection) {
-    if let old = phone, old !== connection { old.cancel() }
-    phone = connection
-    setConnected(true)
-  }
-
   private func setConnected(_ value: Bool) {
     guard connected != value else { return }
     connected = value
+    Log.say("link: phone \(value ? "connected" : "gone")")
     if !value {
       pending.values.forEach { $0.resume(returning: nil) }
       pending.removeAll()
@@ -157,25 +217,16 @@ final class Link {
     onStatus?(value)
   }
 
-  // MARK: asking the phone
-
   /** The phone's answer to a ⌘K, or nil after fifteen seconds. */
   func think(instruction: String, text: String) async -> Reply? {
-    guard let phone else { return nil }
+    guard connected else { return nil }
     let id = UUID().uuidString
     return await withCheckedContinuation { (c: CheckedContinuation<Reply?, Never>) in
       pending[id] = c
-      send(["t": "think", "id": id, "instruction": instruction, "text": String(text.prefix(8000))], on: phone)
+      broadcast(["t": "think", "id": id, "instruction": instruction, "text": String(text.prefix(8000))])
       DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
         self?.pending.removeValue(forKey: id)?.resume(returning: nil)
       }
     }
-  }
-
-  private func send(_ obj: [String: Any], on connection: NWConnection) {
-    guard let data = try? JSONSerialization.data(withJSONObject: obj) else { return }
-    let meta = NWProtocolWebSocket.Metadata(opcode: .text)
-    let context = NWConnection.ContentContext(identifier: "grove", metadata: [meta])
-    connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed { _ in })
   }
 }

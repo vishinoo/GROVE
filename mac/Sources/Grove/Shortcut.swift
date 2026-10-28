@@ -24,22 +24,21 @@ import ApplicationServices
 final class Shortcut {
   var useOption = false
   var onTrigger: ((Captured) -> Void)?
+  var onReady: (() -> Void)?
   private var tap: CFMachPort?
+  var ready: Bool { tap != nil }
 
   /** Marks the ⌘K this tap sends on itself, so it is not caught twice. */
   static let mark: Int64 = 0x6772_6F76
 
   func start() {
-    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-    if !AXIsProcessTrustedWithOptions(options) {
-      // Asked once; checked again until it is granted, so turning it on in
-      // System Settings starts ⌘K without a relaunch.
-      Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] timer in
-        if AXIsProcessTrusted() { timer.invalidate(); self?.install() }
-      }
-      return
+    // The asking is Permissions.swift's job. This waits for the answer, so
+    // switching Grove on in System Settings starts ⌘K without a relaunch.
+    if AXIsProcessTrusted() { install(); return }
+    Log.say("⌘K: waiting for Accessibility")
+    Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] timer in
+      if AXIsProcessTrusted() { timer.invalidate(); self?.install() }
     }
-    install()
   }
 
   private func install() {
@@ -57,8 +56,13 @@ final class Shortcut {
         return me.handle(type, event)
       },
       userInfo: refcon
-    ) else { return }
+    ) else {
+      Log.say("⌘K: macOS refused the key watcher; Accessibility may be granted to an older copy of Grove")
+      return
+    }
     self.tap = tap
+    Log.say("⌘K: ready")
+    DispatchQueue.main.async { [weak self] in self?.onReady?() }
     let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
     CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
@@ -66,6 +70,7 @@ final class Shortcut {
 
   private func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+      Log.say("⌘K: watcher was paused by macOS, turning it back on")
       if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
       return Unmanaged.passUnretained(event)
     }
@@ -80,7 +85,9 @@ final class Shortcut {
     let others = flags.contains(.maskShift) || flags.contains(.maskControl)
     guard command, !others, option == useOption else { return Unmanaged.passUnretained(event) }
 
-    switch Selection.read() {
+    let read = Selection.read()
+    Log.say("⌘K: pressed in \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"), selection \(read.summary)")
+    switch read {
     case .text(let captured):
       DispatchQueue.main.async { [weak self] in self?.onTrigger?(captured) }
       return nil
