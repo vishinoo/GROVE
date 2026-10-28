@@ -1450,6 +1450,23 @@ ends and an expected size and returns null rather than guessing, every caller
 is written `region !== null && …`, and a section feeds `between()` a missing
 landmark to prove it fails rather than passes.
 
+The same fault turned up twice more, both times found by running the fix rather
+than reading it. A check let Settings off by pointing at the shared `Screen`
+wrapper, which holds no `TextInput` and so was never itself checked — deleting
+the keyboard handling from `Screen` broke every screen using it while every
+check printed `ok`. **A delegation is only worth accepting if the delegate is
+the thing being asserted.** And the verdict at the bottom of the file was
+reached synchronously, so an `async` section scheduled its checks and
+`process.exit` ran first: thirteen checks printed a heading and nothing else,
+with the tally unaffected. Async sections are registered with `laterSection`
+and awaited before the count is read.
+
+That one was worth fixing rather than avoiding, because **an ability is an
+async function, and the only way to assert what one does rather than what its
+source looks like is to run it.** It is how "memory before contacts" is
+checked at all: `findContact` is made to throw, and the send has to succeed
+anyway. Grepping for two calls cannot tell which runs first.
+
 Runs the real modules — not a copy of their regexes — with the native halves
 stubbed as present, and asserts the wiring: every ability is reachable from the
 phrases it advertises, a question can only ever reach an ability marked `reads`,
