@@ -54,14 +54,15 @@ final class Voice {
           self.latest = result.bestTranscription.formattedString
           partial(self.latest)
           self.quiet?.invalidate()
-          self.quiet = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { _ in self.end() }
+          // Two and a half seconds of quiet: a breath mid-sentence is not the end of it.
+          self.quiet = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { _ in self.end() }
           if result.isFinal { self.end() }
         } else if error != nil {
           self.end()
         }
       }
     }
-    cap = Timer.scheduledTimer(withTimeInterval: 8, repeats: false) { [weak self] _ in self?.end() }
+    cap = Timer.scheduledTimer(withTimeInterval: 25, repeats: false) { [weak self] _ in self?.end() }
   }
 
   private func end() {

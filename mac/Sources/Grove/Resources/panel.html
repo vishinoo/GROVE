@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <title>Grove</title>
+<!-- The phone app's type: Inter, light for what is said. Falls back to the system face offline. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap">
 <style>
 /*
   Grove's panel in the notch. The window is transparent and the size of the
@@ -10,7 +12,7 @@
   notch, over the same moving field as the phone, in the phone's colours.
 */
 :root {
-  --sans: -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --sans: "Inter", -apple-system, "SF Pro Text", system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
   --live: #5EE08A;
   --notch-w: 190px;
@@ -31,7 +33,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
 .panel.open .body { opacity: 1; transform: none; transition-delay: 90ms; }
 .row { display: flex; align-items: center; gap: 10px; }
 .space { justify-content: space-between; }
-.hello { font-size: 22px; font-weight: 300; letter-spacing: -0.03em; }
+.hello { font-size: 22px; font-weight: 300; letter-spacing: -0.03em; padding-right: 34px; }
 .small { font-size: 12.5px; color: rgba(255,255,255,0.75); }
 .label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.7); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -39,7 +41,10 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
 .chip:hover { background: rgba(255,255,255,0.22); }
 .chip.solid { background: #FFFFFF; color: #0B0C12; border-color: #FFFFFF; }
 .quote { border-left: 2px solid rgba(255,255,255,0.5); padding: 2px 0 2px 10px; font-size: 13px; line-height: 1.45; color: rgba(255,255,255,0.88); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.heard { font-size: 15px; line-height: 1.4; min-height: 21px; }
+.heard { font-size: 19px; line-height: 1.35; font-weight: 300; letter-spacing: -0.02em; min-height: 26px; color: #FFFFFF; }
+.answer, .quote { font-weight: 400; letter-spacing: -0.005em; }
+.x { position: absolute; top: calc(var(--notch-h) + 10px); right: 12px; width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.22); background: rgba(255,255,255,0.12); color: #FFFFFF; font: 400 15px var(--sans); line-height: 24px; text-align: center; cursor: pointer; z-index: 4; padding: 0; }
+.x:hover { background: rgba(255,255,255,0.24); }
 .ask { display: flex; gap: 8px; }
 .ask input { flex: 1; min-width: 0; background: rgba(8,10,16,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; color: #FFFFFF; font: 400 13.5px var(--sans); padding: 9px 12px; outline: none; -webkit-user-select: text; user-select: text; }
 .ask input::placeholder { color: rgba(255,255,255,0.55); }
@@ -89,20 +94,28 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
   window.addEventListener('error', (e) => post({ t: 'log', text: `${e.message} (${e.lineno})` }));
   const setH = (n) => { panel.style.setProperty('--h', (n + S.notchH) + 'px'); size(); };
 
+  const wireAsk = () => {
+    const input = document.getElementById('ask-input');
+    if (!input) return;
+    input.addEventListener('focus', () => post({ t: 'focus' }));
+    document.getElementById('ask').addEventListener('submit', (e) => { e.preventDefault(); if (input.value.trim()) post({ t: 'ask', instruction: input.value.trim() }); });
+  };
+  // Every state can be closed, from a corner that is always in the same place.
+  const closer = () => { if (S.mode !== 'closed' && !document.getElementById('x')) body.insertAdjacentHTML('beforebegin', '<button class="x" id="x" aria-label="Close">×</button>'); };
+
   const render = () => {
     const m = S.mode, d = S.data;
     S.flow = m === 'thinking' ? 2.6 : m === 'listening' ? 1.7 : m === 'job' ? 2.2 : 1;
     if (m === 'idle') {
-      setH(150);
+      setH(S.signedIn ? 196 : 240);
       body.innerHTML = `
         <div class="row space"><span class="hello">${greeting()}</span><span class="small row"><span class="dot ${S.phone ? 'on' : ''}"></span>${S.phone ? 'iPhone connected' : 'iPhone not connected'}</span></div>
         ${S.signedIn ? '' : '<span class="small">Sign in with Noctus on both devices and they find each other.</span>'}
-        <div class="chips">
-          <button class="chip" data-music="play">Play music</button>
-          <button class="chip" data-music="pause">Pause</button>
-          <button class="chip" data-music="next">Next song</button>
-          ${S.signedIn ? '' : '<button class="chip solid" data-act="signin">Sign in with Google</button>'}
-        </div>`;
+        ${S.signedIn ? '' : '<div class="chips"><button class="chip solid" data-act="signin">Sign in with Noctus</button></div>'}
+        <span class="label">You ask these most</span>
+        <div class="chips">${(S.asks || []).map((a) => `<button class="chip" data-ask="${esc(a)}">${esc(a)}</button>`).join('')}</div>
+        <form class="ask" id="ask"><input id="ask-input" placeholder="Ask Grove anything" autocomplete="off"><button class="chip" type="submit">Ask</button></form>`;
+      wireAsk();
     }
     if (m === 'listening') {
       setH(232);
@@ -117,9 +130,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
           <button class="chip" data-ask="Fix the grammar">Fix grammar</button>
         </div>
         <form class="ask" id="ask"><input id="ask-input" placeholder="Or type it" autocomplete="off"><button class="chip" type="submit">Go</button></form>`;
-      const input = document.getElementById('ask-input');
-      input.addEventListener('focus', () => post({ t: 'focus' }));
-      document.getElementById('ask').addEventListener('submit', (e) => { e.preventDefault(); if (input.value.trim()) post({ t: 'ask', instruction: input.value.trim() }); });
+      wireAsk();
     }
     if (m === 'thinking') {
       setH(118);
@@ -160,6 +171,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     }
   };
 
+  panel.addEventListener('click', (e) => { if (e.target.id === 'x') post({ t: 'close' }); });
   body.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.ask) return post({ t: 'ask', instruction: b.dataset.ask });
@@ -179,12 +191,15 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
       document.documentElement.style.setProperty('--notch-h', S.notchH + 'px');
       panel.classList.toggle('fake', !o.hardware);
     },
-    show(p) { S.mode = p.mode; S.data = p; panel.classList.add('open'); render(); },
+    show(p) { S.mode = p.mode; S.data = p; panel.classList.add('open'); render(); closer(); },
+    tuck() { panel.classList.remove('open'); size(); },
+    untuck() { panel.classList.add('open'); size(); },
+    asks(list) { S.asks = list; if (S.mode === 'idle') render(); },
     event(e) {
       if (e.event === 'heard') { const el = document.getElementById('heard'); if (el) el.textContent = e.data.words; }
       if (e.event === 'choose') { const el = document.getElementById('listen-state'); if (el) el.textContent = 'Say it, or pick'; }
     },
-    close() { S.mode = 'closed'; panel.classList.remove('open'); size(); },
+    close() { S.mode = 'closed'; panel.classList.remove('open'); document.getElementById('x')?.remove(); size(); },
     look(l) { S.look = Object.assign(S.look, l); },
     phone(on) { S.phone = on; if (S.mode === 'idle') render(); },
     account(signedIn) { S.signedIn = signedIn; if (S.mode === 'idle') render(); },

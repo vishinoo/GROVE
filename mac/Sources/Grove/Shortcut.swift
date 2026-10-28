@@ -25,6 +25,8 @@ final class Shortcut {
   var useOption = false
   var onTrigger: ((Captured) -> Void)?
   var onReady: (() -> Void)?
+  /** Esc while Grove's panel is up: returns true if it closed something. */
+  var onEscape: (() -> Bool)?
   private var tap: CFMachPort?
   var ready: Bool { tap != nil }
 
@@ -76,6 +78,11 @@ final class Shortcut {
     }
     guard type == .keyDown else { return Unmanaged.passUnretained(event) }
     if event.getIntegerValueField(.eventSourceUserData) == Shortcut.mark { return Unmanaged.passUnretained(event) }
+
+    if event.getIntegerValueField(.keyboardEventKeycode) == 53, event.flags.intersection([.maskCommand, .maskAlternate, .maskControl, .maskShift]).isEmpty,
+       onEscape?() == true {
+      return nil
+    }
 
     let k: Int64 = 40 // kVK_ANSI_K
     guard event.getIntegerValueField(.keyboardEventKeycode) == k else { return Unmanaged.passUnretained(event) }

@@ -70,6 +70,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     shortcut.useOption = UserDefaults.standard.bool(forKey: "grove.shortcut.option")
     shortcut.onTrigger = { [weak self] captured in self?.begin(captured) }
     shortcut.onReady = { [weak self] in self?.refreshMenu() }
+    shortcut.onEscape = { [weak self] in
+      guard let self, self.notch.isShowing else { return false }
+      self.voice.stop()
+      self.captured = nil
+      self.notch.close()
+      return true
+    }
+    notch.setAsks(Asks.top())
     shortcut.start()
 
     makeMenu()
@@ -124,10 +132,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
+  /**
+    A question from the notch with nothing highlighted. What was last copied
+    stands in for a selection when the question is about "this" or "what I
+    copied" — the commonest reason to ask from the notch at all.
+  */
+  private func askFree(_ instruction: String) {
+    let clip = NSPasteboard.general.string(forType: .string) ?? ""
+    let aboutClip = instruction.lowercased().contains("copied") || instruction.lowercased().contains("this")
+    captured = Captured(text: aboutClip ? clip : "", app: nil, element: nil, viaClipboard: true)
+    think(instruction)
+  }
+
   private func fromPanel(_ message: [String: Any]) {
     switch message["t"] as? String {
     case "ask":
-      if let text = message["instruction"] as? String { think(text) }
+      guard let text = message["instruction"] as? String else { break }
+      Asks.count(text)
+      notch.setAsks(Asks.top())
+      if captured != nil { think(text) } else { askFree(text) }
     case "replace":
       if let captured, let result = captured.result {
         notch.close()

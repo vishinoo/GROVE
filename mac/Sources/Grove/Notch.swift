@@ -35,6 +35,11 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
   private var leaveTimer: Timer?
   private var shrinkTimer: Timer?
   private var top: CGFloat = 0
+  /** A pinned panel the pointer left: hidden, not finished, and shown again from the notch. */
+  private var tucked = false
+  /** Whether the pointer has been over this panel since it opened. Only then does leaving mean anything. */
+  private var entered = false
+  var isShowing: Bool { isOpen }
   private var look: Look
 
   init(look: Look) {
@@ -127,28 +132,35 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     if !isOpen {
       // A little forgiveness below the notch, none at the sides: the menu
       // bar items either side are things people click on purpose.
-      if notchRect.insetBy(dx: 0, dy: -6).contains(p) { show("idle", [:], pin: false) }
+      if notchRect.insetBy(dx: 0, dy: -6).contains(p) {
+        if tucked { untuck() } else { show("idle", [:], pin: false) }
+      }
       return
     }
-    guard !pinned else { return }
     // No size reported yet means the panel is still growing: never treat
     // that as the pointer having left, or it closes as it opens.
     guard visible > 0, visibleWidth > 0 else { return }
     let shown = NSRect(x: notchRect.midX - visibleWidth / 2, y: top - visible, width: visibleWidth, height: visible)
     if shown.insetBy(dx: -4, dy: -4).contains(p) {
+      entered = true
       leaveTimer?.invalidate()
       leaveTimer = nil
-    } else if leaveTimer == nil {
+    } else if entered, leaveTimer == nil {
       // Short: the panel should feel like it follows the pointer, not like
       // it is deciding whether to.
-      leaveTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: false) { [weak self] _ in
-        self?.leaveTimer = nil
-        self?.close()
+      let wasPinned = pinned
+      leaveTimer = Timer.scheduledTimer(withTimeInterval: wasPinned ? 0.35 : 0.1, repeats: false) { [weak self] _ in
+        guard let self else { return }
+        self.leaveTimer = nil
+        if wasPinned { self.tuck() } else { self.close() }
       }
     }
   }
 
   func show(_ mode: String, _ data: [String: Any], pin: Bool, closeAfter: TimeInterval? = nil) {
+    tucked = false
+    // Opened from the notch, the pointer is already on it.
+    entered = notchRect.insetBy(dx: 0, dy: -6).contains(NSEvent.mouseLocation)
     closeTimer?.invalidate()
     leaveTimer?.invalidate()
     leaveTimer = nil
@@ -163,11 +175,27 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     if let closeAfter {
       closeTimer = Timer.scheduledTimer(withTimeInterval: closeAfter, repeats: false) { [weak self] _ in
         guard let self else { return }
-        // Stay open while the pointer is over it; it goes when the pointer does.
+        // Stay open while the pointer is over it; it goes when the pointer does,
+        // and straight away if the pointer never came near it.
         self.pinned = false
-        self.pointer()
+        if self.entered { self.pointer() } else { self.close() }
       }
     }
+  }
+
+  /** Out of the way, with what it was showing kept for when the pointer comes back. */
+  private func tuck() {
+    tucked = true
+    isOpen = false
+    panel.ignoresMouseEvents = true
+    js("grove.tuck()")
+  }
+
+  private func untuck() {
+    tucked = false
+    isOpen = true
+    panel.ignoresMouseEvents = false
+    js("grove.untuck()")
   }
 
   func send(_ event: String, _ data: [String: Any]) {
@@ -175,6 +203,7 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
   }
 
   func close() {
+    tucked = false
     closeTimer?.invalidate()
     leaveTimer?.invalidate()
     leaveTimer = nil
@@ -193,6 +222,10 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
 
   func setPhone(_ connected: Bool) {
     js("grove.phone(\(connected ? "true" : "false"))")
+  }
+
+  func setAsks(_ asks: [String]) {
+    js("grove.asks(\(json(asks)))")
   }
 
   func setAccount(_ signedIn: Bool) {
