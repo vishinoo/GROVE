@@ -64,6 +64,51 @@ export function isListening(): boolean {
   return running;
 }
 
+/**
+ * The audio session the recogniser must leave behind, which is Grove's own.
+ *
+ * Passed on every start, and the reason music would not play.
+ *
+ * `expo-speech-recognition` configures the shared session itself, and given no
+ * category it uses its own default: `.playAndRecord` in `.measurement` mode
+ * with `[.defaultToSpeaker, .allowBluetooth]` — **no `.mixWithOthers`** — and
+ * then calls `setActive(true, .notifyOthersOnDeactivation)`. A non-mixable
+ * `playAndRecord` session going active interrupts whatever else is making
+ * sound, so opening the microphone stopped the Music app.
+ *
+ * Which is the bug `configureSession` in grove-remote already carries a long
+ * comment about having fixed — "start a song and it stops, every time" —
+ * reintroduced from the other side, by the package rather than by us, and
+ * invisible from the Swift because nothing in that file was wrong.
+ *
+ * Two things made it total rather than occasional:
+ *
+ *   EVERY REPLY OPENS THE MICROPHONE now, for the grace window. So the
+ *   override ran after every single turn, about half a second after the song
+ *   had been resumed — Grove said "Playing Wait For U" and then killed it.
+ *
+ *   AND IT STUCK. Nothing sets the category back. `setKeepAlive` only plays
+ *   or pauses the silence; it does not reconfigure. So one press left the
+ *   session non-mixable for the rest of the launch, with Grove's own
+ *   keep-alive silence holding it open — and from then on nothing could play
+ *   at all, which is why this looked like music being broken rather than like
+ *   listening breaking music.
+ *
+ * Deliberately identical to `configureSession`, field for field, rather than
+ * merely mixable: if the two differ the category is swapped on every listen,
+ * and swapping category mid-conversation audibly clips the first syllable.
+ * **If you change one, change both.**
+ *
+ * Plain strings rather than the package's enums, which are string constants of
+ * exactly these values. Importing them would be a static import of the native
+ * half, which is the one thing this file exists to avoid.
+ */
+const SESSION = {
+  category: 'playAndRecord',
+  mode: 'spokenAudio',
+  categoryOptions: ['allowBluetooth', 'allowBluetoothA2DP', 'mixWithOthers', 'defaultToSpeaker'],
+} as const;
+
 export type ListenOptions = {
   /** Keep audio on the device rather than sending it to Apple. */
   preferOnDevice?: boolean;
@@ -138,6 +183,9 @@ export function startListening(handlers: ListenHandlers, options: ListenOptions 
       continuous: options.continuous ?? false,
       requiresOnDeviceRecognition: options.preferOnDevice ?? true,
       addsPunctuation: true,
+      // Keeps the session mixable, so opening the microphone does not stop
+      // the music. See SESSION above — this is the whole fix.
+      iosCategory: SESSION,
       // iOS caps how many it uses; the most important come first.
       ...(options.hints && options.hints.length > 0 ? { contextualStrings: options.hints.slice(0, 100) } : {}),
       volumeChangeEventOptions: { enabled: true, intervalMillis: 100 },

@@ -355,6 +355,36 @@ actually opens, two light taps when it closes having heard nothing, a success
 tap when something was changed, a warning tap when it could not. One Light tap
 for everything was indistinguishable from the phone's own notifications.
 
+**Opening the microphone must not stop the music.** `expo-speech-recognition`
+configures the shared audio session itself, and given no category it uses its
+own default — `.playAndRecord` in `.measurement` mode with
+`[.defaultToSpeaker, .allowBluetooth]`, **no `.mixWithOthers`** — and then
+calls `setActive(true, .notifyOthersOnDeactivation)`. A non-mixable
+`playAndRecord` session going active interrupts whatever else is making sound.
+
+Which is the bug `configureSession` in grove-remote carries a long comment
+about having fixed — *"start a song and it stops, every time"* — arriving from
+the other side. **Nothing in the Swift was wrong**, which is why it survived:
+the file that explains the problem is not the file that caused it.
+
+Two things made it total rather than occasional. Every reply opens the
+microphone now for the grace window, so the override ran after every single
+turn, about half a second after the song had been resumed — Grove said
+"Playing …" and then killed it. And **it stuck**: nothing sets the category
+back, since `setKeepAlive` only plays or pauses the silence and in the
+foreground `beginListening` deliberately skips `reactivate`. So one press left
+the session non-mixable for the rest of the launch with Grove's own keep-alive
+silence holding it open, and from then on nothing could play at all — which is
+why this looked like music being broken rather than like listening breaking
+music.
+
+`listen.ts` now passes `iosCategory` on every start, **identical to
+`configureSession` field for field** rather than merely mixable: if the two
+differ the category is swapped on every listen, and the Swift already says why
+that is not free. `npm run verify` compares the two files across the language
+boundary and fails if either changes alone, because no compiler reads them
+together.
+
 **Grove's own sounds must never press the ring.** The J09 works through the
 volume fallback, and any sound Grove starts — a chime, the working pulse, speech
 starting or stopping — can move the volume on Bluetooth glasses, which the

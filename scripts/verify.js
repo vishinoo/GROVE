@@ -1167,6 +1167,93 @@ section('You can see what you type, and Done does something');
   );
 }
 
+/**
+ * Opening the microphone does not stop the music.
+ *
+ * `expo-speech-recognition` configures the shared audio session itself, and
+ * given no category it uses its own default: `.playAndRecord` in
+ * `.measurement` mode with `[.defaultToSpeaker, .allowBluetooth]` and **no
+ * `.mixWithOthers`**, then `setActive(true, .notifyOthersOnDeactivation)`. A
+ * non-mixable `playAndRecord` session going active interrupts whatever else
+ * is making sound, so starting a listen stopped the Music app.
+ *
+ * Which is the bug `configureSession` in grove-remote carries a long comment
+ * about having fixed — "start a song and it stops, every time" — arriving
+ * from the other side. **Nothing in the Swift was wrong**, which is why it
+ * survived: the file that explains the problem is not the file that caused it.
+ *
+ * Two things made it total. Every reply opens the microphone now for the
+ * grace window, so the override ran after every turn — about half a second
+ * after the song had been resumed. And nothing sets the category back:
+ * `setKeepAlive` only plays or pauses the silence, and in the foreground
+ * `beginListening` deliberately skips `reactivate`. So one press left the
+ * session non-mixable for the rest of the launch, with Grove's own keep-alive
+ * silence holding it open, and from then on nothing could play at all.
+ *
+ * The check is a cross-language one, because the failure is a disagreement
+ * between two files in two languages that no compiler reads together.
+ */
+section('Listening does not stop the music');
+{
+  const listen = fs.readFileSync(path.join(ROOT, 'src/lib/listen.ts'), 'utf8');
+  const swift = fs.readFileSync(path.join(ROOT, 'modules/grove-remote/ios/GroveRemoteModule.swift'), 'utf8');
+
+  // The recogniser has to be told, on the path that actually records.
+  const start = between(listen, 'module.start({', 'volumeChangeEventOptions', { min: 100, max: 1200 });
+  check(start !== null, 'the recogniser start options are where they are expected to be');
+  check(
+    start !== null && /iosCategory:/.test(start),
+    'the recogniser is told which audio session to leave behind',
+    'given none it picks a non-mixable one, which interrupts whatever is playing'
+  );
+
+  // What we tell it.
+  const ours = between(listen, 'const SESSION = {', '} as const;', { min: 80, max: 400 });
+  check(ours !== null, 'the session Grove asks for is where it is expected to be');
+  const mode = /mode:\s*'([a-zA-Z]+)'/.exec(ours ?? '')?.[1] ?? null;
+  const category = /category:\s*'([a-zA-Z]+)'/.exec(ours ?? '')?.[1] ?? null;
+  const options = [...(ours ?? '').matchAll(/'([a-zA-Z0-9]+)'/g)]
+    .map((m) => m[1])
+    .filter((v) => v !== mode && v !== category);
+
+  // What grove-remote sets for itself.
+  const configure = between(swift, 'private func configureSession()', 'setActive(true', {
+    min: 100,
+    max: 1400,
+  });
+  check(configure !== null, 'the native session config is where it is expected to be');
+  const nativeMode = /mode:\s*\.([a-zA-Z]+)/.exec(configure ?? '')?.[1] ?? null;
+  const nativeCategory = /setCategory\(\s*\.([a-zA-Z]+)/.exec(configure ?? '')?.[1] ?? null;
+  const nativeOptions = (/options:\s*\[([^\]]*)\]/.exec(configure ?? '')?.[1] ?? '')
+    .split(',')
+    .map((v) => v.trim().replace(/^\./, ''))
+    .filter(Boolean);
+
+  check(
+    options.includes('mixWithOthers'),
+    'the session Grove listens on is mixable',
+    'the one thing that decides whether a song survives the microphone opening'
+  );
+  check(
+    nativeOptions.includes('mixWithOthers'),
+    'and so is the one it holds the rest of the time'
+  );
+
+  /*
+   * Identical, not merely both mixable. If the two differ the category is
+   * swapped on every listen, and the Swift says why that is not free:
+   * swapping category mid-conversation audibly clips the first syllable.
+   */
+  const same = (a, b) => a.length === b.length && [...a].sort().join() === [...b].sort().join();
+  check(category === nativeCategory, `both ask for the same category (${category})`);
+  check(mode === nativeMode, `and the same mode (${mode})`);
+  check(
+    nativeOptions.length > 0 && same(options, nativeOptions),
+    'and exactly the same options, so the session never changes shape',
+    `listen.ts has [${[...options].sort()}], the module has [${[...nativeOptions].sort()}]`
+  );
+}
+
 section('Enough means enough, and nothing else does');
 {
   const { closing } = require(path.join(OUT, 'lib/closing.js'));
