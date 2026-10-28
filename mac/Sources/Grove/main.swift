@@ -187,6 +187,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       run(Job(id: UUID().uuidString, kind: "music.\(action)", args: [:], fromPhone: false)) { _, _ in }
     case "pair":
       connectPhone()
+    case "settings":
+      showSettings()
+    case "signout":
+      account.signOut()
+      showSettings()
+    case "shortcut":
+      setShortcut(option: (message["option"] as? Bool) ?? false)
+      showSettings()
+    case "permissions":
+      Permission.requestAll { [weak self] in self?.showSettings() }
     case "signin":
       account.signIn()
     case "log":
@@ -279,6 +289,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   @objc private func signIn() { account.signIn() }
+  /** The notch's own settings, from the ⋯ opposite the close button. */
+  private func showSettings() {
+    let missing = Permission.allCases.filter { $0.granted != true }.map(\.title)
+    notch.show("settings", [
+      "email": account.session?.email ?? "",
+      "signedIn": account.session != nil,
+      "phone": link.connected,
+      "option": shortcut.useOption,
+      "missing": missing,
+    ], pin: true)
+  }
+
   @objc private func connectPhone() {
     guard let code = link.startPairing() else {
       notch.show("answer", ["ask": "Connect iPhone", "text": "Still connecting to Noctus. Try again in a moment.", "failed": true], pin: true)

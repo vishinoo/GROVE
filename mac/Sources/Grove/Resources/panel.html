@@ -47,8 +47,14 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
 .chip, .ask input { font-weight: 400; }
 .x { position: absolute; top: 8px; right: 12px; width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.22); background: rgba(255,255,255,0.12); color: #FFFFFF; font: 400 15px var(--sans); line-height: 24px; text-align: center; cursor: pointer; z-index: 4; padding: 0; }
 .x:hover { background: rgba(255,255,255,0.24); }
-.pairbtn { position: absolute; top: 8px; left: 12px; height: 26px; border-radius: 13px; border: 1px solid rgba(255,255,255,0.22); background: rgba(255,255,255,0.12); color: #FFFFFF; font: 500 11.5px var(--sans); padding: 0 10px; cursor: pointer; z-index: 4; }
-.pairbtn:hover { background: rgba(255,255,255,0.24); }
+.more { position: absolute; top: 8px; left: 12px; width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.22); background: rgba(255,255,255,0.12); color: #FFFFFF; cursor: pointer; z-index: 4; padding: 0; display: grid; place-items: center; }
+.more:hover { background: rgba(255,255,255,0.24); }
+.more i { display: block; width: 3px; height: 3px; border-radius: 50%; background: #FFFFFF; box-shadow: -5px 0 0 #FFFFFF, 5px 0 0 #FFFFFF; }
+.set { display: grid; gap: 2px; }
+.set .line { display: flex; align-items: center; gap: 10px; min-height: 34px; border-bottom: 1px solid rgba(255,255,255,0.12); }
+.set .line:last-child { border-bottom: 0; }
+.set .name { flex: 1; font-size: 13.5px; }
+.set .val { font-size: 12.5px; color: rgba(255,255,255,0.72); }
 .ask { display: flex; gap: 8px; }
 .ask input { flex: 1; min-width: 0; background: rgba(8,10,16,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; color: #FFFFFF; font: 400 13.5px var(--sans); padding: 9px 12px; outline: none; -webkit-user-select: text; user-select: text; }
 .ask input::placeholder { color: rgba(255,255,255,0.55); }
@@ -122,9 +128,9 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
   // Every state can be closed, from a corner that is always in the same place.
   const closer = () => {
     if (S.mode !== 'closed' && !document.getElementById('x')) body.insertAdjacentHTML('beforebegin', '<button class="x" id="x" aria-label="Close">×</button>');
-    // Opposite the ×: a code for connecting the phone, while there is none connected.
-    document.getElementById('pairbtn')?.remove();
-    if (S.mode === 'idle' && S.signedIn && !S.phone) body.insertAdjacentHTML('beforebegin', '<button class="pairbtn" id="pairbtn">Connect iPhone</button>');
+    // Opposite the ×: Grove's own settings.
+    if (S.mode !== 'closed' && S.mode !== 'settings' && !document.getElementById('more')) body.insertAdjacentHTML('beforebegin', '<button class="more" id="more" aria-label="Settings"><i></i></button>');
+    if (S.mode === 'settings') document.getElementById('more')?.remove();
   };
 
   const render = () => {
@@ -189,6 +195,18 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
         <span class="code">${esc(d.code)}</span>
         <span class="small">In Grove on your iPhone: Settings › Your Mac, and type this code. It works for five minutes.</span>`;
     }
+    if (m === 'settings') {
+      const missing = d.missing || [];
+      setH(250);
+      body.innerHTML = `
+        <div class="row space"><span class="label" style="margin-left:34px">Settings</span></div>
+        <div class="set">
+          <div class="line"><span class="name">iPhone</span><span class="val">${d.phone ? 'Connected' : 'Not connected'}</span><button class="chip" data-act="pair">Get a code</button></div>
+          <div class="line"><span class="name">Noctus</span><span class="val">${d.signedIn ? esc(d.email || 'Signed in') : 'Not signed in'}</span>${d.signedIn ? '<button class="chip" data-act="signout">Sign out</button>' : '<button class="chip solid" data-act="signin">Sign in</button>'}</div>
+          <div class="line"><span class="name">Shortcut</span><button class="chip ${d.option ? '' : 'solid'}" data-short="0">⌘K</button><button class="chip ${d.option ? 'solid' : ''}" data-short="1">⌥⌘K</button></div>
+          <div class="line"><span class="name">Permissions</span><span class="val">${missing.length ? esc(missing.length + ' to allow') : 'All allowed'}</span>${missing.length ? '<button class="chip" data-act="permissions">Allow</button>' : ''}</div>
+        </div>`;
+    }
     if (m === 'synced') {
       setH(100);
       body.innerHTML = `<div class="row space"><span class="hello">${esc(d.label)}.</span><span class="small">From your iPhone</span></div><span class="small">The same colours as your phone.</span>`;
@@ -197,11 +215,12 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
 
   panel.addEventListener('click', (e) => {
     if (e.target.id === 'x') post({ t: 'close' });
-    if (e.target.id === 'pairbtn') post({ t: 'pair' });
+    if (e.target.closest && e.target.closest('#more')) post({ t: 'settings' });
   });
   body.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.ask) return post({ t: 'ask', instruction: b.dataset.ask });
+    if (b.dataset.short !== undefined) return post({ t: 'shortcut', option: b.dataset.short === '1' });
     if (b.dataset.run) { try { const r = JSON.parse(b.dataset.run); return post({ t: 'run', kind: r.kind, args: r.args }); } catch (err) { return; } }
     if (b.dataset.music) return post({ t: 'music', action: b.dataset.music });
     if (b.dataset.act === 'copy') return post({ t: 'copy', text: S.data.text });
@@ -227,7 +246,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
       if (e.event === 'heard') { const el = document.getElementById('heard'); if (el) el.textContent = e.data.words; }
       if (e.event === 'choose') { const el = document.getElementById('listen-state'); if (el) el.textContent = 'Say it, or pick'; }
     },
-    close() { S.mode = 'closed'; panel.classList.remove('open'); document.getElementById('x')?.remove(); document.getElementById('pairbtn')?.remove(); size(); },
+    close() { S.mode = 'closed'; panel.classList.remove('open'); document.getElementById('x')?.remove(); document.getElementById('more')?.remove(); size(); },
     look(l) { S.look = Object.assign(S.look, l); },
     phone(on) { S.phone = on; if (S.mode === 'idle') { render(); closer(); } },
     account(signedIn) { S.signedIn = signedIn; if (S.mode === 'idle') render(); },
