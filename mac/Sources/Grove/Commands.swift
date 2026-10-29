@@ -17,6 +17,8 @@ enum Commands {
     let id = UUID().uuidString
     func make(_ kind: String, _ args: [String: String] = [:]) -> Job { Job(id: id, kind: kind, args: args, fromPhone: false) }
 
+    // While the Mac is doing something, "stop" means stop that, not the music.
+    if Agent.shared.running, text.range(of: #"^(stop|cancel|stop it|stop that|enough)$"#, options: .regularExpression) != nil { return make("agent.stop") }
     if text.range(of: #"^(pause|stop)( the)?( music| song| it)?$"#, options: .regularExpression) != nil { return make("music.pause") }
     if text.range(of: #"^(next|skip)( song| track| this| it)?$"#, options: .regularExpression) != nil { return make("music.next") }
     if text.range(of: #"^(previous|back|go back|last song)( song| track)?$"#, options: .regularExpression) != nil { return make("music.previous") }

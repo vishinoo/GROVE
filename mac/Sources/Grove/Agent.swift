@@ -46,15 +46,31 @@ final class Agent {
     var steps = 0
     var confirm: Pending?
     var touched = Date()
+    /** What the notch shows: short, human, never the engine's log. */
+    var shown: [String] = []
+    /** Recent moves, to notice going round in circles. */
+    var moves: [String] = []
     init(id: String, goal: String) { self.id = id; self.goal = goal }
   }
 
   private var tasks: [String: Task] = [:]
+  /** Set by Stop; every run checks it between moves. */
+  private var stopping = false
+  private(set) var running = false
+
+  /** "Stop", from the notch's button, the Mac's mic or the phone. */
+  func stop() {
+    Log.say("agent: stop")
+    stopping = running
+    tasks.removeAll()
+  }
   /** Shown in the notch as it goes. */
   var onStep: ((String, [String]) -> Void)?
 
   private static let budget: TimeInterval = 60
   private static let maxSteps = 40
+  /** Labels that put something in a cart or an order. */
+  private static let addWords = #"(?i)\b(quick add|add to (cart|bag|basket|order|trolley)|add \d+ to (order|cart)|add item)\b"#
   /** Labels that are the irreversible step, whatever the model calls them. */
   private static let finalWords = #"(?i)\b(place (your )?order|buy now|pay( now)?|complete (purchase|order|checkout)|confirm (order|purchase|payment|booking)|submit( order| application)?|send( now)?|book( now)?|reserve|delete|apply( now)?|checkout and pay|purchase)\b"#
 
@@ -95,10 +111,14 @@ final class Agent {
   // MARK: the loop
 
   private func loop(_ task: Task) async -> AgentResult {
+    running = true
+    stopping = false
+    defer { running = false; stopping = false }
     let started = Date()
     if let failure = await Browser.ready() { return AgentResult(state: "failed", spoken: failure, task: task.id) }
 
     while Date().timeIntervalSince(started) < Agent.budget {
+      if stopping { return AgentResult(state: "stopped", spoken: "Stopped.", task: task.id) }
       guard task.steps < Agent.maxSteps else {
         return AgentResult(state: "failed", spoken: "I went round in circles on your Mac and stopped. It's on the page I got to.", task: task.id)
       }
@@ -111,21 +131,41 @@ final class Agent {
       let n = (move["n"] as? Int) ?? Int("\(move["n"] ?? "")") ?? -1
       let text = move["text"] as? String ?? ""
       let label = Agent.label(of: n, in: page)
-      Log.say("agent: \(task.id) \(action) \(n) \(text.prefix(60))")
+      Log.say("agent: \(task.id) \(action) \(n) \(label.prefix(40)) \(text.prefix(60))")
+
+      // The same move on the same thing, again: the page is not doing what the
+      // model expects. Twice is a hint to try something else; a third time is
+      // a loop, and it stops and says so rather than clicking for ever.
+      let signature = "\(action)|\(label)|\(move["url"] ?? "")"
+      task.moves.append(signature)
+      if task.moves.count > 6 { task.moves.removeFirst() }
+      let repeats = task.moves.filter { $0 == signature }.count
+      if repeats >= 3 && action != "scroll" && action != "wait" {
+        task.history.append("Stuck: tried \(action) on \(label) three times.")
+        return AgentResult(state: "ask", spoken: "I'm going in circles on \(page.title.isEmpty ? "this page" : page.title). What should I pick?", task: task.id)
+      }
+      if repeats == 2 && action != "scroll" && action != "wait" {
+        task.history.append("You already did \(action) on \(label) and the page did not change the way you wanted. Do something different, or ask them.")
+      }
+      if let said = move["step"] as? String, !said.isEmpty { show(task, said) }
 
       switch action {
       case "go":
         let url = move["url"] as? String ?? ""
         await Browser.go(url)
         task.history.append("Went to \(url)")
-        step(task, "Opening \(URL(string: url)?.host ?? url)")
       case "click":
+        // Putting something in a cart is a choice, and theirs: "is this the
+        // one?" before it goes in, with the same yes as a payment. Told this in
+        // the prompt, the model still quick-added a burger nobody picked.
+        if label.range(of: Agent.addWords, options: .regularExpression) != nil {
+          return askToConfirm(task, n: n, url: page.url, summary: (move["summary"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Add \(label.prefix(60)) to your cart?")
+        }
         if label.range(of: Agent.finalWords, options: .regularExpression) != nil {
           return askToConfirm(task, n: n, url: page.url, summary: (move["summary"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Press \(label)?")
         }
         let r = await Browser.js(Browser.clickJS(n))
         task.history.append("Clicked [\(n)] \(label) → \(r)")
-        step(task, "Clicking \(label.prefix(40))")
         try? await _Concurrency.Task.sleep(nanoseconds: 1_500_000_000)
       case "type":
         if Agent.isSecret(n, in: page) {
@@ -135,7 +175,6 @@ final class Agent {
         let r = await Browser.js(Browser.typeJS(n, text))
         if (move["enter"] as? Bool) == true { await Browser.pressReturn() }
         task.history.append("Typed \"\(text)\" into [\(n)] \(label) → \(r)")
-        step(task, "Typing \(text.prefix(30))")
         try? await _Concurrency.Task.sleep(nanoseconds: 1_500_000_000)
       case "select":
         let r = await Browser.js(Browser.selectJS(n, text))
@@ -177,9 +216,13 @@ final class Agent {
     return AgentResult(state: "confirm", spoken: summary, task: task.id)
   }
 
-  private func step(_ task: Task, _ line: String) {
-    let recent = task.history.suffix(3).map { String($0.prefix(60)) }
-    DispatchQueue.main.async { self.onStep?(task.goal, recent + [line]) }
+  /** A new line in the notch, unless it says what the last one said. */
+  private func show(_ task: Task, _ line: String) {
+    let clean = String(line.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))
+    guard clean != task.shown.last else { return }
+    task.shown.append(clean)
+    let recent = Array(task.shown.suffix(3))
+    DispatchQueue.main.async { self.onStep?(task.goal, recent) }
   }
 
   // MARK: reading the page
@@ -199,7 +242,7 @@ final class Agent {
   private static let brief = """
   You are Grove, using the person's own Mac and their Chrome browser to do what they asked. They are signed in to their usual sites.
   Each turn you see the goal, what has happened so far, and the current page: its address, numbered things you can press or type into, and some of its text.
-  Reply with ONE next move as JSON:
+  Reply with ONE next move as JSON. Every move also carries "step": what you are doing, as a person would say it in four to seven words, e.g. "Searching Amazon for watermelon", "Adding it to your cart", "Opening checkout". Never numbers, brackets or button names in step.
   {"action":"go","url":"https://..."} — open an address. Go straight to search addresses when you can: https://www.youtube.com/results?search_query=..., https://www.google.com/search?q=..., https://www.amazon.com/s?k=..., https://www.linkedin.com/jobs/search/?keywords=..., https://www.indeed.com/jobs?q=...
   {"action":"click","n":12,"summary":"..."}
   {"action":"type","n":4,"text":"...","enter":true}
@@ -213,6 +256,7 @@ final class Agent {
   - Orders: before checkout, ask them to confirm the delivery address and the item you picked if either was not stated. Never change payment details. Never press the final button with click; use confirm.
   - Never type into password or card fields. If a sign-in is needed, ask them to sign in on the Mac and say when they have.
   - Prefer the obvious choice over asking, for things that cost nothing: the first good video, the top results.
+  - Food and shopping: if they did not name the exact item or restaurant, ask, offering the best two or three by name and price ("Smash Burger Co, $14, or Five Guys, $16?"). Never use quick-add on something they did not choose. Ignore existing carts unless they mention them.
   - For looking things up (jobs, reviews, prices), finish on the page that shows them and summarise the best two or three in done.
   - Do not repeat a move that just failed; try another way.
   JSON only.

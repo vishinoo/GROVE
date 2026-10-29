@@ -228,6 +228,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       notch.show("idle", [:], pin: false)
     case "mic":
       dictate()
+    case "stop":
+      run(Job(id: UUID().uuidString, kind: "agent.stop", args: [:], fromPhone: false)) { _, _, _ in }
     case "answer", "approve", "decline":
       voice.stop()
       let kind = message["t"] as? String ?? ""
@@ -255,6 +257,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   // MARK: jobs from the phone
 
   private func run(_ job: Job, reply: @escaping (Bool, String, [String: String]) -> Void) {
+    if job.kind == "agent.stop" {
+      agent.stop()
+      notch.show("done", ["title": "Stopped", "text": "Left it where it was.", "ok": true], pin: false, closeAfter: 2.5)
+      reply(true, "Stopped.", ["state": "stopped"])
+      return
+    }
     if job.kind.hasPrefix("agent.") { runAgent(job, reply: reply); return }
     let title = Jobs.title(for: job)
     if job.fromPhone { notch.show("job", ["title": title, "from": "From your iPhone", "steps": Jobs.steps(for: job), "at": 0], pin: true) }
@@ -285,6 +293,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.notch.show("waiting", ["text": result.spoken, "task": result.task, "confirm": result.state == "confirm"], pin: true)
       case "ask", "confirm":
         self.notch.show("done", ["title": result.state == "confirm" ? "Waiting for your yes" : "A question", "text": result.spoken, "ok": true], pin: false, closeAfter: 6)
+      case "stopped":
+        break  // the Stop already said so
       default:
         self.notch.show("done", ["title": "Done", "text": result.spoken, "ok": result.state == "done"], pin: false, closeAfter: 4)
       }

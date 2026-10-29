@@ -3326,6 +3326,7 @@ const MAC_USE: Ability = {
     goal: { type: 'string', what: 'what to get done, in their words with every detail they gave' },
     answer: { type: 'string', what: 'their answer, when the Mac just asked them something' },
     task: { type: 'string', what: 'the task id the Mac gave, when answering' },
+    stop: { type: 'string', what: '"yes" when they say stop, cancel or enough while the Mac is doing something' },
     confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
   },
   examples: [
@@ -3333,8 +3334,13 @@ const MAC_USE: Ability = {
     'find me finance internships on my laptop',
     'put on a video about peter thiel on my mac',
     'check linkedin for jobs on my computer',
+    'stop what my mac is doing',
   ],
   run: async (args) => {
+    if (/^(yes|true|stop)$/i.test((args.stop || '').trim())) {
+      macTask = null;
+      return macJob('agent.stop', {});
+    }
     const fresh = macTask && Date.now() - macTask.at < 10 * 60_000 ? macTask.id : '';
     const task = (args.task || '').trim() || fresh;
     const approve = /^(yes|confirmed?)$/i.test((args.confirmed || '').trim());
