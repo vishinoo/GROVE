@@ -159,7 +159,13 @@ final class Agent {
         // one?" before it goes in, with the same yes as a payment. Told this in
         // the prompt, the model still quick-added a burger nobody picked.
         if label.range(of: Agent.addWords, options: .regularExpression) != nil {
-          return askToConfirm(task, n: n, url: page.url, summary: (move["summary"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Add \(label.prefix(60)) to your cart?")
+          // The question names what goes in, because "adding the burger" was
+          // what came back and that is not a thing anyone can say yes to.
+          var said = ((move["summary"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+          if said.isEmpty || !said.hasSuffix("?") {
+            said = "\(said.isEmpty ? "Adding to your cart" : said.trimmingCharacters(in: CharacterSet(charactersIn: ".")))\(label.isEmpty ? "" : " (\(label.prefix(60)))"). Is that the one?"
+          }
+          return askToConfirm(task, n: n, url: page.url, summary: said)
         }
         if label.range(of: Agent.finalWords, options: .regularExpression) != nil {
           return askToConfirm(task, n: n, url: page.url, summary: (move["summary"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Press \(label)?")
@@ -244,7 +250,7 @@ final class Agent {
   Each turn you see the goal, what has happened so far, and the current page: its address, numbered things you can press or type into, and some of its text.
   Reply with ONE next move as JSON. Every move also carries "step": what you are doing, as a person would say it in four to seven words, e.g. "Searching Amazon for watermelon", "Adding it to your cart", "Opening checkout". Never numbers, brackets or button names in step.
   {"action":"go","url":"https://..."} — open an address. Go straight to search addresses when you can: https://www.youtube.com/results?search_query=..., https://www.google.com/search?q=..., https://www.amazon.com/s?k=..., https://www.linkedin.com/jobs/search/?keywords=..., https://www.indeed.com/jobs?q=...
-  {"action":"click","n":12,"summary":"..."}
+  {"action":"click","n":12,"summary":"..."} — when the click puts something in a cart or an order, summary is the question they will answer: the item, how many and the price, e.g. "One OG Cheeseburger from Burger's Priest, $11.99. Add it to your order?" Check the quantity is what they asked for (one, unless they said more) before adding.
   {"action":"type","n":4,"text":"...","enter":true}
   {"action":"select","n":7,"text":"option"}
   {"action":"scroll"} {"action":"back"} {"action":"wait"}
