@@ -3250,12 +3250,12 @@ const NOW: Ability = {
 const MAC_MUSIC: Ability = {
   id: 'mac.music',
   name: 'Music on your Mac',
-  what: 'Plays, pauses or skips music in Apple Music on their laptop. Only when they say laptop, Mac or computer; music on the phone is the other music tool.',
+  what: 'Plays, pauses or skips music in Apple Music on their laptop, or makes the laptop louder or quieter. Only when they say laptop, Mac or computer; music on the phone is the other music tool.',
   where: 'device',
   wired: true,
   needs: [],
   args: {
-    action: { type: 'string', what: '"play", "pause", "resume", "next" or "previous"', required: true },
+    action: { type: 'string', what: '"play", "pause", "resume", "next", "previous", "louder" or "quieter"', required: true },
     what: { type: 'string', what: 'for play: a playlist, song, album or artist from their library; empty to shuffle' },
   },
   examples: [
@@ -3263,10 +3263,18 @@ const MAC_MUSIC: Ability = {
     'put my focus playlist on the mac',
     'pause the music on my computer',
     'skip this song on my mac',
+    'set the volume higher on my laptop',
   ],
   run: async (args) => {
-    const action = (args.action || 'play').trim().toLowerCase();
-    const kind = ['pause', 'resume', 'next', 'previous'].includes(action) ? `music.${action}` : 'music.play';
+    // An action it does not know is refused, never turned into "play": asked
+    // to turn the volume up, the old fallback shuffled their whole library.
+    const action = (args.action || '').trim().toLowerCase();
+    const KINDS: Record<string, string> = {
+      play: 'music.play', pause: 'music.pause', resume: 'music.resume', next: 'music.next', previous: 'music.previous',
+      louder: 'volume.up', up: 'volume.up', 'volume up': 'volume.up', quieter: 'volume.down', down: 'volume.down', 'volume down': 'volume.down',
+    };
+    const kind = KINDS[action];
+    if (!kind) return { ok: false, spoken: 'I can play, pause, skip, or change the volume on your Mac. Which?' };
     const result = await macJob(kind, kind === 'music.play' ? { what: (args.what || '').trim() } : {});
     return { ok: result.ok, spoken: result.spoken };
   },
@@ -3289,6 +3297,67 @@ const MAC_OPEN: Ability = {
     const looksLikeLink = /^https?:\/\//i.test(what) || /^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(what);
     const result = await macJob(looksLikeLink ? 'open.url' : 'open.app', looksLikeLink ? { url: what } : { app: what });
     return { ok: result.ok, spoken: result.spoken };
+  },
+};
+
+/**
+ * Anything that can be done in a browser, done on the Mac (mac/Sources/Grove/Agent.swift).
+ *
+ * The Mac drives their own Chrome step by step and comes back with one of
+ * three things: done, a question, or a summary waiting for a yes. A question is
+ * spoken with the microphone open and the answer re-runs this with `task` and
+ * `answer`; the task is also remembered here, so an answer the model passes
+ * without its id still reaches the right one. A yes goes through the same
+ * press-or-say-yes confirmation as everything else that cannot be undone, and
+ * only a confirmed re-run sends `approve` — the one thing the Mac will press a
+ * buy, send or submit button for. The model never gets to say yes for them.
+ */
+let macTask: { id: string; at: number } | null = null;
+
+const MAC_USE: Ability = {
+  id: 'mac.use',
+  name: 'Use your Mac',
+  what: 'Does things on their laptop in its web browser: finds jobs, puts on a video, looks something up on a site, fills in a form, orders something. For anything they want done on the laptop, Mac or computer that is not just music or opening one app. It asks them questions as it goes and waits for a yes before buying, sending or submitting. When it has just asked them something, their next sentence is the answer: call this again with answer.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  slow: true,
+  args: {
+    goal: { type: 'string', what: 'what to get done, in their words with every detail they gave' },
+    answer: { type: 'string', what: 'their answer, when the Mac just asked them something' },
+    task: { type: 'string', what: 'the task id the Mac gave, when answering' },
+    confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
+  },
+  examples: [
+    'order a watermelon on my mac',
+    'find me finance internships on my laptop',
+    'put on a video about peter thiel on my mac',
+    'check linkedin for jobs on my computer',
+  ],
+  run: async (args) => {
+    const fresh = macTask && Date.now() - macTask.at < 10 * 60_000 ? macTask.id : '';
+    const task = (args.task || '').trim() || fresh;
+    const approve = /^(yes|confirmed?)$/i.test((args.confirmed || '').trim());
+    const answer = (args.answer || '').trim();
+    const goal = (args.goal || '').trim();
+
+    let result;
+    if (task && (approve || answer)) {
+      result = await macJob('agent.resume', { task, answer, approve: approve ? 'yes' : '' }, 88_000);
+    } else if (goal) {
+      result = await macJob('agent.start', { goal }, 88_000);
+    } else {
+      return { ok: false, spoken: 'What should I do on your Mac?' };
+    }
+
+    macTask = result.task && (result.state === 'ask' || result.state === 'confirm') ? { id: result.task, at: Date.now() } : null;
+    if (result.state === 'confirm') {
+      return { ok: false, needsConfirming: true, spoken: result.spoken, confirmArgs: { task: result.task ?? '', answer: 'yes' } };
+    }
+    if (result.state === 'ask') {
+      return { ok: true, spoken: result.spoken, listenAfter: true, detail: `Your Mac is waiting on this (task ${result.task}).` };
+    }
+    return { ok: result.ok, spoken: result.spoken, detail: result.detail };
   },
 };
 
@@ -3912,6 +3981,7 @@ export const ABILITIES: Ability[] = [
   PERSON_BRIEF,
   MAIL_IMPORTANT,
   MAC_TASK,
+  MAC_USE,
   MAC_MUSIC,
   MAC_OPEN,
   RIDE,

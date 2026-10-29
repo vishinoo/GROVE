@@ -17,7 +17,7 @@ enum Script {
       let result = NSAppleScript(source: source)?.executeAndReturnError(&error)
       if let error {
         Log.say("script: failed \(error[NSAppleScript.errorNumber] ?? "?") \(error[NSAppleScript.errorMessage] ?? "")")
-        done(false, "")
+        done(false, "\(error[NSAppleScript.errorMessage] ?? "")")
       } else {
         done(true, result?.stringValue ?? "")
       }

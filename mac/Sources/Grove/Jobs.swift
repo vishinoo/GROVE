@@ -2,13 +2,8 @@
   What the Mac can do when asked.
 
   A short list on purpose, because each one is a promise: music in Apple Music,
-  and opening a link or an app. Driving a website — clicking through a form,
-  a booking, an order — is the next thing and the one that needs the most care,
-  and it is not here yet; asked for one, the Mac says so plainly rather than
-  pretending.
-
-  Nothing here spends money. When that arrives it will set the job up and stop
-  for a press, the same rule as the phone.
+  the volume, and opening a link or an app. Driving a website is Agent.swift,
+  and the only path here that can end in spending money — it stops for a yes.
 */
 
 import AppKit
@@ -49,6 +44,8 @@ enum Jobs {
     case "music.resume": Music.simple("play", spoken: "Playing.", done: done)
     case "music.next": Music.simple("next track", spoken: "Skipped.", done: done)
     case "music.previous": Music.simple("previous track", spoken: "Back one.", done: done)
+    case "volume.up": Music.volume(by: 12, done: done)
+    case "volume.down": Music.volume(by: -12, done: done)
     case "open.url": openURL(job.args["url"] ?? "", done: done)
     case "open.app": openApp(job.args["app"] ?? "", done: done)
     default: done(false, "Your Mac can't do that yet.")
@@ -156,6 +153,12 @@ enum Music {
         done(true, artist.isEmpty ? "Playing \(title)." : "Playing \(title) by \(artist).")
       }
     }
+  }
+
+  /** The Mac's own volume, not Music's: louder means louder, whatever is playing. */
+  static func volume(by step: Int, done: @escaping (Bool, String) -> Void) {
+    let source = "set v to (output volume of (get volume settings)) + (\(step))\nif v > 100 then set v to 100\nif v < 0 then set v to 0\nset volume output volume v\nreturn v as text"
+    Script.run(source) { ok, level in done(ok, ok ? "Volume \(level)." : "I couldn't change the volume.") }
   }
 
   static func simple(_ command: String, spoken: String, done: @escaping (Bool, String) -> Void) {

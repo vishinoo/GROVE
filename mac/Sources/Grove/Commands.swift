@@ -21,6 +21,8 @@ enum Commands {
     if text.range(of: #"^(next|skip)( song| track| this| it)?$"#, options: .regularExpression) != nil { return make("music.next") }
     if text.range(of: #"^(previous|back|go back|last song)( song| track)?$"#, options: .regularExpression) != nil { return make("music.previous") }
     if text.range(of: #"^(resume|unpause|continue)( the)?( music)?$"#, options: .regularExpression) != nil { return make("music.resume") }
+    if text.range(of: #"^(turn it up|louder|volume up|increase( the)? volume|raise( the)? volume)"#, options: .regularExpression) != nil { return make("volume.up") }
+    if text.range(of: #"^(turn it down|quieter|volume down|decrease( the)? volume|lower( the)? volume)"#, options: .regularExpression) != nil { return make("volume.down") }
 
     if let m = text.range(of: #"^(play|put on|shuffle)\b"#, options: .regularExpression) {
       var what = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).dropFirst(text.distance(from: text.startIndex, to: m.upperBound)))

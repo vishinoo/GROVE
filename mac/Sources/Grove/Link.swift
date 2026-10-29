@@ -20,7 +20,7 @@
 
     phone → mac   hello {}                           settings {colour, label, stops, speed, warp, name, manner}
                   job {id, kind, args}               thought {id, kind, text}
-    mac → phone   welcome {mac}                      done {id, ok, spoken}
+    mac → phone   welcome {mac}                      done {id, ok, spoken, state?, task?, detail?}
                   think {id, instruction, text}
 
   "Connected" means heard from the phone in the last two and a half minutes;
@@ -36,7 +36,7 @@ import Foundation
 
 final class Link {
   var onLook: ((LookUpdate) -> Void)?
-  var onJob: ((Job, @escaping (Bool, String) -> Void) -> Void)?
+  var onJob: ((Job, @escaping (Bool, String, [String: String]) -> Void) -> Void)?
   var onStatus: ((Bool) -> Void)?
 
   private(set) var connected = false
@@ -236,8 +236,10 @@ final class Link {
       let id = (m["id"] as? String) ?? UUID().uuidString
       let args = (m["args"] as? [String: Any] ?? [:]).compactMapValues { "\($0)" }
       Log.say("link: job \(m["kind"] ?? "")")
-      onJob?(Job(id: id, kind: (m["kind"] as? String) ?? "", args: args, fromPhone: true)) { [weak self] ok, spoken in
-        self?.broadcast(["t": "done", "id": id, "ok": ok, "spoken": spoken])
+      onJob?(Job(id: id, kind: (m["kind"] as? String) ?? "", args: args, fromPhone: true)) { [weak self] ok, spoken, extra in
+        var out: [String: Any] = ["t": "done", "id": id, "ok": ok, "spoken": spoken]
+        extra.forEach { out[$0.key] = $0.value }
+        self?.broadcast(out)
       }
     case "thought":
       guard let id = m["id"] as? String, let waiting = pending.removeValue(forKey: id) else { return }

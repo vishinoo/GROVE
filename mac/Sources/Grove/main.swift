@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   var link: Link!
   var shortcut: Shortcut!
   var voice = Voice()
+  let agent = Agent.shared
   var status: NSStatusItem!
 
   /** What ⌘K captured, held until the answer comes back. */
@@ -96,6 +97,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       DispatchQueue.main.asyncAfter(deadline: .now() + 4) { Log.say("test: pairing code \(self.link.startPairing() ?? "none")") }
     }
 
+    // `open Grove.app --args --agent "goal"` runs a browser goal at launch, to test Agent.swift without the phone.
+    if let i = CommandLine.arguments.firstIndex(of: "--agent"), i + 1 < CommandLine.arguments.count {
+      let goal = CommandLine.arguments[i + 1]
+      DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+        self.run(Job(id: "test", kind: "agent.start", args: ["goal": goal], fromPhone: false)) { _, spoken, extra in
+          Log.say("test: agent \(extra["state"] ?? "") — \(spoken)")
+        }
+      }
+    }
+
     // `open Grove.app --args --peek` opens the panel once at launch, to check it draws.
     if CommandLine.arguments.contains("--peek") {
       DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.notch.show("idle", [:], pin: true) }
@@ -149,13 +160,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // asked to, it says so politely, which is the worst answer there is.
     if let job = Commands.job(for: instruction) {
       notch.close()
-      run(job) { _, _ in }
+      run(job) { _, _, _ in }
       return
     }
     let clip = NSPasteboard.general.string(forType: .string) ?? ""
     let aboutClip = instruction.lowercased().contains("copied") || instruction.lowercased().contains("this")
-    captured = Captured(text: aboutClip ? clip : "", app: nil, element: nil, viaClipboard: true)
-    think(instruction)
+    if aboutClip {
+      captured = Captured(text: clip, app: nil, element: nil, viaClipboard: true)
+      think(instruction)
+      return
+    }
+    // Not about anything highlighted: answer it, or go and do it in Chrome.
+    notch.show("thinking", ["text": "", "ask": instruction], pin: true)
+    Task { @MainActor in
+      switch await Thinking.decide(instruction, manner: self.look.manner) {
+      case .act(let goal):
+        self.runAgent(Job(id: UUID().uuidString, kind: "agent.start", args: ["goal": goal], fromPhone: false)) { _, _, _ in }
+      case .answer(let text):
+        self.notch.show("answer", ["ask": instruction, "text": text, "via": "mac"], pin: true)
+      case nil:
+        self.notch.show("answer", ["ask": instruction, "text": "I couldn't reach anything to think with. Check your connection and try again.", "failed": true], pin: true)
+      }
+    }
+  }
+
+  /** The mic beside the ask box: what is said fills the box, and is sent when they stop. */
+  private func dictate() {
+    notch.hold()
+    voice.listen(
+      partial: { [weak self] words in self?.notch.send("dictate", ["words": words]) },
+      done: { [weak self] said in self?.notch.send("dictate", ["words": said ?? "", "final": true]) }
+    )
   }
 
   private func fromPanel(_ message: [String: Any]) {
@@ -181,14 +216,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     case "run":
       let kind = (message["kind"] as? String) ?? ""
       let args = (message["args"] as? [String: Any] ?? [:]).compactMapValues { "\($0)" }
-      run(Job(id: UUID().uuidString, kind: kind, args: args, fromPhone: false)) { _, _ in }
+      run(Job(id: UUID().uuidString, kind: kind, args: args, fromPhone: false)) { _, _, _ in }
     case "music":
       let action = (message["action"] as? String) ?? "play"
-      run(Job(id: UUID().uuidString, kind: "music.\(action)", args: [:], fromPhone: false)) { _, _ in }
+      run(Job(id: UUID().uuidString, kind: "music.\(action)", args: [:], fromPhone: false)) { _, _, _ in }
     case "pair":
       connectPhone()
     case "settings":
       showSettings()
+    case "back":
+      notch.show("idle", [:], pin: false)
+    case "mic":
+      dictate()
+    case "answer", "approve", "decline":
+      voice.stop()
+      let kind = message["t"] as? String ?? ""
+      let answer = kind == "decline" ? "No, don't press that. Stop and ask me what to change." : (message["text"] as? String ?? "")
+      runAgent(Job(id: UUID().uuidString, kind: "agent.resume",
+                   args: ["task": message["task"] as? String ?? "", "answer": answer, "approve": kind == "approve" ? "yes" : ""],
+                   fromPhone: false)) { _, _, _ in }
     case "signout":
       account.signOut()
       showSettings()
@@ -208,7 +254,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   // MARK: jobs from the phone
 
-  private func run(_ job: Job, reply: @escaping (Bool, String) -> Void) {
+  private func run(_ job: Job, reply: @escaping (Bool, String, [String: String]) -> Void) {
+    if job.kind.hasPrefix("agent.") { runAgent(job, reply: reply); return }
     let title = Jobs.title(for: job)
     if job.fromPhone { notch.show("job", ["title": title, "from": "From your iPhone", "steps": Jobs.steps(for: job), "at": 0], pin: true) }
     Jobs.run(job) { [weak self] ok, spoken in
@@ -216,7 +263,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       if job.fromPhone || job.kind.hasPrefix("music.") || job.kind.hasPrefix("open.") {
         self.notch.show("done", ["title": title, "text": spoken, "ok": ok], pin: false, closeAfter: 2.8)
       }
-      reply(ok, spoken)
+      reply(ok, spoken, [:])
+    }
+  }
+
+  /** A goal for the browser (Agent.swift). Shown in the notch as it goes; questions go back to the phone. */
+  private func runAgent(_ job: Job, reply: @escaping (Bool, String, [String: String]) -> Void) {
+    let goal = job.args["goal"] ?? ""
+    let from = job.fromPhone ? "From your iPhone" : "On this Mac"
+    agent.onStep = { [weak self] goal, steps in
+      self?.notch.show("job", ["title": goal, "from": from, "steps": steps, "at": max(0, steps.count - 1)], pin: true)
+    }
+    notch.show("job", ["title": goal.isEmpty ? "Carrying on" : goal, "from": from, "steps": [job.kind == "agent.start" ? "Opening Chrome" : "Carrying on"], "at": 0], pin: true)
+    Task { @MainActor in
+      let result = job.kind == "agent.start"
+        ? await self.agent.start(goal: goal)
+        : await self.agent.resume(task: job.args["task"] ?? "", answer: job.args["answer"] ?? "", approve: job.args["approve"] == "yes")
+      switch result.state {
+      case "ask" where !job.fromPhone, "confirm" where !job.fromPhone:
+        // Asked here, answered here: a box for the answer, or the two buttons for a yes.
+        self.notch.show("waiting", ["text": result.spoken, "task": result.task, "confirm": result.state == "confirm"], pin: true)
+      case "ask", "confirm":
+        self.notch.show("done", ["title": result.state == "confirm" ? "Waiting for your yes" : "A question", "text": result.spoken, "ok": true], pin: false, closeAfter: 6)
+      default:
+        self.notch.show("done", ["title": "Done", "text": result.spoken, "ok": result.state == "done"], pin: false, closeAfter: 4)
+      }
+      reply(result.state != "failed", result.spoken, ["state": result.state, "task": result.task, "detail": result.detail])
     }
   }
 
@@ -323,6 +395,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
   @objc private func showLog() { NSWorkspace.shared.open(Log.url) }
   @objc private func quit() { NSApp.terminate(nil) }
+}
+
+// One Grove at a time. Two copies each draw a panel over the notch, one on top
+// of the other, and each answers every ⌘K. The running-apps list is not ready
+// this early in a launch, so a lock decides: the first copy holds it until it
+// exits, and a second one cannot take it and gives way.
+let lockFD = open(NSTemporaryDirectory() + "grove-mac.lock", O_CREAT | O_RDWR, 0o600)
+if lockFD >= 0 && flock(lockFD, LOCK_EX | LOCK_NB) != 0 {
+  Log.say("launch: another Grove is already running, quitting this one")
+  exit(0)
 }
 
 let app = NSApplication.shared

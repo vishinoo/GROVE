@@ -16,7 +16,7 @@ import AVFoundation
 import Speech
 
 enum Permission: CaseIterable {
-  case accessibility, microphone, speech, music
+  case accessibility, microphone, speech, music, chrome
 
   var title: String {
     switch self {
@@ -24,6 +24,7 @@ enum Permission: CaseIterable {
     case .microphone: return "Microphone"
     case .speech: return "Speech recognition"
     case .music: return "Control Music"
+    case .chrome: return "Control Chrome (for doing things on the web)"
     }
   }
 
@@ -34,6 +35,7 @@ enum Permission: CaseIterable {
     case .microphone: return AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
     case .speech: return SFSpeechRecognizer.authorizationStatus() == .authorized
     case .music: return UserDefaults.standard.bool(forKey: "grove.permission.music") ? true : nil
+    case .chrome: return UserDefaults.standard.bool(forKey: "grove.permission.chrome") ? true : nil
     }
   }
 
@@ -61,6 +63,12 @@ enum Permission: CaseIterable {
       Script.run("tell application \"Music\" to get player state") { ok, _ in
         Log.say("permission: music \(ok ? "allowed" : "not allowed")")
         if ok { UserDefaults.standard.set(true, forKey: "grove.permission.music") } else { Permission.open("Privacy_Automation") }
+        done()
+      }
+    case .chrome:
+      Script.run("tell application \"Google Chrome\" to get name") { ok, _ in
+        Log.say("permission: chrome \(ok ? "allowed" : "not allowed")")
+        if ok { UserDefaults.standard.set(true, forKey: "grove.permission.chrome") } else { Permission.open("Privacy_Automation") }
         done()
       }
     }

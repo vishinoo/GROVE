@@ -58,6 +58,10 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
 .ask { display: flex; gap: 8px; }
 .ask input { flex: 1; min-width: 0; background: rgba(8,10,16,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; color: #FFFFFF; font: 400 13.5px var(--sans); padding: 9px 12px; outline: none; -webkit-user-select: text; user-select: text; }
 .ask input::placeholder { color: rgba(255,255,255,0.55); }
+.mic { width: 34px; flex: 0 0 34px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.24); background: rgba(255,255,255,0.13); color: #FFFFFF; cursor: pointer; display: grid; place-items: center; padding: 0; }
+.mic:hover { background: rgba(255,255,255,0.22); }
+.mic.on { background: #FFFFFF; color: #0B0C12; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 5px rgba(255,255,255,0.18); } }
 .answer { font-size: 14px; line-height: 1.5; max-height: 130px; overflow: auto; white-space: pre-wrap; -webkit-user-select: text; user-select: text; }
 .code { font-family: var(--mono); font-size: 30px; letter-spacing: 0.18em; }
 .bars { display: inline-flex; gap: 3px; align-items: center; height: 16px; }
@@ -119,11 +123,18 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     el.style.transition = 'opacity 220ms ease'; el.style.opacity = '0';
     setTimeout(() => { el.innerHTML = pair(); el.style.opacity = '1'; }, 230);
   }, 6000);
-  const wireAsk = () => {
+  // An answer to the browser engine goes back to its task; anything else is a new ask.
+  const wireAsk = (answering) => {
     const input = document.getElementById('ask-input');
     if (!input) return;
     input.addEventListener('focus', () => post({ t: 'focus' }));
-    document.getElementById('ask').addEventListener('submit', (e) => { e.preventDefault(); if (input.value.trim()) post({ t: 'ask', instruction: input.value.trim() }); });
+    document.getElementById('ask').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      post(answering ? { t: 'answer', task: S.data.task, text } : { t: 'ask', instruction: text });
+    });
+    if (!answering) setTimeout(() => input.focus(), 30);
   };
   // Every state can be closed, from a corner that is always in the same place.
   const closer = () => {
@@ -144,7 +155,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
         ${S.signedIn ? '' : '<span class="small">Sign in with Noctus on both devices and they find each other.</span>'}
         ${S.signedIn ? '' : '<div class="chips"><button class="chip solid" data-act="signin">Sign in with Noctus</button></div>'}
         <div class="chips" id="sugg">${pair()}</div>
-        <form class="ask" id="ask"><input id="ask-input" placeholder="Ask Grove anything" autocomplete="off"><button class="chip" type="submit">Ask</button></form>`;
+        <form class="ask" id="ask"><input id="ask-input" placeholder="Ask, or tell it to do something" autocomplete="off"><button class="mic" type="button" id="mic" aria-label="Speak"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button><button class="chip" type="submit">Ask</button></form>`;
       wireAsk();
     }
     if (m === 'listening') {
@@ -164,7 +175,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     }
     if (m === 'thinking') {
       setH(118);
-      body.innerHTML = `<div class="row space"><span class="label">${esc(d.ask)}</span><span class="row small"><span class="bars"><i></i><i></i><i></i><i></i></span>Thinking</span></div><div class="quote">${esc(d.text)}</div>`;
+      body.innerHTML = `<div class="row space"><span class="label">${esc(d.ask)}</span><span class="row small"><span class="bars"><i></i><i></i><i></i><i></i></span>Thinking</span></div>${d.text ? `<div class="quote">${esc(d.text)}</div>` : ''}`;
     }
     if (m === 'rewrite' || m === 'answer') {
       setH(m === 'rewrite' ? 222 : 206);
@@ -187,6 +198,16 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     if (m === 'done') {
       setH(110);
       body.innerHTML = `<div class="row space"><span class="hello" style="font-size:18px">${esc(d.title)}</span><span class="small row"><span class="dot ${d.ok ? 'on' : ''}"></span>${d.ok ? 'Done' : 'Didn’t work'}</span></div><span class="small">${esc(d.text)}</span>`;
+    }
+    if (m === 'waiting') {
+      setH(d.confirm ? 168 : 180);
+      body.innerHTML = `
+        <div class="row space"><span class="label">${d.confirm ? 'Waiting for your yes' : 'A question'}</span></div>
+        <div class="answer">${esc(d.text)}</div>
+        ${d.confirm
+          ? '<div class="chips"><button class="chip solid" data-act="approve">Yes, go ahead</button><button class="chip" data-act="decline">No</button></div>'
+          : `<form class="ask" id="ask"><input id="ask-input" placeholder="Your answer" autocomplete="off">${'<button class="mic" type="button" id="mic" aria-label="Speak"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>'}<button class="chip" type="submit">Send</button></form>`}`;
+      if (!d.confirm) wireAsk(true);
     }
     if (m === 'pair') {
       setH(190);
@@ -214,12 +235,15 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
   };
 
   panel.addEventListener('click', (e) => {
-    if (e.target.id === 'x') post({ t: 'close' });
+    // From settings the × goes back to the notch's own page, not away.
+    if (e.target.id === 'x') post({ t: S.mode === 'settings' ? 'back' : 'close' });
     if (e.target.closest && e.target.closest('#more')) post({ t: 'settings' });
   });
   body.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.ask) return post({ t: 'ask', instruction: b.dataset.ask });
+    if (b.id === 'mic') { b.classList.add('on'); return post({ t: 'mic' }); }
+    if (b.dataset.act === 'approve' || b.dataset.act === 'decline') return post({ t: b.dataset.act, task: S.data.task });
     if (b.dataset.short !== undefined) return post({ t: 'shortcut', option: b.dataset.short === '1' });
     if (b.dataset.run) { try { const r = JSON.parse(b.dataset.run); return post({ t: 'run', kind: r.kind, args: r.args }); } catch (err) { return; } }
     if (b.dataset.music) return post({ t: 'music', action: b.dataset.music });
@@ -244,6 +268,11 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     suggestions(list) { S.suggestions = list; if (S.mode === 'idle') render(); },
     event(e) {
       if (e.event === 'heard') { const el = document.getElementById('heard'); if (el) el.textContent = e.data.words; }
+      if (e.event === 'dictate') {
+        const input = document.getElementById('ask-input'), mic = document.getElementById('mic');
+        if (input) input.value = e.data.words || '';
+        if (e.data.final) { mic?.classList.remove('on'); if (input && input.value.trim()) document.getElementById('ask').requestSubmit(); }
+      }
       if (e.event === 'choose') { const el = document.getElementById('listen-state'); if (el) el.textContent = 'Say it, or pick'; }
     },
     close() { S.mode = 'closed'; panel.classList.remove('open'); document.getElementById('x')?.remove(); document.getElementById('more')?.remove(); size(); },

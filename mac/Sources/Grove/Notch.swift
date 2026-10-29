@@ -209,6 +209,12 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     js("grove.untuck()")
   }
 
+  /** Keep it open while something is under way in it — dictation, a question. */
+  func hold() {
+    pinned = true
+    closeTimer?.invalidate()
+  }
+
   func send(_ event: String, _ data: [String: Any]) {
     js("grove.event(\(json(["event": event, "data": data])))")
   }

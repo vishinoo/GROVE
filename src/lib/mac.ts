@@ -62,7 +62,8 @@ let channel: RealtimeChannel | null = null;
 let look: Look | null = null;
 let lastHeard = 0;
 let hello: ReturnType<typeof setInterval> | null = null;
-const jobs = new Map<string, (result: { ok: boolean; spoken: string }) => void>();
+export type MacResult = { ok: boolean; spoken: string; state?: string; task?: string; detail?: string };
+const jobs = new Map<string, (result: MacResult) => void>();
 
 function set(next: MacStatus) {
   status = next;
@@ -95,7 +96,13 @@ function heard(m: Record<string, unknown>) {
     if (first && look) send({ t: 'settings', ...look });
   } else if (m.t === 'done') {
     const id = String(m.id ?? '');
-    jobs.get(id)?.({ ok: Boolean(m.ok), spoken: String(m.spoken ?? '') });
+    jobs.get(id)?.({
+      ok: Boolean(m.ok),
+      spoken: String(m.spoken ?? ''),
+      state: m.state ? String(m.state) : undefined,
+      task: m.task ? String(m.task) : undefined,
+      detail: m.detail ? String(m.detail) : undefined,
+    });
     jobs.delete(id);
   } else if (m.t === 'think') {
     void answer(String(m.id ?? ''), String(m.instruction ?? ''), String(m.text ?? ''));
@@ -226,7 +233,7 @@ export function sendLook(next: Look): void {
  * Something for the Mac to do. Resolves with what to say, including when the
  * Mac is not there — the caller always gets a sentence, never a hang.
  */
-export function macJob(kind: string, args: Record<string, string>, timeoutMs = 20_000): Promise<{ ok: boolean; spoken: string }> {
+export function macJob(kind: string, args: Record<string, string>, timeoutMs = 20_000): Promise<MacResult> {
   if (status.state !== 'connected') {
     return Promise.resolve({
       ok: false,

@@ -1520,9 +1520,20 @@ closed. Making it permanently full size swallowed clicks under the panel's
 empty corners.
 
 `mac.music` and `mac.open` are the phone's abilities for it, separate from
-`mac.do` (the older agent bridge over HTTP). Neither spends money; driving a
-website — forms, bookings, orders, trades — is the next thing and will stop for
-a press like everything else that cannot be undone.
+`mac.do` (the older agent bridge over HTTP). **`mac.use` drives a website**
+(`mac/Sources/Grove/Agent.swift`): their own Chrome, so their own sign-ins,
+read → model → one move → read again, bounded at a minute a run so the phone
+always gets a sentence. It comes back done, with a question (spoken with the
+mic open; the answer re-runs it, and the task id is remembered so a dropped id
+still lands), or with a summary for a yes. **Code decides the press**: a click
+whose label reads like buy, send, submit, book, apply or delete becomes a
+confirmation whatever the model called it, only a confirmed re-run sends
+`approve`, the approval is for that element on that page, and password and card
+fields are never typed into. This is the first ability that can spend money,
+and it can only do it through the same yes as `mail.send`.
+
+Chrome needs View › Developer › Allow JavaScript from Apple Events ticked once.
+It is a security setting, so Grove says where it is and does not flip it.
 
 ## Checks
 
