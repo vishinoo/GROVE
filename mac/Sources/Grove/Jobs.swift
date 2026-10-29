@@ -73,7 +73,18 @@ enum Jobs {
         break
       }
     }
-    guard let url = found else { done(false, "I couldn't find an app called \(wanted) on your Mac."); return }
+    // Not an app: most things people name are websites ("open instagram"), so
+    // try the site in the browser rather than saying no.
+    guard let url = found else {
+      let site = wanted.lowercased().replacingOccurrences(of: " ", with: "")
+      if !site.isEmpty, site.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "." }), let web = URL(string: "https://\(site.contains(".") ? site : "www.\(site).com")") {
+        NSWorkspace.shared.open(web)
+        done(true, "Opened \(web.host ?? site) in your browser.")
+      } else {
+        done(false, "I couldn't find \(wanted) on your Mac.")
+      }
+      return
+    }
     NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, error in
       DispatchQueue.main.async {
         done(error == nil, error == nil ? "Opened \(url.deletingPathExtension().lastPathComponent)." : "\(url.deletingPathExtension().lastPathComponent) wouldn't open.")

@@ -3317,7 +3317,7 @@ let macTask: { id: string; at: number } | null = null;
 const MAC_USE: Ability = {
   id: 'mac.use',
   name: 'Use your Mac',
-  what: 'Does things on their laptop in its web browser: finds jobs, puts on a video, looks something up on a site, fills in a form, orders something. For anything they want done on the laptop, Mac or computer that is not just music or opening one app. It asks them questions as it goes and waits for a yes before buying, sending or submitting. When it has just asked them something, their next sentence is the answer: call this again with answer.',
+  what: 'Does things on their laptop in its web browser, where they are signed in to everything: checks Instagram or other DMs, finds jobs, puts on a video, looks something up on a site, fills in a form, orders something. Call it straight away, without asking first, for anything that needs a website or an account no other tool here reaches (Instagram, LinkedIn, Uber Eats, a shop, any site), whether or not they said laptop; never ask "should I check your laptop?". If the Mac is not connected it says so itself. It asks them questions as it goes and waits for a yes before buying, sending or submitting. When it has just asked them something, their next sentence is the answer: call this again with answer.',
   where: 'device',
   wired: true,
   needs: [],
@@ -3335,6 +3335,7 @@ const MAC_USE: Ability = {
     'put on a video about peter thiel on my mac',
     'check linkedin for jobs on my computer',
     'stop what my mac is doing',
+    'check my instagram dms',
   ],
   run: async (args) => {
     if (/^(yes|true|stop)$/i.test((args.stop || '').trim())) {

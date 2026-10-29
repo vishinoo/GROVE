@@ -265,6 +265,7 @@ final class Agent {
   - Food and shopping: if they did not name the exact item or restaurant, ask, offering the best two or three by name and price ("Smash Burger Co, $14, or Five Guys, $16?"). Never use quick-add on something they did not choose. Ignore existing carts unless they mention them.
   - For looking things up (jobs, reviews, prices), finish on the page that shows them and summarise the best two or three in done.
   - Do not repeat a move that just failed; try another way.
+  - Messages: Instagram DMs are at https://www.instagram.com/direct/inbox/. Reading is fine without asking; summarise who wrote and what in done. Never send a message without confirm.
   JSON only.
   """
 
