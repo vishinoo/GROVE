@@ -1,8 +1,8 @@
 /*
   Typed commands, recognised on the Mac.
 
-  "Play my agent playlist", "pause", "skip", "open Notes": things to do, with
-  one obvious meaning, which the Mac can do itself in a moment. Recognised by
+  "Pause", "skip", "louder", "open Notes": things to do, with exactly one
+  meaning, which the Mac can do itself in a moment. Recognised by
   their first words rather than sent to the model, which cannot press play and
   answers as if asked a question. Anything that is not one of these is a
   question and goes to Grove as before.
@@ -26,15 +26,12 @@ enum Commands {
     if text.range(of: #"^(turn it up|louder|volume up|increase( the)? volume|raise( the)? volume)"#, options: .regularExpression) != nil { return make("volume.up") }
     if text.range(of: #"^(turn it down|quieter|volume down|decrease( the)? volume|lower( the)? volume)"#, options: .regularExpression) != nil { return make("volume.down") }
 
-    if let m = text.range(of: #"^(play|put on|shuffle)\b"#, options: .regularExpression) {
-      var what = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).dropFirst(text.distance(from: text.startIndex, to: m.upperBound)))
-      for filler in [" playlist", "my ", "the ", "some ", "music", "something"] {
-        what = what.replacingOccurrences(of: filler, with: " ", options: .caseInsensitive)
-      }
-      var args = ["what": what.trimmingCharacters(in: .whitespacesAndNewlines)]
-      if text.contains("playlist") { args["playlist"] = "yes" }
-      return make("music.play", args)
-    }
+    // Only "play" with nothing after it. "Play my gym playlist" and "play a
+    // game of chess" begin the same way and mean different things, so
+    // anything longer goes to the model, which decides between music, the
+    // browser and an answer for the price of one cheap call. Taken here, the
+    // chess game was searched for in Apple Music.
+    if text.range(of: #"^(play|shuffle|play music|play some music|shuffle my music)$"#, options: .regularExpression) != nil { return make("music.play", ["what": ""]) }
 
     if let m = text.range(of: #"^open\b"#, options: .regularExpression) {
       let what = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).dropFirst(text.distance(from: text.startIndex, to: m.upperBound)))
