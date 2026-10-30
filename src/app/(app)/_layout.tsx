@@ -13,6 +13,7 @@ import { useAgent } from '@/context/agent';
 import { capabilities } from '@/lib/capabilities';
 import { useDevMode } from '@/lib/devMode';
 import { sendLook, startMac } from '@/lib/mac';
+import { loadFacts, memoryData } from '@/lib/memory';
 import { rememberIntro } from '@/lib/consolidate';
 import { takeIntro } from '@/lib/firstRun';
 import { Elevation, Fonts, Radius } from '@/constants/theme';
@@ -98,9 +99,12 @@ function OnTheField() {
   useEffect(() => {
     void startMac();
   }, []);
+  // And what Grove knows about them, refreshed as memory changes: without it
+  // the Mac was a stranger with the same voice, asked for a film and picking
+  // any film.
   useEffect(() => {
     const colour = fieldColour(persona.sky);
-    sendLook({
+    const look = {
       colour: colour.key,
       label: colour.label,
       stops: colour.c,
@@ -108,8 +112,15 @@ function OnTheField() {
       warp: colour.warp,
       name: persona.name,
       manner: persona.manner,
-    });
-  }, [persona.sky, persona.name, persona.manner]);
+    };
+    const send = () =>
+      void (uid ? loadFacts(uid) : Promise.resolve([]))
+        .then((facts) => sendLook({ ...look, about: memoryData(facts).slice(0, 3000) }))
+        .catch(() => sendLook(look));
+    send();
+    const every = setInterval(send, 10 * 60_000);
+    return () => clearInterval(every);
+  }, [persona.sky, persona.name, persona.manner, uid]);
 
   // What someone wrote in the intro before there was an account to keep it in.
   useEffect(() => {

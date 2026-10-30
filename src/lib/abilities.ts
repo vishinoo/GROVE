@@ -3349,7 +3349,9 @@ const MAC_USE: Ability = {
     const goal = (args.goal || '').trim();
 
     let result;
-    if (task && (approve || answer)) {
+    // A new goal is a new task. Resuming whatever was pending because an
+    // answer argument came along with it is how an old job came back.
+    if (task && (approve || (answer && (!goal || args.task)))) {
       result = await macJob('agent.resume', { task, answer, approve: approve ? 'yes' : '' }, 88_000);
     } else if (goal) {
       result = await macJob('agent.start', { goal }, 88_000);

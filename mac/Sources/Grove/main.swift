@@ -155,7 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     stands in for a selection when the question is about "this" or "what I
     copied" — the commonest reason to ask from the notch at all.
   */
-  private func askFree(_ instruction: String) {
+  private func askFree(_ instruction: String, earlier: String = "") {
     // A command is done, not discussed: the model cannot press play, and
     // asked to, it says so politely, which is the worst answer there is.
     if let job = Commands.job(for: instruction) {
@@ -172,10 +172,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     // Not about anything highlighted: answer it, or go and do it in Chrome.
     notch.show("thinking", ["text": "", "ask": instruction], pin: true)
+    Log.say("ask: \(instruction.prefix(80))")
     Task { @MainActor in
-      switch await Thinking.decide(instruction, manner: self.look.manner) {
-      case .act(let goal):
-        self.runAgent(Job(id: UUID().uuidString, kind: "agent.start", args: ["goal": goal], fromPhone: false)) { _, _, _ in }
+      let decision = await Thinking.decide(earlier.isEmpty ? instruction : earlier + "Now they say: " + instruction, manner: self.look.manner, about: self.look.about)
+      Log.say("ask: decided \(String(describing: decision).prefix(100))")
+      switch decision {
+      case .music(let action, let what, _, let say):
+        let kinds = ["pause": "music.pause", "resume": "music.resume", "next": "music.next", "previous": "music.previous", "louder": "volume.up", "quieter": "volume.down"]
+        let kind = kinds[action] ?? "music.play"
+        self.run(Job(id: UUID().uuidString, kind: kind, args: kind == "music.play" ? ["what": what, "say": say] : ["say": say], fromPhone: false)) { _, _, _ in }
+      case .act(let goal, let say):
+        self.runAgent(Job(id: UUID().uuidString, kind: "agent.start", args: ["goal": goal, "say": say], fromPhone: false)) { _, _, _ in }
+      case .message(let to, let text):
+        self.runAgent(Job(id: UUID().uuidString, kind: "agent.message", args: ["to": to, "text": text, "goal": "Text \(to)"], fromPhone: false)) { _, _, _ in }
       case .answer(let text):
         self.notch.show("answer", ["ask": instruction, "text": text, "via": "mac"], pin: true)
       case nil:
@@ -197,7 +206,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     switch message["t"] as? String {
     case "ask":
       guard let text = message["instruction"] as? String else { break }
-      if captured != nil { think(text) } else { askFree(text) }
+      let follows = (message["follows"] as? String).map { ask in "Earlier they asked: \(ask)\nYou answered: \((message["said"] as? String) ?? "")\n\n" } ?? ""
+      if captured != nil { think(text) } else { askFree(text, earlier: follows) }
     case "replace":
       if let captured, let result = captured.result {
         notch.close()
@@ -225,6 +235,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     case "settings":
       showSettings()
     case "back":
+      captured = nil
       notch.show("idle", [:], pin: false)
     case "mic":
       dictate()
@@ -269,7 +280,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     Jobs.run(job) { [weak self] ok, spoken in
       guard let self else { return }
       if job.fromPhone || job.kind.hasPrefix("music.") || job.kind.hasPrefix("open.") {
-        self.notch.show("done", ["title": title, "text": spoken, "ok": ok], pin: false, closeAfter: 2.8)
+        // Grove's own line when it had one ("Some Calvin Harris. You've earned it."),
+        // the plain receipt when it did not, or when it went wrong.
+        let said = ok ? (job.args["say"].flatMap { $0.isEmpty ? nil : $0 } ?? spoken) : spoken
+        self.notch.show("done", ["title": title, "text": said, "ok": ok], pin: false, closeAfter: said == spoken ? 2.8 : 4)
       }
       reply(ok, spoken, [:])
     }
@@ -282,11 +296,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     agent.onStep = { [weak self] goal, steps in
       self?.notch.show("job", ["title": goal, "from": from, "steps": steps, "at": max(0, steps.count - 1)], pin: true)
     }
-    notch.show("job", ["title": goal.isEmpty ? "Carrying on" : goal, "from": from, "steps": [job.kind == "agent.start" ? "Opening Chrome" : "Carrying on"], "at": 0], pin: true)
+    let said = job.args["say"].flatMap { $0.isEmpty ? nil : $0 }
+    let first = said ?? ["agent.start": "Opening Chrome", "agent.message": "Finding them in Contacts"][job.kind] ?? "Carrying on"
+    notch.show("job", ["title": goal.isEmpty ? "Carrying on" : goal, "from": from, "steps": [first], "at": 0], pin: true)
+    agent.manner = look.manner
     Task { @MainActor in
-      let result = job.kind == "agent.start"
-        ? await self.agent.start(goal: goal)
-        : await self.agent.resume(task: job.args["task"] ?? "", answer: job.args["answer"] ?? "", approve: job.args["approve"] == "yes")
+      // A run started here can take its time: someone is watching the notch.
+      // The phone is waiting on an answer, so its runs check in sooner.
+      let result: AgentResult
+      switch job.kind {
+      case "agent.start": result = await self.agent.start(goal: goal, budget: job.fromPhone ? 60 : 240)
+      case "agent.message": result = await self.agent.message(to: job.args["to"] ?? "", text: job.args["text"] ?? "")
+      default: result = await self.agent.resume(task: job.args["task"] ?? "", answer: job.args["answer"] ?? "", approve: job.args["approve"] == "yes")
+      }
       switch result.state {
       case "ask" where !job.fromPhone, "confirm" where !job.fromPhone:
         // Asked here, answered here: a box for the answer, or the two buttons for a yes.
@@ -296,7 +318,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       case "stopped":
         break  // the Stop already said so
       default:
-        self.notch.show("done", ["title": "Done", "text": result.spoken, "ok": result.state == "done"], pin: false, closeAfter: 4)
+        // Long enough to read what it found, then back to the ask box.
+        let read = min(10, 2.5 + Double(result.spoken.count) * 0.04)
+        self.notch.show("done", ["title": "Done", "text": result.spoken, "ok": result.state == "done"], pin: true, closeAfter: read, thenHome: true)
       }
       reply(result.state != "failed", result.spoken, ["state": result.state, "task": result.task, "detail": result.detail])
     }

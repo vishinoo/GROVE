@@ -54,6 +54,8 @@ export type Look = {
   warp: number;
   name: string;
   manner: string;
+  /** What Grove remembers about them, so the Mac picks a film they would watch, not any film. */
+  about?: string;
 };
 
 let status: MacStatus = { state: 'signed-out' };
@@ -93,7 +95,12 @@ function heard(m: Record<string, unknown>) {
   if (m.t === 'welcome') {
     const first = status.state !== 'connected';
     set({ ...status, state: 'connected', mac: String(m.mac ?? 'Mac'), note: undefined });
-    if (first && look) send({ t: 'settings', ...look });
+    if (first && look) {
+      send({ t: 'settings', ...look });
+      sentAbout = look.about;
+      const { about: _about, ...rest } = look;
+      sentLook = rest;
+    }
   } else if (m.t === 'done') {
     const id = String(m.id ?? '');
     jobs.get(id)?.({
@@ -226,7 +233,21 @@ export async function stopMac(): Promise<void> {
 /** The phone's colour, name and manner, sent now and whenever they change. */
 export function sendLook(next: Look): void {
   look = next;
-  if (status.state === 'connected') send({ t: 'settings', ...next });
+  if (status.state !== 'connected') return;
+  // The Mac keeps its own encrypted copy of what Grove remembers, so it is
+  // only sent when it has changed; a refresh that changed nothing sends none.
+  const fresh = next.about !== undefined && next.about !== sentAbout;
+  if (!fresh && sameLook(next)) return;
+  const { about, ...rest } = next;
+  send({ t: 'settings', ...rest, ...(fresh ? { about } : {}) });
+  if (fresh) sentAbout = about;
+  sentLook = rest;
+}
+let sentAbout: string | undefined;
+let sentLook: Omit<Look, 'about'> | null = null;
+function sameLook(next: Look): boolean {
+  const { about: _about, ...rest } = next;
+  return JSON.stringify(rest) === JSON.stringify(sentLook);
 }
 
 /**

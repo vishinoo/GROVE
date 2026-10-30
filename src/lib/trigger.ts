@@ -70,6 +70,13 @@ export type Signal = {
   gap?: number;
   /** Whether this one was swallowed as a duplicate of the press before it. */
   coalesced: boolean;
+  /**
+   * What became of it, in a few words: "ignored · Grove's own sound",
+   * "started listening", "yes?". A press that arrived and did nothing is the
+   * failure this app can least afford and the one hardest to see from a
+   * pocket, so every way of dropping one says so here.
+   */
+  outcome?: string;
 };
 
 /**
@@ -293,7 +300,7 @@ function handleRemote(event: RemoteEvent): void {
   // Our own session re-take, not a finger. Recorded so the diagnostics panel
   // shows it was seen and discarded rather than silently dropped.
   if (event.command === 'volume-down' && Date.now() < suppressVolumeUntil) {
-    record(event, true);
+    record(event, true, 'ignored · Grove’s own sound');
     return;
   }
 
@@ -308,7 +315,7 @@ function handleRemote(event: RemoteEvent): void {
   }
 
   const duplicate = at - lastAt < COALESCE_MS;
-  record(event, duplicate);
+  record(event, duplicate, duplicate ? `merged · ${Math.round(at - lastAt)}ms after the last` : undefined);
   if (duplicate) return;
 
   lastAt = at;
@@ -319,7 +326,18 @@ function emit(trigger: Trigger): void {
   for (const listener of listeners) listener(trigger);
 }
 
-function record(event: RemoteEvent, coalesced: boolean): void {
+/** What the press that just arrived ended up doing. Called by the agent. */
+export function notePress(outcome: string): void {
+  console.log('[grove:trigger]', outcome);
+  for (let i = signals.length - 1; i >= 0; i--) {
+    if (!signals[i].coalesced) {
+      if (!signals[i].outcome) signals[i].outcome = outcome;
+      return;
+    }
+  }
+}
+
+function record(event: RemoteEvent, coalesced: boolean, outcome?: string): void {
   // Printed as well as recorded: the diagnostics panel needs the app open on
   // that screen, and the interesting presses happen with the phone locked.
   const sincePrevious = signals.length > 0 ? Math.round(event.at * 1000 - signals[signals.length - 1].at) : 0;
@@ -344,6 +362,7 @@ function record(event: RemoteEvent, coalesced: boolean): void {
     // the second is discarded and would have nothing left to measure against.
     gap: previous ? Math.round(at - previous.at) : undefined,
     coalesced,
+    outcome,
   });
   // A ring buffer, because this exists to be read on a diagnostics screen and
   // nobody needs the thousandth-most-recent button press.

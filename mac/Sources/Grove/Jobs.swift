@@ -77,7 +77,7 @@ enum Jobs {
     // try the site in the browser rather than saying no.
     guard let url = found else {
       let site = wanted.lowercased().replacingOccurrences(of: " ", with: "")
-      if !site.isEmpty, site.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "." }), let web = URL(string: "https://\(site.contains(".") ? site : "www.\(site).com")") {
+      if !site.isEmpty, !wanted.contains(" ") || wanted.contains("."), site.count <= 30, site.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "." }), let web = URL(string: "https://\(site.contains(".") ? site : "www.\(site).com")") {
         NSWorkspace.shared.open(web)
         done(true, "Opened \(web.host ?? site) in your browser.")
       } else {
@@ -116,7 +116,12 @@ enum Music {
       tell application "Music"
         set shuffle enabled to true
         play library playlist 1
-        return "library|" & name of current track & "|" & artist of current track
+        delay 0.6
+        try
+          return "library|" & name of current track & "|" & artist of current track
+        on error
+          return "library||"
+        end try
       end tell
       """
     } else {
@@ -141,10 +146,15 @@ enum Music {
           return "playlist|" & name of found
         end if
         \(playlistOnly ? "return \"none\"" : """
-        set hits to (every track of library playlist 1 whose name contains wanted or artist contains wanted or album contains wanted)
+        set hits to (search library playlist 1 for wanted)
         if (count of hits) > 0 then
           play item 1 of hits
-          return "song|" & name of current track & "|" & artist of current track
+          delay 0.6
+          try
+            return "song|" & name of current track & "|" & artist of current track
+          on error
+            return "song|" & name of item 1 of hits & "|"
+          end try
         end if
         return "none"
         """)
@@ -153,7 +163,17 @@ enum Music {
     }
     Script.run(script) { ok, out in
       if !ok { done(false, "Music wouldn't respond. Grove may need permission to control it, in the Grove menu's checklist."); return }
-      if out == "none" { done(false, playlistOnly ? "I couldn't find a playlist called \(q)." : "I couldn't find \(q) in your music."); return }
+      if out == "none" {
+        // Not in their library: Music's own search has the rest of the catalogue.
+        if !playlistOnly, let term = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+           let url = URL(string: "music://music.apple.com/search?term=\(term)") {
+          NSWorkspace.shared.open(url)
+          done(true, "\(q) isn't in your library, so I've searched for it in Music.")
+        } else {
+          done(false, "I couldn't find a playlist called \(q).")
+        }
+        return
+      }
       let bits = out.split(separator: "|", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
       switch bits.first {
       case "playlist": done(true, "Playing your \(bits.count > 1 ? bits[1] : q) playlist.")

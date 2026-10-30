@@ -1532,6 +1532,31 @@ confirmation whatever the model called it, only a confirmed re-run sends
 fields are never typed into. This is the first ability that can spend money,
 and it can only do it through the same yes as `mail.send`.
 
+**How a run stays on track** is general, not per site. A task opens its own
+tab, because starting on whatever was in front is how "text my brother" was
+sent on Instagram. The first move writes a plan that rides with every move
+after. Each click, type or key press is checked against the page it was meant
+to change, and the model is told when nothing changed, which is how it
+tells a missed press from a working one. The page reader goes into shadow
+roots and reads tile and cell states, so a game board is visible at all.
+`keys` sends real key presses for pages that listen to the keyboard. Moves are
+chosen by `gemini-flash-latest` with thinking, under a second a move, with the
+lite model as fallback. Every yes names the button it will press, and a press
+already approved is never asked for twice. Runs started on the Mac get four
+minutes; the phone's get one, because it is waiting.
+
+**The Mac knows them, cheaply.** The phone sends what Grove remembers with its
+colours, and only when it has changed. The Mac seals it with AES-GCM under a
+Keychain key, this-device-only (`Vault.swift`, one file in Application
+Support/Grove). Only the call that decides an ask reads it, and only the lines
+that bear on it, capped at about 1200 characters. That call writes the choice
+into the goal ("put on Interstellar, they like Nolan"), so the browser's moves
+never carry the memory at all.
+
+Texts go through Messages, not a website (`agent.message`): the person is
+found in Contacts by name or relation, a pick among several is remembered,
+and the exact words are read back before sending.
+
 Chrome needs View › Developer › Allow JavaScript from Apple Events ticked once.
 It is a security setting, so Grove says where it is and does not flip it.
 

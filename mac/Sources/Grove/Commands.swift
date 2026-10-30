@@ -39,7 +39,11 @@ enum Commands {
     if let m = text.range(of: #"^open\b"#, options: .regularExpression) {
       let what = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).dropFirst(text.distance(from: text.startIndex, to: m.upperBound)))
         .trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !what.isEmpty else { return nil }
+      // "open Notes", "open instagram.com" — a name, not a sentence. "Open my
+      // email and check who replied" is a task, and taken as an app name it
+      // became a .com made of the whole sentence.
+      guard !what.isEmpty, what.split(separator: " ").count <= 3,
+            what.range(of: #"(?i)\b(and|then|my|to|for|check|find|see|if)\b"#, options: .regularExpression) == nil else { return nil }
       let link = what.contains("://") || what.range(of: #"^[\w-]+(\.[\w-]+)+(/\S*)?$"#, options: .regularExpression) != nil
       return make(link ? "open.url" : "open.app", link ? ["url": what] : ["app": what])
     }

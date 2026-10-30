@@ -17,6 +17,7 @@ struct LookUpdate {
   var warp: Double?
   var name: String?
   var manner: String?
+  var about: String?
 }
 
 final class Look {
@@ -27,6 +28,8 @@ final class Look {
   var warp = 1.6
   var name = "Grove"
   var manner = ""
+  /** What Grove remembers about them, from the phone; sealed on disk by Vault, sent only when it changes. */
+  var about = ""
 
   static func load() -> Look {
     let look = Look()
@@ -38,6 +41,7 @@ final class Look {
     if d.object(forKey: "grove.look.warp") != nil { look.warp = d.double(forKey: "grove.look.warp") }
     if let v = d.string(forKey: "grove.look.name") { look.name = v }
     if let v = d.string(forKey: "grove.look.manner") { look.manner = v }
+    look.about = Vault.load()
     return look
   }
 
@@ -49,6 +53,7 @@ final class Look {
     if let v = u.warp { warp = v }
     if let v = u.name, !v.isEmpty { name = v }
     if let v = u.manner { manner = v }
+    if let v = u.about, v != about { about = v; Vault.save(v) }
     let d = UserDefaults.standard
     d.set(colour, forKey: "grove.look.colour")
     d.set(colourLabel, forKey: "grove.look.label")

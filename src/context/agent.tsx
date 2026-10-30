@@ -2054,12 +2054,14 @@ function shortFailure(text: string): string {
         clearTimeout(yesTimer.current);
         yesTimer.current = null;
         awaitingYes.current = null;
+        trigger.notePress('second press · cancelled');
         buzz();
         utter('Cancelled.');
         return;
       } else {
         // First press. Wait to see whether a second follows before acting,
         // because acting immediately makes a double press impossible to express.
+        trigger.notePress('yes, unless a second press follows');
         buzz();
         yesTimer.current = setTimeout(() => {
           yesTimer.current = null;
@@ -2086,6 +2088,7 @@ function shortFailure(text: string): string {
 
     // Barge-in. Stop talking and start listening, in that order.
     if (current === 'speaking' || isSpeaking()) {
+      trigger.notePress('interrupted · listening');
       stopSpeaking();
       void beginListening(false);
       return;
@@ -2095,9 +2098,11 @@ function shortFailure(text: string): string {
       // stopping it would do nothing and leave the app stuck there forever, so
       // treat it as a fresh press instead of a stop.
       if (!isListening()) {
+        trigger.notePress('listening had stalled · started again');
         void beginListening(false);
         return;
       }
+      trigger.notePress('stopped listening');
       // Also invalidates a start that is still waiting on the session.
       listenSeq.current += 1;
       // Settle what's been said rather than discarding it.
@@ -2111,11 +2116,13 @@ function shortFailure(text: string): string {
     // cancelled at the top of this function, so there is nothing left to
     // protect — barge in like any other state.
     if (current === 'thinking' || current === 'working') {
+      trigger.notePress(`interrupted ${current} · listening`);
       stopSpeaking();
       void beginListening(false);
       return;
     }
 
+    trigger.notePress('started listening');
     void beginListening(false);
     // confirmNow and utter are both useCallback with no deps, so they are
     // stable and listing them changes nothing but the lint.
@@ -2180,7 +2187,7 @@ function shortFailure(text: string): string {
             Date.now() - lastSound.current < 4000 &&
             (stateNow.current === 'thinking' || stateNow.current === 'working')
           ) {
-            console.log('[grove:trigger] volume press ignored — Grove just made a sound');
+            trigger.notePress('ignored · Grove had just made a sound while thinking');
             break;
           }
           press();

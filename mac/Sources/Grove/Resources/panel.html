@@ -56,6 +56,14 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
 .set .name { flex: 1; font-size: 13.5px; }
 .set .val { font-size: 12.5px; color: rgba(255,255,255,0.72); }
 .ask { display: flex; gap: 8px; }
+.prompt { font-size: 12.5px; color: rgba(255,255,255,0.72); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%; }
+.icon { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.24); background: rgba(255,255,255,0.13); color: #FFFFFF; cursor: pointer; display: grid; place-items: center; padding: 0; }
+.icon:hover { background: rgba(255,255,255,0.22); }
+.icon[hidden] { display: none; }
+.icon.solid { background: #FFFFFF; color: #0B0C12; border-color: #FFFFFF; }
+.icon svg, .mic svg { pointer-events: none; }
+.reply { display: flex; gap: 8px; align-items: center; }
+.reply .ask { flex: 1; }
 .ask input { flex: 1; min-width: 0; background: rgba(8,10,16,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; color: #FFFFFF; font: 400 13.5px var(--sans); padding: 9px 12px; outline: none; -webkit-user-select: text; user-select: text; }
 .ask input::placeholder { color: rgba(255,255,255,0.55); }
 .mic { width: 34px; flex: 0 0 34px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.24); background: rgba(255,255,255,0.13); color: #FFFFFF; cursor: pointer; display: grid; place-items: center; padding: 0; }
@@ -111,6 +119,12 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
   };
   window.addEventListener('error', (e) => post({ t: 'log', text: `${e.message} (${e.lineno})` }));
   const setH = (n) => { panel.style.setProperty('--h', (n + S.notchH) + 'px'); size(); };
+  // As tall as what is there, up to the mode's size: a short answer gets a
+  // short card rather than floating above empty glass.
+  const fit = (max) => requestAnimationFrame(() => {
+    const last = body.lastElementChild;
+    if (last) setH(Math.min(max, last.offsetTop + last.offsetHeight + 16));
+  });
 
   // Two at a time, turning over through the list every few seconds.
   let turn = 0;
@@ -127,6 +141,15 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     el.style.transition = 'opacity 220ms ease'; el.style.opacity = '0';
     setTimeout(() => { el.innerHTML = pair(); el.style.opacity = '1'; }, 230);
   }, 6000);
+  const svg = (d) => `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  const ICON = {
+    mic: svg('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>'),
+    send: svg('<path d="M12 19V5M6 11l6-6 6 6"/>'),
+    copy: svg('<rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/>'),
+    done: svg('<path d="M5 12l5 5 9-10"/>'),
+    home: svg('<path d="M3 11l9-7 9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/>'),
+    replace: svg('<path d="M4 7h13l-3-3M20 17H7l3 3"/>'),
+  };
   // An answer to the browser engine goes back to its task; anything else is a new ask.
   const wireAsk = (answering) => {
     const input = document.getElementById('ask-input');
@@ -136,7 +159,10 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
       e.preventDefault();
       const text = input.value.trim();
       if (!text) return;
-      post(answering ? { t: 'answer', task: S.data.task, text } : { t: 'ask', instruction: text });
+      // A reply under an answer carries the exchange it follows, so "and in
+      // French?" is asked of that answer and not of nothing.
+      const follows = (S.mode === 'answer' || S.mode === 'rewrite') ? { follows: S.data.ask || '', said: S.data.text || '' } : {};
+      post(answering ? { t: 'answer', task: S.data.task, text } : { t: 'ask', instruction: text, ...follows });
     });
     if (!answering) setTimeout(() => input.focus(), 30);
   };
@@ -169,7 +195,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     if (m === 'listening') {
       setH(232);
       body.innerHTML = `
-        <div class="row space"><span class="label">Highlighted</span><span class="row small" id="listen-state"><span class="bars"><i></i><i></i><i></i><i></i></span>Listening</span></div>
+        <div class="row space"><span class="prompt">What you selected</span><span class="row small" id="listen-state"><span class="bars"><i></i><i></i><i></i><i></i></span>Listening</span></div>
         <div class="quote">${esc(d.text)}</div>
         <div class="heard" id="heard"></div>
         <div class="chips">
@@ -183,17 +209,28 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     }
     if (m === 'thinking') {
       setH(118);
-      body.innerHTML = `<div class="row space"><span class="label">${esc(d.ask)}</span><span class="row small"><span class="bars"><i></i><i></i><i></i><i></i></span>Thinking</span></div>${d.text ? `<div class="quote">${esc(d.text)}</div>` : ''}`;
+      body.innerHTML = `<div class="row space"><span class="prompt">${esc(d.ask)}</span><span class="row small"><span class="bars"><i></i><i></i><i></i><i></i></span>Thinking</span></div>${d.text ? `<div class="quote">${esc(d.text)}</div>` : ''}`;
     }
     if (m === 'rewrite' || m === 'answer') {
-      setH(m === 'rewrite' ? 222 : 206);
+      setH(m === 'rewrite' ? 236 : 220);
+      // One row: reply in the same box as the first ask, the mic (or, for
+      // changed text, Replace in its place), then copy and home.
       body.innerHTML = `
-        <div class="row space"><span class="label">${esc(d.ask)}</span><span class="small">${d.via === 'phone' ? 'From your iPhone' : d.failed ? '' : 'On this Mac'}</span></div>
+        <div class="row space"><span class="prompt">${esc(d.ask)}</span><span class="small">${d.via === 'phone' ? 'From your iPhone' : d.failed ? '' : 'On this Mac'}</span></div>
         <div class="answer">${esc(d.text)}</div>
-        <div class="chips">
-          ${m === 'rewrite' ? '<button class="chip solid" data-act="replace">Replace  ⏎</button>' : ''}
-          <button class="chip" data-act="copy">Copy</button><button class="chip" data-act="close">Close</button>
+        <div class="reply">
+          <form class="ask" id="ask"><input id="ask-input" placeholder="${m === 'rewrite' ? 'Change it again' : 'Reply'}" autocomplete="off">
+            ${m === 'rewrite' ? `<button class="icon solid" type="button" data-act="replace" aria-label="Replace" title="Replace (⏎)">${ICON.replace}</button>` : `<button class="mic" type="button" id="mic" aria-label="Speak" title="Speak">${ICON.mic}</button>`}
+            <button class="icon solid" type="submit" id="send" aria-label="Send" title="Send (⏎)" hidden>${ICON.send}</button></form>
+          <button class="icon" type="button" data-act="copy" aria-label="Copy" title="Copy">${ICON.copy}</button>
+          <button class="icon" type="button" data-act="back" aria-label="Home" title="Home">${ICON.home}</button>
         </div>`;
+      wireAsk();
+      setTimeout(() => document.activeElement?.blur(), 40);
+      fit(m === 'rewrite' ? 236 : 220);
+      // Send only appears once there is something to send; Return does the same.
+      const input = document.getElementById('ask-input'), send = document.getElementById('send');
+      input?.addEventListener('input', () => { send.hidden = !input.value.trim(); });
     }
     if (m === 'job') {
       setH(104 + Math.min((d.steps || []).length, 3) * 25);
@@ -256,7 +293,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     if (b.dataset.short !== undefined) return post({ t: 'shortcut', option: b.dataset.short === '1' });
     if (b.dataset.run) { try { const r = JSON.parse(b.dataset.run); return post({ t: 'run', kind: r.kind, args: r.args }); } catch (err) { return; } }
     if (b.dataset.music) return post({ t: 'music', action: b.dataset.music });
-    if (b.dataset.act === 'copy') return post({ t: 'copy', text: S.data.text });
+    if (b.dataset.act === 'copy') { b.innerHTML = ICON.done; setTimeout(() => { b.innerHTML = ICON.copy; }, 1200); return post({ t: 'copy', text: S.data.text }); }
     if (b.dataset.act) return post({ t: b.dataset.act });
   });
   document.addEventListener('keydown', (e) => {

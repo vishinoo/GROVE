@@ -231,7 +231,8 @@ final class Link {
     case "settings":
       onLook?(LookUpdate(
         colour: m["colour"] as? String, label: m["label"] as? String, stops: m["stops"] as? [String],
-        speed: m["speed"] as? Double, warp: m["warp"] as? Double, name: m["name"] as? String, manner: m["manner"] as? String))
+        speed: m["speed"] as? Double, warp: m["warp"] as? Double, name: m["name"] as? String, manner: m["manner"] as? String,
+        about: m["about"] as? String))
     case "job":
       let id = (m["id"] as? String) ?? UUID().uuidString
       let args = (m["args"] as? [String: Any] ?? [:]).compactMapValues { "\($0)" }

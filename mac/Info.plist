@@ -40,7 +40,7 @@
   <key>NSSpeechRecognitionUsageDescription</key>
   <string>Grove turns what you say after ⌘K into an instruction, on this Mac.</string>
   <key>NSAppleEventsUsageDescription</key>
-  <string>Grove plays, pauses and skips music in Apple Music when you or your phone ask it to.</string>
+  <string>Grove plays music in Apple Music, drives Chrome, and sends texts through Messages to people in Contacts, when you or your phone ask it to.</string>
   <key>NSLocalNetworkUsageDescription</key>
   <string>Grove talks to Grove on your iPhone over your Wi-Fi.</string>
   <key>NSBonjourServices</key>

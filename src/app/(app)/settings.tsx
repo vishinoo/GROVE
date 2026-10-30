@@ -1150,11 +1150,17 @@ function Diagnostics() {
                 }}
               >
                 <Dot tone={signal.coalesced ? 'off' : 'live'} size={6} />
-                <Text style={[Type.bodySm, { color: palette.ink, flex: 1 }]}>
-                  {signal.command}
-                  {signal.phase ? ` · ${signal.phase}` : ''}
-                </Text>
-                <Mono>{signal.coalesced ? 'merged' : 'used'}</Mono>
+                <View style={{ flex: 1 }}>
+                  <Text style={[Type.bodySm, { color: palette.ink }]}>
+                    {signal.outcome ?? (signal.coalesced ? 'merged' : 'arrived, nothing after')}
+                  </Text>
+                  <Text style={[Type.bodySm, { color: palette.muted, fontSize: 12 }]}>
+                    {signal.command}
+                    {signal.phase ? ` · ${signal.phase}` : ''}
+                    {signal.gap !== undefined ? ` · +${signal.gap}ms` : ''}
+                  </Text>
+                </View>
+                <Mono>{new Date(signal.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</Mono>
               </View>
             ))
           )}

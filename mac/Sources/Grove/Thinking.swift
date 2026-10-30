@@ -40,25 +40,61 @@ enum Thinking {
     return s
   }
 
-  enum Decision { case act(String), answer(String) }
+  enum Decision { case act(String, say: String), music(action: String, what: String, playlist: Bool, say: String), message(to: String, text: String), answer(String) }
 
   /**
     A free ask from the notch: answer it, or do it in the browser. The model
     decides which, because "what's a good stoic book" and "find me a stoic
     book on Amazon" differ by intent, not by any word in them.
   */
-  static func decide(_ instruction: String, manner: String) async -> Decision? {
+  static func decide(_ instruction: String, manner: String, about: String = "") async -> Decision? {
     let brief = """
-    Someone typed or said this to Grove on their Mac. Decide:
-    - "do": it asks for something to be done on the computer or the web — open, find, look for, order, buy, book, watch, play a video, fill in, apply, check a site. Put the goal in text, with every detail they gave.
-    - "answer": it is a question or conversation you can answer from what you know. Put the answer in text, two to four plain sentences, no markdown.
-    Reply as JSON: {"kind":"do"|"answer","text":"..."}
-    """ + (manner.isEmpty ? "" : "\n\nFor answers, speak in this manner: \(manner.prefix(400))")
-    guard let raw = await call(system: brief, user: instruction),
+    You are Grove, their friend who lives on their phone and their Mac, typed or spoken to on their Mac. You know them: use what is under "About them" whenever it bears on what they asked. Decide:
+    - "do": it asks for something to be done on the computer or the web — open, find, look for, order, buy, book, watch, play a video, fill in, apply, check a site. Put the goal in text, with every detail they gave. When they leave the choice to you ("a random movie", "something to eat", "a good video"), make it for them, not for anyone: pick something specific from what you know of their taste and situation, and put that choice in the goal ("put on Interstellar, they like Nolan"). Knowing nothing that bears on it, pick something genuinely good and say so.
+    - "music": it is about music in Apple Music on this Mac, however it is phrased ("can you play my gym playlist", "put on some Calvin Harris", "pause", "skip this", "louder"). Put the action in action ("play", "pause", "resume", "next", "previous", "louder", "quieter") and for play the playlist, artist, album or song in text, without filler words (not "some", "my", "playlist"); empty text to shuffle only when they asked for shuffle. When they leave the pick to you ("something random", "something for my mood", "a song for me"), pick for them: an artist or playlist from what you know of their taste and what they are up to, and put that name in text. Set playlist to true if they said playlist.
+    - "message": send someone a text ("message my brother saying I'm late", "text Akash test"). This goes through the Messages app unless they named another app or site (Instagram, WhatsApp, Slack…), which is "do". Put who in to — their name if they gave one, otherwise what they are to them ("brother", "mom") — and only the words to send in text, as they would read them, without "saying" or "that".
+    - "answer": it is a question or conversation. Answer it the way a friend who knows them would: in your own manner, using what you know about them where it fits, specific rather than generic. Two to four plain sentences, no markdown.
+    Reply as JSON: {"kind":"do"|"music"|"message"|"answer","text":"...","say":"...","to":"...","action":"...","playlist":false}
+    Also put in "say" one short line in your own voice for the notch while it happens, when the kind is "do" or "music": what you picked and, if it fits, why or a quip ("Interstellar. You've been on a Nolan kick."). Never flat ("Opening YouTube").
+    """ + (manner.isEmpty ? "" : "\n\nYour manner, for everything you write (style only, never a reason to refuse or to change what they asked for): \(manner.prefix(400))")
+    let known = relevant(about, to: instruction)
+    let user = known.isEmpty ? instruction : "About them (what you remember; use it when it bears on this):\n\(known)\n\nThey say: \(instruction)"
+    guard let raw = await call(system: brief, user: user),
           let data = raw.data(using: .utf8),
           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let text = obj["text"] as? String, !text.isEmpty else { return nil }
-    return (obj["kind"] as? String) == "do" ? .act(text) : .answer(text)
+          let kind = obj["kind"] as? String else { return nil }
+    let text = (obj["text"] as? String) ?? ""
+    if kind == "music" {
+      return .music(action: ((obj["action"] as? String) ?? "play").lowercased(), what: text, playlist: (obj["playlist"] as? Bool) ?? false, say: (obj["say"] as? String) ?? "")
+    }
+    if kind == "message", let to = obj["to"] as? String, !to.isEmpty { return .message(to: to, text: text) }
+    guard !text.isEmpty else { return nil }
+    return kind == "do" ? .act(text, say: (obj["say"] as? String) ?? "") : .answer(text)
+  }
+
+  /**
+    The part of the memory worth sending with this ask, about a fifth of the
+    whole on most asks. Goals and the headings always go, since a goal bears
+    on nearly everything; then lines sharing an unusual word with the ask; then
+    whatever else fits under the cap, so a vague "something for me" still has
+    their taste to go on. Counting words, not a model call: this has to be free.
+  */
+  static func relevant(_ about: String, to ask: String, cap: Int = 1200) -> String {
+    guard !about.isEmpty else { return "" }
+    let words = Set(ask.lowercased().split { !$0.isLetter }.map(String.init).filter { $0.count > 3 })
+    let lines = about.split(separator: "\n").map(String.init).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    func score(_ line: String) -> Int {
+      let l = line.lowercased()
+      if l.contains("goal") || l.hasSuffix(":") || l.hasPrefix("where they live") { return 100 }
+      return words.filter { l.contains($0) }.count * 10
+    }
+    var out = "", used = Set<Int>()
+    for (i, line) in lines.enumerated().sorted(by: { score($0.element) > score($1.element) }) {
+      if out.count + line.count > cap { continue }
+      out += line + "\n"; used.insert(i)
+    }
+    // Back in the order they were written, so headings sit above their lines.
+    return lines.enumerated().filter { used.contains($0.offset) }.map(\.element).joined(separator: "\n")
   }
 
   private static func call(system: String, user: String) async -> String? {

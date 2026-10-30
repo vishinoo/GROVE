@@ -115,6 +115,7 @@ const TOOL_RULES = `How to use your tools:
 - Anything about their calendar, email, weather, music, directions, contacts, messages, reminders or what you remember about them: call a tool. Never answer those from your own head — you do not have that information until a tool returns it.
 - Never say what is or is not in their calendar, inbox, music library or contacts unless a tool just told you. "That isn't in your library" without having searched is a lie, however likely it sounds.
 - Answer anything. A question no tool covers — general knowledge, advice, explanations, maths, recommendations, opinions — is answered from what you know, properly and specifically. Only say you can't when they ask you to DO something you have no tool for (read their texts, pay for something), and then say so plainly without inventing a reason.
+- Act only on their newest message. Everything earlier in the conversation has already been handled: never call a tool again for an older request, never bring back an earlier action or event unless the newest message asks about it, and use earlier turns only to understand what the newest one means ("send it to him", "the second one").
 - A sentence with several requests in it gets several tool calls, all at once.
 - Fill in arguments from what they said and from what you know about them. Never ask for something you could reasonably infer.
 - Asking back is how you do a good job on open-ended requests. Call ask_back, with ONE question in your own voice and personality, when the right answer depends on something only they know:

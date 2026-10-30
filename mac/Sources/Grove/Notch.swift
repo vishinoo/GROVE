@@ -40,6 +40,13 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
   private var queue: [String] = []
   private var isOpen = false
   private var pinned = false
+  /**
+    Stays out while the Mac is doing something or waiting on an answer, even
+    with the pointer elsewhere: having to go back to the notch to see whether
+    a task finished is the thing it exists to save. Done, stopped or a new
+    state ends it.
+  */
+  private var sticky = false
   private var visible: CGFloat = 0
   private var visibleWidth: CGFloat = 0
   private var closeTimer: Timer?
@@ -156,7 +163,7 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
       entered = true
       leaveTimer?.invalidate()
       leaveTimer = nil
-    } else if entered, leaveTimer == nil {
+    } else if entered, leaveTimer == nil, !sticky {
       // Short: the panel should feel like it follows the pointer, not like
       // it is deciding whether to.
       let wasPinned = pinned
@@ -168,7 +175,8 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     }
   }
 
-  func show(_ mode: String, _ data: [String: Any], pin: Bool, closeAfter: TimeInterval? = nil) {
+  /** `thenHome`: when the time is up, go back to the notch's own page rather than closing. */
+  func show(_ mode: String, _ data: [String: Any], pin: Bool, closeAfter: TimeInterval? = nil, thenHome: Bool = false) {
     tucked = false
     // Opened from the notch, the pointer is already on it.
     entered = notchRect.insetBy(dx: 0, dy: -6).contains(NSEvent.mouseLocation)
@@ -179,6 +187,7 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     if !isOpen { Log.say("notch: open (\(mode))") }
     isOpen = true
     pinned = pin
+    sticky = mode == "job" || mode == "waiting"
     panel.ignoresMouseEvents = false
     var payload = data
     payload["mode"] = mode
@@ -186,6 +195,7 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     if let closeAfter {
       closeTimer = Timer.scheduledTimer(withTimeInterval: closeAfter, repeats: false) { [weak self] _ in
         guard let self else { return }
+        if thenHome { self.show("idle", [:], pin: false); return }
         // Stay open while the pointer is over it; it goes when the pointer does,
         // and straight away if the pointer never came near it.
         self.pinned = false
