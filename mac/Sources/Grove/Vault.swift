@@ -15,10 +15,11 @@ import Security
 
 enum Vault {
   private static let account = "grove.memory.key"
-  private static var file: URL {
+  /** One sealed file per kind of thing kept: "memory" (from the phone), "lessons" (Lessons.swift). */
+  private static func file(_ name: String) -> URL {
     let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Grove")
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    return dir.appendingPathComponent("memory.sealed")
+    return dir.appendingPathComponent("\(name).sealed")
   }
 
   private static func key() -> SymmetricKey? {
@@ -33,16 +34,16 @@ enum Vault {
     return SecItemAdd(add as CFDictionary, nil) == errSecSuccess ? fresh : nil
   }
 
-  static func save(_ text: String) {
+  static func save(_ text: String, as name: String = "memory") {
     guard let key = key(), let sealed = try? AES.GCM.seal(Data(text.utf8), using: key).combined else {
       Log.say("vault: could not seal; memory kept in memory only")
       return
     }
-    try? sealed.write(to: file, options: [.atomic, .completeFileProtection])
+    try? sealed.write(to: file(name), options: [.atomic, .completeFileProtection])
   }
 
-  static func load() -> String {
-    guard let data = try? Data(contentsOf: file), let key = key(),
+  static func load(_ name: String = "memory") -> String {
+    guard let data = try? Data(contentsOf: file(name)), let key = key(),
           let box = try? AES.GCM.SealedBox(combined: data),
           let plain = try? AES.GCM.open(box, using: key) else { return "" }
     return String(decoding: plain, as: UTF8.self)

@@ -643,6 +643,63 @@ the branch that runs an accepted one, and `npm run verify` checks both: an
 offer carrying a confirmation would be a way to reach a paid app with one yes
 to a question Grove thought of by itself.
 
+## One sentence, five things
+
+`src/lib/plan.ts`. *"Prepare my evening. Check my calendar, order dinner,
+finish the presentation on my Mac, email it to my colleague, and put the film
+back on."*
+
+**The model was never the problem.** Measured against the live model with the
+real declarations, that sentence comes back as five tool calls, split
+correctly, each quoting the words that asked for it, and routed to the right
+machine — the calendar to the phone, three jobs to the Mac. Environment
+awareness, planning and argument-filling all already worked.
+
+The tool loop was the problem. It ran the reads, reached the first call that
+*does* something, and returned — and **the three calls after it were dropped
+with nothing on screen to say so.** One sentence asking for five things did
+two of them, and the failure read exactly like Grove deciding the rest was not
+worth doing.
+
+So what is left is kept, and said back one at a time once the step before it
+has finished.
+
+**A step is stored as their own words, not as a tool call.** `plan.ts` holds
+the quote the model already had to supply (`asked`), and `carryOn` hands it to
+`exchange` as though it had just been said. Not because that is cheaper — it
+costs one model call a step — but because **everything that guards an action
+lives on that path**: the check that their words really asked for it, the
+confirmation, the press, the twenty-five second expiry, the offer budget. A
+queue that called abilities directly would have to re-implement every one of
+them, and the first one somebody forgot would be a plan that spent money
+without asking.
+
+What a plan may never do, each asserted rather than described:
+
+- **Confirm anything.** `confirmed`, `draft` and `new_email` are refused on
+  the way in and never written on the way out. Every irreversible step stops
+  and asks for its own press. *A plan makes Grove finish a sentence; it does
+  not make Grove trusted.* So "prepare my evening" still takes a press for the
+  dinner and a press for the email — that is the design working, not a gap.
+- **Run while a press is owed.** Two things armed at once is one press
+  deciding the wrong one.
+- **Survive the conversation.** A new sentence abandons it, because changing
+  your mind must not leave four actions still coming.
+- **Outlive the moment.** Eight minutes, for the same reason a confirmation
+  expires: a queue left armed is a booby trap.
+- **Grow.** Four steps, so the five-part sentence finishes and a model having
+  an enthusiastic afternoon cannot write itself a to-do list.
+- **Teach the register.** A replayed step is Grove reading their words back,
+  and counting it would have `rapport.ts` learning from its own echo.
+
+A step that fails ends the plan. Ploughing on through "I couldn't reach your
+Mac" to order the dinner anyway is how one wrong word becomes four.
+
+**What this does not yet do**: a step cannot take the *output* of the one
+before it. "Email the finished presentation" is replayed as those words, so
+`mac.use` has to find the presentation itself rather than being handed it.
+That is the next piece, and it is a different one.
+
 ## A searched answer, and an answer that only looks searched
 
 Asked for "burgers near me", Grove named a burger place that does not exist.
@@ -1618,6 +1675,30 @@ the one before. "goon session" became calendar events whenever the model
 did not understand; now an action nobody's words ask for is refused before
 it runs and the model is told to ask_back. The opening glance is a greeting
 for the hour and never remarks on Grove's own work.
+
+**A done is checked by a reader that did not do the work.** The mover is
+generous about its own work: five moves of 2048 called playing it, a
+crossword answer typed into a hidden box called filled in. `Agent.check`
+reads the goal, what happened and the page (and the window, with Screen
+Recording) and only "achieved" is accepted; three refusals are said as a
+failure. A done after a move that changed nothing, or with no move at all,
+is sent back to look first.
+
+**Grove learns sites** (`Lessons.swift`). A task that took some doing ends
+with one lite call that writes what is worth knowing next time — how a site
+works, what to close first, where a frame lives — sealed by site in the
+vault and handed to every later task there. Nothing about the person, and
+nothing about Grove's own plumbing (a JavaScript refusal once taught
+"handle permission blocks" to nytimes.com).
+
+**The reader reads where the page is.** Text came from the top of the page
+whatever was scrolled to, so the ingredients of a recipe were never in it;
+it is now taken from the scroll position, and `find` searches the whole page
+like ⌘F. Popups are named and their buttons listed first; frames from other
+sites are listed by address, since their insides cannot be read. Named keys
+(ArrowDown) are pressed, not typed. Text a page ignores is typed for real.
+Every Chrome call is bounded at twelve seconds, and tabs in a profile where
+JavaScript is off are not offered.
 
 Texts go through Messages, not a website (`agent.message`): the person is
 found in Contacts by name or relation, a pick among several is remembered,

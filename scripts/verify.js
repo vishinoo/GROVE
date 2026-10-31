@@ -1487,6 +1487,109 @@ laterSection('An address you have used once is one Grove knows', async () => {
   }
 });
 
+/**
+ * One sentence can ask for five things, and all five happen.
+ *
+ * "Prepare my evening. Check my calendar, order dinner, finish the
+ * presentation on my Mac, email it to my colleague, and put the film back
+ * on." Measured against the live model: it comes back with five tool calls,
+ * split correctly, each quoting the words that asked for it, routed to the
+ * right machine. The model was never the problem.
+ *
+ * The tool loop was. It ran the reads, reached the first call that *does*
+ * something, and returned — and **the three calls after it were dropped with
+ * nothing on screen to say so**, which reads exactly like Grove deciding
+ * those parts were not worth doing. One sentence asking for five things did
+ * two of them.
+ *
+ * What is left is now kept, as the words that asked for each, and said back
+ * one at a time once the one before it has finished. The safety of that
+ * rests entirely on the rules below, which is why they are asserted rather
+ * than described: a queue that could confirm its own steps would turn one
+ * misheard sentence into four actions nobody pressed for.
+ */
+section('The rest of what they asked for');
+{
+  const plan = require(path.join(OUT, 'lib/plan.js'));
+  const idFor = (n) => require(path.join(OUT, 'lib/tools.js')).abilityIdFor(n, ALL.map((a) => a.id));
+  const step = (name, args) => [{ name, args }];
+
+  const kept = plan.planFrom([
+    { name: 'mac_use', args: { asked: 'finish the presentation on my Mac', goal: 'x' } },
+    { name: 'mac_use', args: { asked: 'email it to my colleague', goal: 'y' } },
+  ], ALL, idFor);
+  check(kept !== null && kept.steps.length === 2, 'what the turn did not run is kept');
+  check(
+    kept !== null && kept.steps.every((x) => x.asked && x.tool),
+    'each step carries the words that asked for it and the tool it named'
+  );
+
+  /*
+   * The one that matters. Everything else here is tidiness; this is the
+   * difference between a queue that finishes a sentence and a queue that
+   * spends money on its own authority.
+   */
+  for (const bad of ['confirmed', 'draft', 'new_email']) {
+    const sneak = plan.planFrom(step('mail_send', { asked: 'email Priya', [bad]: 'yes' }), ALL, idFor);
+    check(sneak === null, `a step carrying \`${bad}\` is refused outright`,
+      'a plan may never answer the press its own step is about to ask for');
+  }
+  const source = fs.readFileSync(path.join(ROOT, 'src/lib/plan.ts'), 'utf8');
+  check(
+    !/confirmed:\s*'yes'|confirmed:\s*"yes"/.test(source),
+    'and nothing in plan.ts ever writes one'
+  );
+
+  // A read already ran inside the loop. Queueing it would do it twice.
+  check(
+    plan.planFrom(step('calendar_read', { asked: 'check my calendar' }), ALL, idFor) === null,
+    'a pure read is never queued, having already run in the turn'
+  );
+
+  // No quote, no replay: inventing the words would be Grove putting them in
+  // somebody's mouth, and those words are what the askedFor guard checks.
+  check(
+    plan.planFrom(step('food_order', { what: 'pizza' }), ALL, idFor) === null,
+    'a step with no quote from their sentence is dropped'
+  );
+
+  const many = plan.planFrom(
+    Array.from({ length: 12 }, (_, i) => ({ name: 'mac_use', args: { asked: `thing ${i}`, goal: 'x' } })),
+    ALL, idFor
+  );
+  check(
+    many !== null && many.steps.length === plan.MOST_STEPS && plan.MOST_STEPS <= 4,
+    `a model having an afternoon is capped at ${plan.MOST_STEPS} steps`
+  );
+
+  const twice = plan.planFrom([
+    { name: 'food_order', args: { asked: 'order dinner', what: 'dinner' } },
+    { name: 'food_order', args: { asked: 'order dinner', what: 'dinner' } },
+  ], ALL, idFor);
+  check(twice !== null && twice.steps.length === 1, 'the same order twice is one step, not two');
+
+  const old = { steps: [{ tool: 'mac.use', asked: 'x' }], at: 0, made: Date.now() - plan.PLAN_LIFE_MS - 1000 };
+  check(plan.nextStep(old) === null, 'a plan left standing expires, like a confirmation left armed');
+  check(plan.PLAN_LIFE_MS <= 10 * 60_000, 'and does not outlive the conversation it came from');
+
+  /* The wiring, which the module cannot see. */
+  const brain = fs.readFileSync(path.join(ROOT, 'src/lib/brain.ts'), 'utf8');
+  const agent = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
+  check(/planFrom\(\s*\n?\s*turn\.calls\.slice\(at \+ 1\)/.test(brain),
+    'the loop keeps the calls after the one it returns on');
+  check(/if \(!replaying\) queue\.current = null;/.test(agent),
+    'a new sentence abandons whatever was queued',
+    'changing your mind must not leave four actions still coming');
+  check(/if \(!replaying\) void noticeRapport/.test(agent),
+    'a replayed step is not counted as evidence of how they talk',
+    'otherwise the register learns from Grove reading their words back');
+  check(/!awaitingYes\.current\) await carryOn/.test(agent),
+    'the next step waits while a press is still owed',
+    'two things armed at once is one press deciding the wrong one');
+  check(/await carryOn\(outcome\.ok\)/.test(agent) && (agent.match(/carryOn\(outcome\.ok\)/g) || []).length >= 2,
+    'and it carries on from both the pressed path and the unpressed one');
+}
+
 section('Listening does not stop the music');
 {
   const listen = fs.readFileSync(path.join(ROOT, 'src/lib/listen.ts'), 'utf8');

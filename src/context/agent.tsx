@@ -75,6 +75,7 @@ import {
   type Proposal,
 } from '@/lib/offers';
 import { closing } from '@/lib/closing';
+import * as plan from '@/lib/plan';
 import { plainFailure } from '@/lib/failure';
 import * as struggles from '@/lib/struggles';
 import { afterTurn, consolidateNow } from '@/lib/consolidate';
@@ -282,6 +283,16 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    * saying "enough" (`closing.ts`), and anything Grove says unprompted.
    */
   const hushAfter = useRef(-1);
+  /*
+    The rest of what one sentence asked for.
+
+    In memory only, and deliberately: an evening prepared the next morning is
+    not a feature, and a queue of actions that survives a relaunch is a queue
+    nobody remembers agreeing to.
+  */
+  const queue = useRef<plan.Plan | null>(null);
+  /** So a finished step can hand the next one back in. */
+  const exchangeRef = useRef<((said: string, heardAloud?: boolean, replaying?: boolean) => Promise<void>) | null>(null);
   /** When the current claim to be listening began, for the desync watchdog. */
   const listenStartedAt = useRef(0);
   /** When Grove last made a sound, which is when a phantom press can arrive. */
@@ -682,7 +693,15 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    * because the ordering *is* the design — reply, record, then run — and
    * scattering it across handlers is how that ordering quietly gets lost.
    */
-  const exchange = useCallback(async (said: string, heardAloud = true) => {
+  const exchange = useCallback(async (said: string, heardAloud = true, replaying = false) => {
+    /*
+      A new sentence abandons whatever was queued.
+
+      "Prepare my evening" and then "actually, what's the weather" is someone
+      changing their mind, not someone adding a sixth thing to the list. Only
+      a replay of the plan's own words is allowed to leave it standing.
+    */
+    if (!replaying) queue.current = null;
     /*
       "Enough" comes off the front of everything else.
 
@@ -739,7 +758,11 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
     // How they talk, counted locally from their own words. Shapes every reply
     // after this one; see rapport.ts.
-    void noticeRapport(account, text);
+    //
+    // Not for a replayed step: those are their words from a minute ago, said
+    // back by Grove, and counting them again would have the register learning
+    // from Grove's own echo.
+    if (!replaying) void noticeRapport(account, text);
     const asked = text;
 
     // Whatever Grove was still saying is finished with.
@@ -981,6 +1004,14 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     if (!mine()) return;
 
     tellMac(text, reply.text);
+    /*
+      The rest of what this sentence asked for.
+
+      Only ever set from the turn that read the sentence, and only when the
+      model asked for more than one thing. A replayed step carries no plan of
+      its own, so a queue can never extend itself.
+    */
+    if (!replaying) queue.current = reply.plan ?? null;
     history.current = [
       ...history.current,
       newTurn('user', text),
@@ -1319,6 +1350,11 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         }
       }
     }
+
+    // And on to the rest of the sentence, if it asked for more than this.
+    // Not while something is still waiting on a press: that step has not
+    // finished, and starting the next one would leave two things armed.
+    if (mine() && !awaitingYes.current) await carryOn(outcome.ok);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1870,6 +1906,8 @@ function shortFailure(text: string): string {
   );
 
   beginListeningRef.current = beginListening;
+  // Lets a finished step hand the next one back into the same entrance.
+  exchangeRef.current = exchange;
 
   /*
     A claim to be listening has to be backed by a recogniser.
@@ -2025,6 +2063,36 @@ function shortFailure(text: string): string {
     void offerMade(live.current.uid, offer);
   }, []);
 
+  /**
+   * The next thing the sentence asked for, once this one has finished.
+   *
+   * Said back in their own words rather than run directly, so the step goes
+   * through the whole path an action has always gone through: their words
+   * are checked against what they said, anything irreversible stops and asks
+   * for its own press, and nothing here can answer that press. See plan.ts.
+   *
+   * A step that failed ends the plan. Ploughing on through "I couldn't reach
+   * your Mac" to order the dinner anyway is how one wrong word becomes four.
+   */
+  const carryOn = useCallback(async (ok: boolean) => {
+    const held = queue.current;
+    if (!ok || !held) {
+      queue.current = null;
+      return;
+    }
+    const step = plan.nextStep(held);
+    if (!step) {
+      queue.current = null;
+      return;
+    }
+    queue.current = plan.advance(held);
+    // After the last answer has been said, not over the top of it.
+    await whenQuiet();
+    if (!mounted.current) return;
+    console.log('[grove:plan] next —', JSON.stringify(step.asked));
+    await exchangeRef.current?.(step.asked, false, true);
+  }, []);
+
   const confirmNow = useCallback(async () => {
     const waiting = awaitingYes.current;
     awaitingYes.current = null;
@@ -2039,6 +2107,9 @@ function shortFailure(text: string): string {
     setCaption(outcome.spoken);
     await whenQuiet();
     utter(outcome.ok ? outcome.spoken : shortFailure(outcome.spoken));
+    // A press finishes one step of a longer sentence as readily as it
+    // finishes the whole of a short one.
+    await carryOn(outcome.ok);
     // setState and utter are both stable (useCallback with no deps).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

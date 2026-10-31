@@ -28,6 +28,7 @@
  */
 
 import { abilityById, currentAccount, runAbility, type Ability } from './abilities';
+import { planFrom } from './plan';
 import type { GroveContext, GroveReply, Turn } from './grove';
 import { asToolResults, asUserTurn, lastModelTrouble, lightAfterAction, lightFallback, toolTurn, type ToolHistory } from './lightModel';
 import { macContext, macReachable } from './mac';
@@ -706,7 +707,8 @@ async function runTurn(
     contents.push(turn.raw);
     const results: { name: string; result: unknown }[] = [];
 
-    for (const call of turn.calls) {
+    for (let at = 0; at < turn.calls.length; at += 1) {
+      const call = turn.calls[at];
       // Asking back ends the turn: the question is the reply, and the answer
       // arrives as the next sentence with this one in the history.
       if (call.name.toLowerCase().replace(/[^a-z]/g, '') === 'askback') {
@@ -816,10 +818,28 @@ async function runTurn(
           .filter(unique)
           .join(' ');
         const said = wrote || plainSpeech(fromReads);
+        /*
+          What they asked for after this one.
+
+          The loop returns here, because doing things is the turn's job and
+          not the loop's — and everything the model asked for after this call
+          used to be dropped on that return with nothing to say it had been.
+          One sentence asking for five things did two of them.
+
+          Kept as the words that asked for each, to be said back one at a
+          time once this one has finished. See plan.ts for why that rather
+          than calling the abilities straight.
+        */
+        const plan = planFrom(
+          turn.calls.slice(at + 1).map((c) => ({ name: c.name, args: c.args })),
+          available,
+          (name) => abilityIdFor(name, available.map((a) => a.id))
+        );
         return {
           text: said,
           ability,
           args,
+          plan,
           fact,
           ran,
           holdForTool: !said,

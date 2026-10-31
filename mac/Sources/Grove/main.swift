@@ -37,7 +37,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     Log.trim()
-    Log.say("launch: accessibility \(AXIsProcessTrusted() ? "granted" : "not granted"), signed in \(account.session != nil)")
+    // Asked once, so Grove is in the Screen Recording list to be switched on.
+    if !CGPreflightScreenCaptureAccess() && !UserDefaults.standard.bool(forKey: "grove.asked.screen") {
+      UserDefaults.standard.set(true, forKey: "grove.asked.screen")
+      _ = CGRequestScreenCaptureAccess()
+    }
+    Log.say("launch: accessibility \(AXIsProcessTrusted() ? "granted" : "not granted"), screen recording \(CGPreflightScreenCaptureAccess() ? "granted" : "not granted"), signed in \(account.session != nil)")
 
     notch = Notch(look: look)
     link = Link(account: account)

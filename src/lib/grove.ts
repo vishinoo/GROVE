@@ -26,6 +26,7 @@
  */
 
 import { usableAbilities, type Ability } from './abilities';
+import type { Plan } from './plan';
 import { askWithTools, type RanTool } from './brain';
 import { type Extracted, type Fact } from './memory';
 import { type Persona } from './persona';
@@ -64,6 +65,13 @@ export type GroveReply = {
   text: string;
   /** The ability to run now, when the user asked for something to happen. */
   ability?: Ability;
+  /**
+   * The rest of what the sentence asked for, when it asked for more than one
+   * thing. Held as their own words and said back one at a time once the
+   * ability above has finished. Nothing in it is run here, and nothing in it
+   * can carry a confirmation — see plan.ts.
+   */
+  plan?: Plan | null;
   args: Record<string, string>;
   /**
    * Set when the sentence carried a recurrence, so the caller saves a spark

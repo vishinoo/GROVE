@@ -65,6 +65,14 @@ final class Agent {
     var tab = ""
     /** A game is being played: it runs until the game ends, not until the usual check-in. */
     var game = false
+    /** It said done after a move that changed nothing, and was asked to look again. */
+    var doubted = false
+    /** Times the check refused its done. */
+    var checks = 0
+    /** Moves that changed something or went somewhere: a done with none is checked. */
+    var acts = 0
+    /** The sites it has been on, for what it learns afterwards. */
+    var sites: [String] = []
     /** The model asked to see the page; the next step carries a picture. */
     var look = false
     /** Where the last picture was taken, to turn a point on it into a point on the screen. */
@@ -230,7 +238,19 @@ final class Agent {
 
   // MARK: the loop
 
+  /** A run, then what it taught: read in the background, so the answer is never kept waiting for it. */
   private func loop(_ task: Task) async -> AgentResult {
+    let result = await steps(task)
+    // Not from a run Chrome itself refused: that says nothing about the site.
+    if result.state != "stopped", !result.spoken.contains("Chrome") {
+      let goal = task.goal, history = task.history, sites = task.sites
+      let outcome = "\(result.state): \(result.spoken)"
+      _Concurrency.Task.detached { await Lessons.learn(goal: goal, history: history, outcome: outcome, sites: sites) }
+    }
+    return result
+  }
+
+  private func steps(_ task: Task) async -> AgentResult {
     current += 1
     let mine = current
     for _ in 0..<60 where running { try? await _Concurrency.Task.sleep(nanoseconds: 250_000_000) }
@@ -239,6 +259,7 @@ final class Agent {
     defer { live -= 1; if !task.tab.isEmpty { lastTab = task.tab } }
     let started = Date()
     if let failure = await Browser.ready() { return AgentResult(state: "failed", spoken: failure, task: task.id) }
+    Log.say("agent: \(task.id) chrome ready")
 
     while Date().timeIntervalSince(started) < (task.game ? Agent.gameBudget : task.budget) {
       if mine != current { return AgentResult(state: "stopped", spoken: "Stopped.", task: task.id) }
@@ -256,6 +277,7 @@ final class Agent {
       var page = Browser.Page()
       if task.tab.isEmpty {
         page.tabs = await Browser.tabs(last: lastTab)
+        Log.say("agent: \(task.id) \(page.tabs.count) tabs read")
       } else {
         Browser.tab = task.tab
         page = await Browser.read()
@@ -268,6 +290,8 @@ final class Agent {
         }
       }
       if !page.chess.isEmpty { task.game = true }
+      let here = Lessons.site(page.url)
+      if !here.isEmpty, task.sites.last != here { task.sites.append(here) }
       // A picture when text cannot say what is there. Not for a chess board,
       // which the reader already names square by square.
       var picture: Data?
@@ -293,7 +317,8 @@ final class Agent {
       // done anything — so a press that missed looked the same as one that
       // worked, and it carried on as though the message had been typed.
       let seen = "\(page.url)|\(page.title)|\(page.board)|\(page.chess)|\(page.text)|" + page.items.map { "\($0["label"] ?? "")=\($0["value"] ?? "")\($0["state"] ?? "")" }.joined()
-      if task.acted && seen == task.seen {
+      let unmoved = task.acted && seen == task.seen
+      if unmoved {
         task.history.append("Result: nothing on the page changed after that move. It did not work; try a different element or way.")
       }
       task.seen = seen
@@ -304,7 +329,7 @@ final class Agent {
       // An ordinary click on an ordinary page does not need it.
       let recent = task.history.suffix(2).joined()
       let hard = task.steps == 1 || !page.board.isEmpty || !page.chess.isEmpty || recent.contains("nothing on the page changed") || recent.contains("already did")
-      guard let move = await Agent.next(goal: task.goal, plan: task.plan, history: task.history, page: page, manner: manner, think: hard || picture != nil, recent: task.steps == 1 || task.tab.isEmpty ? recent : "", picture: picture) else {
+      guard let move = await Agent.next(goal: task.goal, plan: task.plan, history: task.history, page: page, manner: manner, think: hard || picture != nil, recent: task.steps == 1 || task.tab.isEmpty ? recent : "", picture: picture, learned: Lessons.known(for: page.url, goal: task.goal)) else {
         return AgentResult(state: "failed", spoken: "I couldn't work out the next step on your Mac.", task: task.id)
       }
       // Stop pressed while the model was thinking: the move it came back with is not made.
@@ -334,6 +359,7 @@ final class Agent {
       if let said = move["step"] as? String, !said.isEmpty { show(task, said) }
       if task.plan.isEmpty, let plan = move["plan"] as? String { task.plan = plan }
       if ["click", "type", "keys", "select", "move"].contains(action) { task.acted = true }
+      if ["click", "type", "keys", "select", "move", "go", "find"].contains(action) { task.acts += 1 }
       if task.tab.isEmpty && !["go", "tab", "ask", "done", "fail"].contains(action) {
         task.history.append("There is no tab yet: take one of theirs with tab, or go somewhere first.")
         continue
@@ -348,6 +374,12 @@ final class Agent {
         }
         await Browser.go(url)
         task.history.append("Went to \(url)")
+      case "find":
+        // The page searched, not skimmed: every place a word appears, with the
+        // lines around it, and the first one scrolled into view. Asked how much
+        // flour a recipe used, it scrolled past the ingredients four times.
+        let r = await Browser.find(text)
+        task.history.append("Found \"\(text)\" on the page: \(r)")
       case "look":
         task.look = true
         task.history.append("Asked to see the page")
@@ -418,7 +450,21 @@ final class Agent {
           task.history.append("Refused to type into [\(n)]: password and card fields are theirs to fill.")
           continue
         }
-        let r = await Browser.js(Browser.typeJS(n, text))
+        await Browser.watch()
+        var r = await Browser.js(Browser.typeJS(n, text))
+        try? await _Concurrency.Task.sleep(nanoseconds: 500_000_000)
+        // A grid, a game or an editor takes key presses, not a value set by a
+        // script: "SUIT" went into a crossword's hidden box and the grid stayed
+        // empty. When the page did not react and the box is not a plain field
+        // holding the text, it is clicked and typed into for real.
+        if !(await Browser.changed()), await Browser.ignored(n, text) {
+          if let point = await Browser.screenPoint(of: n) {
+            await Browser.front()
+            await Browser.realClick(point)
+          }
+          await Browser.realType(text)
+          r = "typed with the keyboard, because the page ignored text set by a script"
+        }
         if (move["enter"] as? Bool) == true { await Browser.pressReturn() }
         task.history.append("Typed \"\(text)\" into [\(n)] \(label) → \(r)")
         try? await _Concurrency.Task.sleep(nanoseconds: 1_500_000_000)
@@ -450,9 +496,42 @@ final class Agent {
       case "confirm":
         return askToConfirm(task, n: n, url: page.url, summary: (move["summary"] as? String) ?? text, label: label)
       case "done":
+        // Its last move changed nothing, and it says it is finished. That was
+        // a crossword "filled in" with an empty grid. Asked once to look.
+        if unmoved && !task.doubted {
+          task.doubted = true
+          task.history.append("You said done, but your last move changed nothing on the page. Look at the page: if what they asked for is not visibly there, it is not done; try another way.")
+          task.look = true
+          continue
+        }
+        // Nothing done in this task at all. Something already on the page is
+        // not this task's work: a crossword left half-typed by an earlier run
+        // was announced as filled in.
+        if task.acts == 0 && !task.doubted {
+          task.doubted = true
+          task.history.append("You said done without doing anything in this task. What is on the page may be left from before. If they asked you to do something (play, fill in, choose, send), do it now and check it took; if they only wanted it opened or shown and it is in front of them, say done again.")
+          task.look = true
+          continue
+        }
+        // Checked by a second reader before it is believed. The mover judges
+        // its own work and is generous about it: five moves of 2048 called
+        // playing it, a guessed crossword answer called filling it in. The
+        // check sees the goal, what happened and the page as it is now, and
+        // only "achieved" is accepted. Twice refused is said as a failure.
+        let claim = (move["summary"] as? String) ?? text
+        let verdict = await Agent.check(goal: task.goal, claim: claim, history: task.history, page: page, picture: await Agent.picture())
+        Log.say("agent: \(task.id) check \(verdict.ok ? "passed" : "refused"): \(verdict.why.prefix(120))")
+        if !verdict.ok {
+          task.checks += 1
+          if task.checks >= 3 {
+            tasks[task.id] = nil
+            return AgentResult(state: "failed", spoken: "I couldn't get that done properly on your Mac: \(verdict.why)", task: task.id, detail: page.url)
+          }
+          task.history.append("Not done yet — a check of the page says: \(verdict.why) Carry on until it is really done.")
+          continue
+        }
         tasks[task.id] = nil
-        let said = (move["summary"] as? String) ?? text
-        return AgentResult(state: "done", spoken: said.isEmpty ? "Done on your Mac." : said, task: task.id, detail: page.url)
+        return AgentResult(state: "done", spoken: claim.isEmpty ? "Done on your Mac." : claim, task: task.id, detail: page.url)
       default:
         tasks[task.id] = nil
         let said = (move["summary"] as? String) ?? text
@@ -518,9 +597,10 @@ final class Agent {
   {"action":"go","url":"https://..."} — open an address. Go straight to search addresses when you can: https://www.youtube.com/results?search_query=..., https://www.google.com/search?q=..., https://www.amazon.com/s?k=..., https://www.linkedin.com/jobs/search/?keywords=..., https://www.indeed.com/jobs?q=...
   {"action":"click","n":12,"summary":"..."} — when the click puts something in a cart or an order, summary is the question they will answer: the item, how many and the price, e.g. "One OG Cheeseburger from Burger's Priest, $11.99. Add it to your order?" Check the quantity is what they asked for (one, unless they said more) before adding.
   {"action":"type","n":4,"text":"...","enter":true}
-  {"action":"keys","text":"crane","enter":true} — real key presses, for pages that listen to the keyboard rather than a box: games like Wordle, shortcuts. Not for typing into a field.
+  {"action":"keys","text":"crane","enter":true} — real key presses, for pages that listen to the keyboard rather than a box: games like Wordle, shortcuts. Not for typing into a field. For named keys, give their names separated by spaces, several at once when that is the plan: "ArrowLeft ArrowLeft ArrowUp", "Escape", "Space", "Tab", "Backspace".
   {"action":"select","n":7,"text":"option"}
   {"action":"scroll"} {"action":"back"} {"action":"wait"}
+  {"action":"find","text":"flour"} — search the whole page for a word and get every place it appears with the lines around it. Use it first whenever you need a particular fact from a long page (an amount, a price, a time, a name) instead of scrolling and skimming.
   {"action":"move","from":"e2","to":"e4"} — a chess move, when the page has a Chess section.
   {"action":"look"} — see a picture of the window next move, when the text does not tell you what is on the page (a game drawn on a canvas, a video player, a frame). When you have a picture, {"action":"click","x":0.42,"y":0.61} clicks that point on it, as fractions of its width and height.
   {"action":"ask","question":"..."} — only when you cannot go on without them: a detail only they know, or a choice that is theirs and costs money (which item, which size, which restaurant). One short spoken question.
@@ -534,6 +614,9 @@ final class Agent {
   - When the goal says they will play or do it themselves, set it up for them (open it, start the game, pick the settings) and then done: never make their moves or do their part.
   - Games of any kind: play them, properly and to the end, unless they only asked to open one or will play themselves. Find the rules from the page if you do not know them, think about every move, and use what fits the game: keys for keyboard games, a click for buttons and tiles, a point on the picture for anything drawn. Never stop at "started".
   - Videos, films and songs: get the thing itself playing, not a search page; the official upload when there is one, a full film only from a service they use. If it is already open in their tab, carry on there.
+  - Popups are normal: cookie banners, sign-up offers, ads, "welcome" screens, newsletter boxes. When one is listed, close it or accept it (Accept, Agree, Continue, Close, X, No thanks, Maybe later) and carry on with the page underneath. A popup is never a reason to leave a site or to try another one.
+  - Before looking anywhere else, check whether what you came for is already here and usable: a grid, a board, keys, a canvas, a Play or Start button, a frame. If it is, use it. A game, puzzle or player often lives in a frame from another site: go to the frame's address to open it on its own page, where you can read and press it, or use look and click on the picture. Leave a site only if it truly needs payment or an account they do not have, and say so when you do.
+  - "What you have learned before" was learned the hard way on earlier tasks: follow it.
   - Asking interrupts them, so it is rare. Never ask to check something they already said, whether to carry on, "is this right?" about anything that costs nothing, or in the middle of a step. Pick the obvious choice yourself for things that cost nothing: the first good video, the top results, the usual site.
   - Say done only for what you did in this task, or for what you were asked to look at. A result already on the page when you arrived (a finished game, an old order) is not your result: start a new one, or say plainly that it was already like that.
   - When "So far" says they said yes and it was pressed, that step is finished. Look at the page: if the goal is reached, reply done. Never press, type or send it again.
@@ -561,11 +644,49 @@ final class Agent {
     return URLSession(configuration: config)
   }()
 
+  /** A picture of the window for the check, when Grove is allowed to take one. */
+  private static func picture() async -> Data? {
+    guard CGPreflightScreenCaptureAccess() else { return nil }
+    await Browser.front()
+    return await Browser.shot()?.jpeg
+  }
+
+  /** Whether the page really shows the goal reached, judged by a reader that did not do the work. */
+  private static func check(goal: String, claim: String, history: [String], page: Browser.Page, picture: Data?) async -> (ok: Bool, why: String) {
+    let info = Bundle.main.infoDictionary ?? [:]
+    guard let key = info["GroveGeminiKey"] as? String, !key.isEmpty,
+          let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent") else { return (true, "") }
+    let system = """
+    You check another assistant's work in a web browser before the person is told it is finished. Judge only from the page as it is now (and the picture, when there is one) against what the person asked for, read the way they meant it: "play" a game means actually playing it — keep going until it is over or they would be satisfied, not a few moves; "correctly" means correct; "find" means it is on the screen; "order" or "send" means it reached the step they asked for. A claim is not evidence. If the page does not clearly show it, it is not achieved.
+    Reply as JSON: {"achieved":true|false,"why":"one sentence: what on the page shows it, or what is still missing and what to do next"}
+    """
+    let labels = page.items.prefix(60).map { "[\($0["n"] ?? "")] \($0["label"] ?? "")\(($0["value"] as? String).map { " = \"\($0)\"" } ?? "")" }.joined(separator: "\n")
+    let prompt = "They asked: \(goal)\nThe assistant says: \(claim)\nWhat it did:\n\(history.suffix(16).joined(separator: "\n"))\n\nPage: \(page.title)\nAddress: \(page.url)\n\(page.board.isEmpty ? "" : "Board:\n\(page.board)\n")\(page.chess.isEmpty ? "" : "Chess:\n\(page.chess)\n")Things on it:\n\(labels)\nText:\n\(page.text.prefix(1800))"
+    var request = URLRequest(url: url, timeoutInterval: 25)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+    let parts: [[String: Any]] = [["text": prompt]] + (picture.map { [["inlineData": ["mimeType": "image/jpeg", "data": $0.base64EncodedString()]]] } ?? [])
+    let body: [String: Any] = [
+      "systemInstruction": ["parts": [["text": system]]],
+      "contents": [["role": "user", "parts": parts]],
+      "generationConfig": ["responseMimeType": "application/json", "maxOutputTokens": 3000, "temperature": 0, "thinkingConfig": ["thinkingBudget": 1024]],
+    ]
+    request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+    // A check that could not run is not a refusal: the move stands as it did before there was one.
+    guard let (data, response) = try? await session.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200,
+          let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let content = (root["candidates"] as? [[String: Any]])?.first?["content"] as? [String: Any],
+          let raw = (content["parts"] as? [[String: Any]])?.compactMap({ $0["text"] as? String }).last,
+          let obj = Thinking.parsed(raw) else { return (true, "") }
+    return ((obj["achieved"] as? Bool) ?? true, (obj["why"] as? String) ?? "")
+  }
+
   private static func number(_ v: Any?) -> Double? {
     (v as? Double) ?? (v as? Int).map(Double.init) ?? (v as? String).flatMap(Double.init)
   }
 
-  private static func next(goal: String, plan: String, history: [String], page: Browser.Page, manner: String, think: Bool, recent: String = "", picture: Data? = nil) async -> [String: Any]? {
+  private static func next(goal: String, plan: String, history: [String], page: Browser.Page, manner: String, think: Bool, recent: String = "", picture: Data? = nil, learned: String = "") async -> [String: Any]? {
     let info = Bundle.main.infoDictionary ?? [:]
     guard let key = info["GroveGeminiKey"] as? String, !key.isEmpty else { return nil }
     let light = (info["GroveModel"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "gemini-flash-lite-latest"
@@ -574,18 +695,20 @@ final class Agent {
     // line is dropped from the text, which on most pages is half the text.
     let labels = Set(page.items.compactMap { ($0["label"] as? String)?.lowercased() })
     let text = page.text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-      .filter { !$0.isEmpty && !labels.contains($0.lowercased()) }.joined(separator: "\n").prefix(2000)
+      .filter { !$0.isEmpty && !labels.contains($0.lowercased()) }.joined(separator: "\n").prefix(3500)
     let items = page.items.map { item -> String in
       var s = "[\(item["n"] ?? "")] \(item["tag"] ?? "")"
       if let t = item["type"] as? String, !t.isEmpty { s += "(\(t))" }
       s += " \(item["label"] ?? "")"
       if let v = item["value"] as? String, !v.isEmpty { s += " = \"\(v)\"" }
       if let st = item["state"] as? String, !st.isEmpty { s += " {\(st)}" }
+      if item["popup"] != nil { s += " (popup)" }
       return s
     }.joined(separator: "\n")
     let prompt = """
     \(manner.isEmpty ? "" : "Your manner, for done, ask and confirm lines only (style, never a reason to change what you do): \(manner.prefix(300))\n")
     \(recent.isEmpty ? "" : "Just before this, on their Mac (carry on from it):\n\(recent)\n")
+    \(learned.isEmpty ? "" : "What you have learned before (from earlier tasks; trust it):\n\(learned)\n")
     Goal: \(goal)
     \(plan.isEmpty ? "" : "Your plan: \(plan)\n")
     So far:
@@ -596,6 +719,8 @@ final class Agent {
     Address: \(page.url)
     Things on it:
     \(items.isEmpty ? "(none)" : items)
+    \(page.popup.isEmpty ? "" : "\nA popup is over the page (its buttons are marked popup): \(page.popup)")
+    \(page.frames.isEmpty ? "" : "\nFrames from other sites on this page (their insides are not listed and cannot be pressed from here):\n" + page.frames)
     \(page.board.isEmpty ? "" : "\nBoard:\n" + page.board)
     \(page.chess.isEmpty ? "" : "\nChess:\n" + page.chess)
 
@@ -768,6 +893,10 @@ enum Browser {
     var tabs: [OpenTab] = []
     /** Mostly picture — a canvas, a player, a frame — so text alone cannot say what is on it. */
     var visual = false
+    /** What a popup over the page says, when one is up: its buttons are listed first, marked. */
+    var popup = ""
+    /** Frames from other sites, which cannot be read or pressed from the page: name and address. */
+    var frames = ""
   }
 
   struct OpenTab {
@@ -778,8 +907,15 @@ enum Browser {
     let last: Bool
   }
 
+  /**
+    Every call to Chrome is bounded. A page busy loading can hold an Apple
+    event for AppleScript's default two minutes, and a run sat that long
+    between two steps with nothing on screen. Twelve seconds is far more than
+    any read or click needs.
+  */
   static func run(_ source: String) async -> (Bool, String) {
-    await withCheckedContinuation { c in Script.run(source) { ok, out in c.resume(returning: (ok, out)) } }
+    let bounded = "with timeout of 12 seconds\n\(source)\nend timeout"
+    return await withCheckedContinuation { c in Script.run(bounded) { ok, out in c.resume(returning: (ok, out)) } }
   }
 
   private static func quoted(_ s: String) -> String {
@@ -824,11 +960,23 @@ enum Browser {
       set fw to -1
       if (count of windows) > 0 then set fw to id of front window
       repeat with w in windows
+        -- Another Chrome profile, where JavaScript from Apple Events is off:
+        -- its tabs can be seen but not read or pressed, so they are not offered.
+        set usable to true
+        try
+          with timeout of 3 seconds
+            execute active tab of w javascript "1"
+          end timeout
+        on error msg
+          if msg contains "turned off" then set usable to false
+        end try
+        if usable then
         set a to id of active tab of w
         repeat with t in tabs of w
           set isFront to ((id of w) is fw) and ((id of t) is a)
           set out to out & ((id of w) as string) & sep & ((id of t) as string) & sep & (URL of t) & sep & (title of t) & sep & (isFront as string) & linefeed
         end repeat
+        end if
       end repeat
       return out
     end tell
@@ -866,7 +1014,23 @@ enum Browser {
   static func newTab() async {
     let (ok, out) = await run("""
     tell application "Google Chrome"
+      -- A window Grove can work in: the front one unless that is a profile
+      -- with JavaScript from Apple Events off, where a new tab is useless.
       set w to front window
+      repeat with c in windows
+        try
+          with timeout of 3 seconds
+            execute active tab of c javascript "1"
+          end timeout
+          set w to c
+          exit repeat
+        on error msg
+          if msg does not contain "turned off" then
+            set w to c
+            exit repeat
+          end if
+        end try
+      end repeat
       set t to make new tab at end of tabs of w
       return ((id of w) as string) & "," & ((id of t) as string)
     end tell
@@ -903,12 +1067,42 @@ enum Browser {
   */
   // Sent once, to the focused element or the document: it bubbles up to the
   // window on its own, and sending it to both typed every letter twice.
+  /**
+    Named keys, by what the page and the keyboard each call them. "ArrowDown"
+    used to be typed out letter by letter, and on 2048 the N and the R were
+    its shortcuts for a new game, so every move restarted it.
+  */
+  private static let named: [String: (key: String, code: Int, mac: Int)] = [
+    "arrowup": ("ArrowUp", 38, 126), "up": ("ArrowUp", 38, 126),
+    "arrowdown": ("ArrowDown", 40, 125), "down": ("ArrowDown", 40, 125),
+    "arrowleft": ("ArrowLeft", 37, 123), "left": ("ArrowLeft", 37, 123),
+    "arrowright": ("ArrowRight", 39, 124), "right": ("ArrowRight", 39, 124),
+    "enter": ("Enter", 13, 36), "return": ("Enter", 13, 36), "escape": ("Escape", 27, 53), "esc": ("Escape", 27, 53),
+    "tab": ("Tab", 9, 48), "space": (" ", 32, 49), "backspace": ("Backspace", 8, 51), "delete": ("Delete", 46, 117),
+    "home": ("Home", 36, 115), "end": ("End", 35, 119), "pageup": ("PageUp", 33, 116), "pagedown": ("PageDown", 34, 121),
+  ]
+
+  /** The presses a move asks for: named keys when every word is one ("ArrowLeft ArrowLeft Up"), otherwise the letters. */
+  private static func presses(_ text: String) -> [(key: String, code: Int, mac: Int?, char: String?)] {
+    let words = text.split(whereSeparator: { $0 == " " || $0 == "," }).map { $0.lowercased() }
+    if !words.isEmpty, words.allSatisfy({ named[$0] != nil }) {
+      return words.map { let k = named[$0]!; return (k.key, k.code, k.mac, nil) }
+    }
+    return text.map { ch in
+      let s = String(ch)
+      return (s, Int(s.uppercased().unicodeScalars.first?.value ?? 0), nil, s)
+    }
+  }
+
   static func keys(_ text: String, enter: Bool) async {
     let before = await read()
-    let keys = (try? String(data: JSONSerialization.data(withJSONObject: text.map { String($0) } + (enter ? ["Enter"] : [])), encoding: .utf8)) ?? "[]"
+    var list = presses(text)
+    if enter { list.append(("Enter", 13, 36, nil)) }
+    let events = list.map { ["key": $0.key, "code": $0.key.count == 1 ? ($0.key == " " ? "Space" : "Key" + $0.key.uppercased()) : $0.key, "keyCode": $0.code] as [String: Any] }
+    let keys = (try? String(data: JSONSerialization.data(withJSONObject: events), encoding: .utf8)) ?? "[]"
     _ = await js("""
     (function(){var ks=\(keys);var t=document.activeElement&&document.activeElement!==document.body&&!/INPUT|TEXTAREA/.test(document.activeElement.tagName)?document.activeElement:document;
-    ks.forEach(function(k){var o={key:k,code:k==='Enter'?'Enter':'Key'+k.toUpperCase(),keyCode:k==='Enter'?13:k.toUpperCase().charCodeAt(0),which:k==='Enter'?13:k.toUpperCase().charCodeAt(0),bubbles:true,cancelable:true,composed:true};
+    ks.forEach(function(k){var o={key:k.key,code:k.code,keyCode:k.keyCode,which:k.keyCode,bubbles:true,cancelable:true,composed:true};
     t.dispatchEvent(new KeyboardEvent('keydown',o));t.dispatchEvent(new KeyboardEvent('keyup',o));});return 'ok';})()
     """)
     try? await _Concurrency.Task.sleep(nanoseconds: 600_000_000)
@@ -918,11 +1112,14 @@ enum Browser {
     await front()
     _ = await run("tell application \"Google Chrome\" to activate")
     try? await _Concurrency.Task.sleep(nanoseconds: 300_000_000)
-    for ch in text {
-      _ = await run("tell application \"System Events\" to keystroke \(quoted(String(ch)))")
-      try? await _Concurrency.Task.sleep(nanoseconds: 90_000_000)
+    for press in list {
+      if let mac = press.mac {
+        _ = await run("tell application \"System Events\" to key code \(mac)")
+      } else if let ch = press.char {
+        _ = await run("tell application \"System Events\" to keystroke \(quoted(ch))")
+      }
+      try? await _Concurrency.Task.sleep(nanoseconds: 120_000_000)
     }
-    if enter { _ = await run("tell application \"System Events\" to key code 36") }
   }
 
   static func url() async -> String {
@@ -955,7 +1152,8 @@ enum Browser {
       var sel='a[href],button,input,textarea,select,[role=button],[role=link],[role=tab],[role=option],[role=menuitem],[role=checkbox],[role=textbox],[contenteditable=true],[onclick]';
       function field(e){return /^(INPUT|TEXTAREA|SELECT)$/.test(e.tagName)||e.isContentEditable||e.getAttribute('role')==='textbox';}
       function all(q){var out=[];(function walk(root){root.querySelectorAll(q).forEach(function(e){out.push(e);});
-        root.querySelectorAll('*').forEach(function(e){if(e.shadowRoot)walk(e.shadowRoot);});})(document);return out;}
+        root.querySelectorAll('*').forEach(function(e){if(e.shadowRoot)walk(e.shadowRoot);});
+        root.querySelectorAll('iframe').forEach(function(f){try{var d=f.contentDocument;if(d&&d.body)walk(d);}catch(x){}});})(document);return out;}
       function deepText(root){var t='';root.childNodes.forEach(function(c){
         if(c.nodeType===3)t+=c.textContent; else if(c.nodeType===1){var st=getComputedStyle(c); if(st.display==='none'||st.visibility==='hidden')return;
         if(c.shadowRoot)t+=' '+deepText(c.shadowRoot)+' '; if(/^(SCRIPT|STYLE|NOSCRIPT)$/.test(c.tagName))return; t+=deepText(c); if(/^(DIV|P|LI|TR|H[1-6]|SECTION|ARTICLE|BR)$/.test(c.tagName))t+='\\n';}});return t;}
@@ -963,7 +1161,14 @@ enum Browser {
       window.__grove=[];
       var out=[],n=0,h=innerHeight;
       var found=all(sel);
-      found.filter(field).concat(found.filter(function(e){return !field(e);})).forEach(function(e){
+      var pop=null;
+      var dl=all('[role=dialog],[role=alertdialog],[aria-modal=true],dialog[open]').filter(function(e){var r=e.getBoundingClientRect(),st=getComputedStyle(e);return r.width>120&&r.height>60&&st.visibility!=='hidden'&&st.display!=='none';});
+      if(dl.length)pop=dl[dl.length-1];
+      if(!pop){var top=document.elementFromPoint(innerWidth/2,innerHeight/2);for(var e=top;e&&e!==document.body&&e!==document.documentElement;e=e.parentElement){if(getComputedStyle(e).position==='fixed'){var pr=e.getBoundingClientRect();if(pr.width*pr.height>innerWidth*innerHeight*0.1)pop=e;break;}}}
+      if(pop&&found.length>20&&found.filter(function(e){return pop.contains(e);}).length>found.length*0.6)pop=null;
+      var list=found.filter(field).concat(found.filter(function(e){return !field(e);}));
+      if(pop)list=list.filter(function(e){return pop.contains(e);}).concat(list.filter(function(e){return !pop.contains(e);}));
+      list.forEach(function(e){
         if(n>=140)return;
         var r=e.getBoundingClientRect();
         if(r.width<2||r.height<2||r.bottom<-h*0.2||r.top>h*1.6)return;
@@ -976,8 +1181,10 @@ enum Browser {
         var it={n:n,tag:e.tagName.toLowerCase(),label:label.slice(0,70)};
         if(e.type)it.type=e.type; if(edit){it.type='textbox';it.value=(e.innerText||'').trim().slice(0,60);} if(e.autocomplete)it.auto=e.autocomplete;
         if((e.tagName==='INPUT'||e.tagName==='TEXTAREA')&&e.type!=='password')it.value=(e.value||'').slice(0,60);
+        if(field(e)&&(r.width<12||r.height<8||parseFloat(st.opacity)<0.1)){it.type='invisible box: takes key presses for the grid or game around it; what it holds is not what the page shows';delete it.value;}
         var state=e.getAttribute('data-state')||e.getAttribute('aria-pressed')||e.getAttribute('aria-checked')||e.getAttribute('aria-selected')||'';
         if(state&&state!=='false')it.state=state;
+        if(pop&&pop.contains(e))it.popup=1;
         out.push(it); n++;
       });
       var board=[];
@@ -988,9 +1195,17 @@ enum Browser {
         var st=e.getAttribute('data-state')||e.getAttribute('evaluation')||'';
         if(l||st)board.push(l+(st&&l.toLowerCase().indexOf(st)<0?' {'+st+'}':''));
       });
-      var text=(document.body?deepText(document.body):'').replace(/[ \\t]+/g,' ').replace(/\\n\\s*\\n+/g,'\\n').slice(0,2600);
+      var whole=(document.body?document.body.innerText:'')||'';
+      if(whole.length<300&&document.body)whole=deepText(document.body);
+      whole=whole.replace(/[ \\t]+/g,' ').replace(/\\n\\s*\\n+/g,'\\n');
+      var at=0,top=document.elementFromPoint(innerWidth/2,Math.min(120,innerHeight/3));
+      for(var k=0;k<4&&top&&at===0;k++,top=top.parentElement){var probe=(top.innerText||'').replace(/[ \\t]+/g,' ').trim().slice(0,40);if(probe.length>8){var i=whole.indexOf(probe);if(i>0)at=i;}}
+      var start=Math.max(0,at-300);
+      var text=(start>0?'(…from where the page is scrolled to)\\n':'')+whole.slice(start,start+4000)+(whole.length>start+4000?'\\n(…more below)':'');
       var big=0;all('canvas,iframe').forEach(function(e){var r=e.getBoundingClientRect();big=Math.max(big,(Math.min(r.right,innerWidth)-Math.max(r.left,0))*(Math.min(r.bottom,innerHeight)-Math.max(r.top,0))/(innerWidth*innerHeight));});
-      return JSON.stringify({url:location.href,title:document.title,items:out,board:board.join('\\n'),text:text,chess:groveChessText(),visual:big>0.25});
+      var frames=[];all('iframe').forEach(function(f){var r=f.getBoundingClientRect();if(r.width*r.height<innerWidth*innerHeight*0.08||!f.src||/^(about|javascript|data):/.test(f.src))return;var same=false;try{same=!!(f.contentDocument&&f.contentDocument.body);}catch(x){}if(!same)frames.push((f.title||f.name||'frame').slice(0,60)+' at '+f.src.slice(0,180)+' ('+Math.round(r.width)+'x'+Math.round(r.height)+')');});
+      var popText=pop?(pop.innerText||'').replace(/\\s+/g,' ').trim().slice(0,240):'';
+      return JSON.stringify({url:location.href,title:document.title,items:out,board:board.join('\\n'),text:text,chess:groveChessText(),visual:big>0.25,popup:popText,frames:frames.join('\\n')});
     })()
     """
     let raw = await js(code)
@@ -1002,7 +1217,8 @@ enum Browser {
     }
     return Page(url: obj["url"] as? String ?? "", title: obj["title"] as? String ?? "",
                 items: obj["items"] as? [[String: Any]] ?? [], text: obj["text"] as? String ?? "",
-                board: obj["board"] as? String ?? "", chess: obj["chess"] as? String ?? "", visual: obj["visual"] as? Bool ?? false)
+                board: obj["board"] as? String ?? "", chess: obj["chess"] as? String ?? "", visual: obj["visual"] as? Bool ?? false,
+                popup: obj["popup"] as? String ?? "", frames: obj["frames"] as? String ?? "")
   }
 
   /*
@@ -1149,6 +1365,29 @@ enum Browser {
     post(.leftMouseDown)
     try? await _Concurrency.Task.sleep(nanoseconds: 70_000_000)
     post(.leftMouseUp)
+  }
+
+  /** Text set by a script that did not take: the page put it back, or the box is a hidden stand-in for a grid or a game. */
+  static func ignored(_ n: Int, _ text: String) async -> Bool {
+    let t = (try? String(data: JSONSerialization.data(withJSONObject: [text]), encoding: .utf8)) ?? "[\"\"]"
+    return await js("(function(){var e=(window.__grove&&window.__grove[\(n)])||document.querySelector('[data-grove=\"\(n)\"]');if(!e)return 'no';var r=e.getBoundingClientRect(),st=getComputedStyle(e);var v=e.isContentEditable?(e.innerText||''):(e.value||'');var hidden=r.width<12||r.height<8||parseFloat(st.opacity)<0.1||r.right<0||r.bottom<0;return (hidden||v.trim()!==\(t)[0].trim())?'yes':'no';})()") == "yes"
+  }
+
+  /** Every place the words appear on the page, with context; the first is scrolled to. */
+  static func find(_ words: String) async -> String {
+    let q = (try? String(data: JSONSerialization.data(withJSONObject: [words.lowercased()]), encoding: .utf8)) ?? "[\"\"]"
+    let out = await js("""
+    (function(){var q=\(q)[0];if(!q)return 'nothing to look for';var t=(document.body.innerText||'').replace(/[ \\t]+/g,' ');var low=t.toLowerCase(),hits=[],i=low.indexOf(q);
+    while(i>=0&&hits.length<6){hits.push(t.slice(Math.max(0,i-160),i+260).replace(/\\n+/g,' / '));i=low.indexOf(q,i+q.length+200);}
+    if(!hits.length)return 'not on this page';try{window.find(q);}catch(x){}return hits.length+' places: '+hits.join('  ||  ');})()
+    """)
+    return String(out.prefix(1800))
+  }
+
+  /** Real key presses into whatever has focus. */
+  static func realType(_ text: String) async {
+    _ = await run("tell application \"System Events\" to keystroke \(quoted(text))")
+    try? await _Concurrency.Task.sleep(nanoseconds: 400_000_000)
   }
 
   /** Where element n's middle is on the screen, for a real click. */

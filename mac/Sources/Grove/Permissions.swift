@@ -16,7 +16,7 @@ import AVFoundation
 import Speech
 
 enum Permission: CaseIterable {
-  case accessibility, microphone, speech, music, chrome
+  case accessibility, microphone, speech, music, chrome, screen
 
   var title: String {
     switch self {
@@ -25,6 +25,7 @@ enum Permission: CaseIterable {
     case .speech: return "Speech recognition"
     case .music: return "Control Music"
     case .chrome: return "Control Chrome (for doing things on the web)"
+    case .screen: return "Screen Recording (to see games and pictures in Chrome)"
     }
   }
 
@@ -36,6 +37,7 @@ enum Permission: CaseIterable {
     case .speech: return SFSpeechRecognizer.authorizationStatus() == .authorized
     case .music: return UserDefaults.standard.bool(forKey: "grove.permission.music") ? true : nil
     case .chrome: return UserDefaults.standard.bool(forKey: "grove.permission.chrome") ? true : nil
+    case .screen: return CGPreflightScreenCaptureAccess()
     }
   }
 
@@ -65,6 +67,9 @@ enum Permission: CaseIterable {
         if ok { UserDefaults.standard.set(true, forKey: "grove.permission.music") } else { Permission.open("Privacy_Automation") }
         done()
       }
+    case .screen:
+      if !CGRequestScreenCaptureAccess() { Permission.open("Privacy_ScreenCapture") }
+      done()
     case .chrome:
       Script.run("tell application \"Google Chrome\" to get name") { ok, _ in
         Log.say("permission: chrome \(ok ? "allowed" : "not allowed")")
@@ -74,6 +79,9 @@ enum Permission: CaseIterable {
     }
   }
 
+  // Screen Recording: what the page reader cannot see — a crossword's letters,
+  // a game drawn on a canvas — Grove can only check by looking at the window.
+  // Without it, "done" on a game is a guess. Only Chrome's window is ever taken.
   static func open(_ pane: String) {
     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
       NSWorkspace.shared.open(url)
