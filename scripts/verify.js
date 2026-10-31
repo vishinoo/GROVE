@@ -395,6 +395,43 @@ for (const [said, id, argName] of BACKFILLED) {
 }
 
 /* The model chooses what runs, so it must never be able to say yes for you. */
+section('An action runs only on words that asked for it');
+{
+  /*
+    "goon session" became a calendar event, again and again: a model that did
+    not understand reached for the nearest tool. A rule in the prompt did not
+    hold, so every action quotes the words that asked for it and the turn
+    checks the quote against what was said.
+  */
+  const tools = require(path.join(OUT, 'lib/tools.js'));
+  for (const d of tools.declarationsFor(ALL)) {
+    const ability = ALL.find((a) => tools.toolNameFor(a.id) === d.name);
+    if (!ability || ability.reads) continue;
+    check(
+      (d.parameters.required ?? []).includes(tools.ASKED),
+      `${d.name} must quote what asked for it`,
+      'the model could run it on a sentence that never asked'
+    );
+  }
+  check(tools.askedFor('add goon session tomorrow at 3', 'add goon session tomorrow at 3pm'), 'a real request passes');
+  check(tools.askedFor('text Priya', 'can you text priya i am running late'), 'a quote from inside the sentence passes');
+  check(!tools.askedFor('create a calendar event', 'goon session'), 'an action nobody asked for is refused');
+  check(!tools.askedFor('', 'add milk to the list'), 'an empty quote is refused');
+  const brain = fs.readFileSync(path.join(ROOT, 'src/lib/brain.ts'), 'utf8');
+  const guard = between(brain, 'if (!ability.reads) {', 'const wrote = plainSpeech', { min: 400, max: 2500 });
+  check(guard !== null && /askedFor\(/.test(guard) && /continue;/.test(guard), 'the turn refuses an unasked action before it runs');
+}
+
+section('The phone hears what the Mac did');
+{
+  const mac = fs.readFileSync(path.join(ROOT, 'src/lib/mac.ts'), 'utf8');
+  check(/m\.t === 'news'/.test(mac) && /noteMacWork\(/.test(mac.slice(mac.indexOf("m.t === 'news'"))), 'Mac news is recorded for the next sentence');
+  const link = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Link.swift'), 'utf8');
+  check(/func news\(/.test(link) && /outbox/.test(link), 'the Mac sends news, held through a reconnect');
+  const main = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/main.swift'), 'utf8');
+  check((main.match(/link\.news\(/g) ?? []).length >= 4, 'every way a Mac ask ends is reported to the phone');
+}
+
 section('The model can never confirm on your behalf');
 {
   const tools = require(path.join(OUT, 'lib/tools.js'));
@@ -1255,6 +1292,48 @@ section('You can see what you type, and Done does something');
  * first. So `findContact` is made to throw, and the send has to succeed
  * anyway.
  */
+/*
+  Phone or Mac, without being told which.
+
+  "Play wordle" and "order the large one instead" used to need "on my Mac" to
+  reach it, because nothing in the turn said what the Mac was doing. The fix is
+  a few lines of fact in the per-turn context, and the rules for using them in
+  the cached half — so these check that the facts are there, that they are
+  NOT in the system prompt (where they would cost the cache on every change),
+  and that an unreachable Mac goes back to the model to explain rather than
+  to a canned line.
+*/
+laterSection('Grove picks the phone or the Mac without being told', async () => {
+  const mac = require(path.join(OUT, 'lib/mac.js'));
+  const brain = fs.readFileSync(path.join(ROOT, 'src/lib/brain.ts'), 'utf8');
+  const unlinked = mac.macContext();
+  check(/not linked/.test(unlinked) && !/On the Mac/.test(unlinked), 'with nothing linked, the context says so and claims no work', unlinked);
+
+  const t0 = Date.now();
+  mac.noteMacWork({ what: 'order pad thai from Thai Basil on Uber Eats', state: 'confirm', said: 'Pad thai, one, $17.50. Order it?', task: 'T42' });
+  const busy = mac.macContext(t0 + 3 * 60_000);
+  check(/order pad thai/.test(busy) && /waiting on their yes/.test(busy) && /task T42/.test(busy), 'work in progress is in the context with its state and task id', busy);
+  check(!/On the Mac/.test(mac.macContext(t0 + 31 * 60_000)), 'and drops out after half an hour, so an old job is not carried on by accident');
+
+  const sys = between(brain, 'function systemFor(', 'function contextFor(', { min: 200, max: 3000 });
+  check(sys !== null && !/macContext|macStatus|macWork/.test(sys), 'the Mac\'s state is never in the system prompt');
+  const rules = between(brain, 'const TOOL_RULES = `', 'How to answer once tools return', { min: 2000, max: 30000 });
+  check(rules !== null && /Phone or Mac/.test(rules) && /never ask which one/.test(rules), 'the rules say to choose the device, not ask');
+
+  const hand = between(brain, 'if (MAC_HANDS.has(ability.id)', 'if (!ability.reads)', { min: 100, max: 1500 });
+  check(hand !== null && /macReachable\(\)/.test(hand) && /continue;/.test(hand), 'an unreachable Mac is handed back to the model, not run');
+
+  for (const id of ['mac.music', 'mac.open']) {
+    const a = ALL.find((x) => x.id === id);
+    check(Boolean(a) && !/Only when they say/.test(a.what), `${id} no longer needs "on my Mac" to be said`);
+  }
+
+  const use = ALL.find((a) => a.id === 'mac.use');
+  const started = Date.now();
+  const out = await use.run({ goal: 'play wordle' });
+  check(out.ok === false && Date.now() - started < 1500, 'with no Mac linked, a Mac job answers at once rather than waiting on one', JSON.stringify(out));
+});
+
 laterSection('An address you have used once is one Grove knows', async () => {
   const memory = require(path.join(OUT, 'lib/memory.js'));
   const google = require(path.join(OUT, 'lib/google.js'));
@@ -2510,8 +2589,12 @@ section('Nothing that changes every turn is in the system prompt');
   const call = between(brain, 'const system = [systemFor(', 'const ran: RanTool[]', { min: 100, max: 2500 });
   check(call !== null, 'the request assembly is where it is expected to be');
   check(
-    call !== null && /contextFor\(context, \[roster, usual, friction\]/.test(call),
+    call !== null && /contextFor\(context, \[roster, usual, friction[,\]]/.test(call),
     'and so do the roster, the rhythms and the frictions'
+  );
+  check(
+    call !== null && /contextFor\(context, \[[^\]]*macContext\(\)/.test(call),
+    'and so does what the Mac is doing, which changes every few minutes'
   );
   check(
     call !== null && !/systemFor\(context, available\)/.test(call),

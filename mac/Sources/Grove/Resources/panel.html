@@ -31,6 +31,8 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
 .cut { position: absolute; top: 0; left: 50%; width: var(--notch-w); height: var(--notch-h); transform: translateX(-50%); background: #000; border-radius: 0 0 14px 14px; z-index: 2; }
 .body { position: absolute; left: 0; right: 0; top: var(--notch-h); bottom: 0; padding: 14px 18px 16px; display: flex; flex-direction: column; gap: 10px; opacity: 0; transform: translateY(-6px); transition: opacity 240ms ease, transform 340ms ease; z-index: 3; }
 .panel.open .body { opacity: 1; transform: none; transition-delay: 90ms; }
+/* Measured at full size, then the card is fitted to them: a squeezed child measures short and the card never grows. */
+.body > * { flex-shrink: 0; }
 .row { display: flex; align-items: center; gap: 10px; }
 .space { justify-content: space-between; }
 .hello { font-size: 22px; font-weight: 300; letter-spacing: -0.03em; padding-right: 34px; }
@@ -70,7 +72,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
 .mic:hover { background: rgba(255,255,255,0.22); }
 .mic.on { background: #FFFFFF; color: #0B0C12; animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 5px rgba(255,255,255,0.18); } }
-.answer { font-size: 14px; line-height: 1.5; max-height: 130px; overflow: auto; white-space: pre-wrap; -webkit-user-select: text; user-select: text; }
+.answer { font-size: 14px; line-height: 1.5; max-height: 170px; overflow-y: auto; overscroll-behavior: contain; white-space: pre-wrap; -webkit-user-select: text; user-select: text; }
 .code { font-family: var(--mono); font-size: 30px; letter-spacing: 0.18em; }
 .bars { display: inline-flex; gap: 3px; align-items: center; height: 16px; }
 .bars i { width: 3px; border-radius: 2px; background: #FFFFFF; animation: bar 900ms ease-in-out infinite; }
@@ -88,6 +90,18 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
 @keyframes blink { 50% { opacity: 0.3; } }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.4); display: inline-block; }
 .dot.on { background: var(--live); }
+.hello.remark { font-size: 18px; padding-right: 12px; }
+/* A line too long for its row glides through, pausing at the start each time
+   round, rather than ending in an ellipsis nobody can expand. */
+.glide { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.gliding { text-overflow: clip; -webkit-mask-image: linear-gradient(90deg, transparent, #000 10px, #000 calc(100% - 14px), transparent); mask-image: linear-gradient(90deg, transparent, #000 10px, #000 calc(100% - 14px), transparent); }
+.gliding .run { display: inline-block; white-space: nowrap; will-change: transform; }
+.gliding .gap { display: inline-block; width: 48px; }
+/* Long text scrolls down inside the card instead of being cut off by it. */
+.scroll { max-height: 150px; overflow-y: auto; overscroll-behavior: contain; -webkit-user-select: text; user-select: text; white-space: pre-wrap; }
+.answer::-webkit-scrollbar, .scroll::-webkit-scrollbar { width: 4px; }
+.answer::-webkit-scrollbar-thumb, .scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.35); border-radius: 2px; }
+
 </style>
 </head>
 <body>
@@ -124,6 +138,25 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
   const fit = (max) => requestAnimationFrame(() => {
     const last = body.lastElementChild;
     if (last) setH(Math.min(max, last.offsetTop + last.offsetHeight + 16));
+  });
+
+  // Grove's remark on what they are doing stands in for the greeting for a few minutes.
+  const remarkFresh = () => S.remark && Date.now() - S.remarkAt < 5 * 60 * 1000;
+
+  // Every line that does not fit its row glides: slowly enough to read
+  // (about 35 points a second), a pause at the start of each pass, and the
+  // text repeated after a gap so the loop has no jump in it.
+  const glide = () => requestAnimationFrame(() => {
+    body.querySelectorAll('.prompt, .glide').forEach((el) => {
+      if (el.dataset.glide || el.scrollWidth <= el.clientWidth + 1) return;
+      el.dataset.glide = '1';
+      const text = el.textContent, dist = el.scrollWidth + 48, secs = dist / 35, rest = 1.6;
+      el.classList.add('gliding');
+      el.innerHTML = `<span class="run">${esc(text)}<span class="gap"></span>${esc(text)}</span>`;
+      el.firstChild.animate(
+        [{ transform: 'translateX(0)' }, { transform: 'translateX(0)', offset: rest / (secs + rest) }, { transform: `translateX(-${dist}px)` }],
+        { duration: (secs + rest) * 1000, iterations: Infinity });
+    });
   });
 
   // Two at a time, turning over through the list every few seconds.
@@ -184,7 +217,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     if (m === 'idle') {
       setH(S.signedIn ? (S.phone ? 156 : 180) : 200);
       body.innerHTML = `
-        <div class="row space"><span class="hello">${greeting()}</span><span class="small row" style="margin-right:34px"><span class="dot ${S.phone ? 'on' : ''}"></span>${S.phone ? 'iPhone connected' : 'iPhone not connected'}</span></div>
+        <div class="row space"><span class="hello${remarkFresh() ? ' glide remark' : ''}">${esc(remarkFresh() ? S.remark : greeting())}</span><span class="small row" style="margin-right:34px;flex:none"><span class="dot ${S.phone ? 'on' : ''}"></span>${S.phone ? 'iPhone connected' : 'iPhone not connected'}</span></div>
         ${S.signedIn && !S.phone ? '<span class="small">Open Grove on your iPhone, signed in to Noctus with the same Google account, and it connects by itself.</span>' : ''}
         ${S.signedIn ? '' : '<span class="small">Sign in with Noctus on both devices and they find each other.</span>'}
         ${S.signedIn ? '' : '<div class="chips"><button class="chip solid" data-act="signin">Sign in with Noctus</button></div>'}
@@ -227,7 +260,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
         </div>`;
       wireAsk();
       setTimeout(() => document.activeElement?.blur(), 40);
-      fit(m === 'rewrite' ? 236 : 220);
+      fit(m === 'rewrite' ? 280 : 270);
       // Send only appears once there is something to send; Return does the same.
       const input = document.getElementById('ask-input'), send = document.getElementById('send');
       input?.addEventListener('input', () => { send.hidden = !input.value.trim(); });
@@ -238,11 +271,12 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
       body.innerHTML = `
         <div class="row space"><span class="label">${esc(d.from || '')}</span></div>
         <span class="hello" style="font-size:18px">${esc((d.title || '').charAt(0).toUpperCase() + (d.title || '').slice(1))}</span>
-        <ul class="steps">${steps.map((t, i) => `<li class="${i < (d.at || 0) ? 'done' : i === (d.at || 0) ? 'now' : ''}"><i></i>${esc(t)}</li>`).join('')}</ul>`;
+        <ul class="steps">${steps.map((t, i) => `<li class="${i < (d.at || 0) ? 'done' : i === (d.at || 0) ? 'now' : ''}"><i></i><span class="glide">${esc(t)}</span></li>`).join('')}</ul>`;
     }
     if (m === 'done') {
       setH(110);
-      body.innerHTML = `<div class="row space"><span class="hello" style="font-size:18px">${esc(d.title)}</span><span class="small row"><span class="dot ${d.ok ? 'on' : ''}"></span>${d.ok ? 'Done' : 'Didn’t work'}</span></div><span class="small">${esc(d.text)}</span>`;
+      body.innerHTML = `<div class="row space"><span class="hello glide" style="font-size:18px;padding-right:12px">${esc(d.title)}</span><span class="small row" style="margin-right:34px;flex:none"><span class="dot ${d.ok ? 'on' : ''}"></span>${d.ok ? 'Done' : 'Didn’t work'}</span></div><div class="small scroll">${esc(d.text)}</div>`;
+      fit(250);
     }
     if (m === 'waiting') {
       setH(d.confirm ? 168 : 180);
@@ -253,6 +287,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
           ? '<div class="chips"><button class="chip solid" data-act="approve">Yes, go ahead</button><button class="chip" data-act="decline">No</button></div>'
           : `<form class="ask" id="ask"><input id="ask-input" placeholder="Your answer" autocomplete="off">${'<button class="mic" type="button" id="mic" aria-label="Speak"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>'}<button class="chip" type="submit">Send</button></form>`}`;
       if (!d.confirm) wireAsk(true);
+      fit(280);
     }
     if (m === 'pair') {
       setH(190);
@@ -263,13 +298,14 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     }
     if (m === 'settings') {
       const missing = d.missing || [];
-      setH(250);
+      setH(288);
       body.innerHTML = `
         <div class="row space"><span class="label" style="margin-left:34px">Settings</span></div>
         <div class="set">
           <div class="line"><span class="name">iPhone</span><span class="val">${d.phone ? 'Connected' : 'Not connected'}</span><button class="chip" data-act="pair">Get a code</button></div>
           <div class="line"><span class="name">Noctus</span><span class="val">${d.signedIn ? esc(d.email || 'Signed in') : 'Not signed in'}</span>${d.signedIn ? '<button class="chip" data-act="signout">Sign out</button>' : '<button class="chip solid" data-act="signin">Sign in</button>'}</div>
           <div class="line"><span class="name">Shortcut</span><button class="chip ${d.option ? '' : 'solid'}" data-short="0">⌘K</button><button class="chip ${d.option ? 'solid' : ''}" data-short="1">⌥⌘K</button></div>
+          <div class="line"><span class="name">GIF reactions</span><span class="val">Pop-ups for songs, tasks, hellos</span><button class="chip ${d.gifs ? 'solid' : ''}" data-gifs="1">On</button><button class="chip ${d.gifs ? '' : 'solid'}" data-gifs="0">Off</button></div>
           <div class="line"><span class="name">Permissions</span><span class="val">${missing.length ? esc(missing.length + ' to allow') : 'All allowed'}</span>${missing.length ? '<button class="chip" data-act="permissions">Allow</button>' : ''}</div>
         </div>`;
     }
@@ -290,6 +326,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     if (b.dataset.ask) return post({ t: 'ask', instruction: b.dataset.ask });
     if (b.id === 'mic') { b.classList.add('on'); return post({ t: 'mic' }); }
     if (b.dataset.act === 'approve' || b.dataset.act === 'decline') return post({ t: b.dataset.act, task: S.data.task });
+    if (b.dataset.gifs !== undefined) return post({ t: 'gifs', on: b.dataset.gifs === '1' });
     if (b.dataset.short !== undefined) return post({ t: 'shortcut', option: b.dataset.short === '1' });
     if (b.dataset.run) { try { const r = JSON.parse(b.dataset.run); return post({ t: 'run', kind: r.kind, args: r.args }); } catch (err) { return; } }
     if (b.dataset.music) return post({ t: 'music', action: b.dataset.music });
@@ -308,16 +345,20 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
       document.documentElement.style.setProperty('--notch-h', S.notchH + 'px');
       panel.classList.toggle('fake', !o.hardware);
     },
-    show(p) { S.mode = p.mode; S.data = p; panel.classList.add('open'); render(); closer(); },
+    show(p) { S.mode = p.mode; S.data = p; panel.classList.add('open'); render(); closer(); glide(); },
     tuck() { panel.classList.remove('open'); size(); },
     untuck() { panel.classList.add('open'); size(); },
-    suggestions(list) { S.suggestions = list; if (S.mode === 'idle') render(); },
+    suggestions(list) { S.suggestions = list; if (S.mode === 'idle') { render(); glide(); } },
     event(e) {
       if (e.event === 'heard') { const el = document.getElementById('heard'); if (el) el.textContent = e.data.words; }
       if (e.event === 'dictate') {
         const input = document.getElementById('ask-input'), mic = document.getElementById('mic');
         if (input) input.value = e.data.words || '';
         if (e.data.final) { mic?.classList.remove('on'); if (input && input.value.trim()) document.getElementById('ask').requestSubmit(); }
+      }
+      if (e.event === 'remark') {
+        S.remark = e.data.text; S.remarkAt = Date.now();
+        if (S.mode === 'idle') { render(); closer(); glide(); }
       }
       if (e.event === 'choose') { const el = document.getElementById('listen-state'); if (el) el.textContent = 'Say it, or pick'; }
     },

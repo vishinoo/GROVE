@@ -33,6 +33,8 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
   let panel: KeyablePanel
   let web: WKWebView
   var onMessage: (([String: Any]) -> Void)?
+  /** The notch's own page was opened by the pointer: a glance, which main answers with a remark. */
+  var onGlance: (() -> Void)?
 
   private var notchRect = NSRect.zero
   private var notchSize = CGSize(width: 190, height: 32)
@@ -151,7 +153,7 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
       // A little forgiveness below the notch, none at the sides: the menu
       // bar items either side are things people click on purpose.
       if notchRect.insetBy(dx: 0, dy: -6).contains(p) {
-        if tucked { untuck() } else { show("idle", [:], pin: false) }
+        if tucked { untuck() } else { show("idle", [:], pin: false); onGlance?() }
       }
       return
     }
@@ -195,13 +197,30 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     if let closeAfter {
       closeTimer = Timer.scheduledTimer(withTimeInterval: closeAfter, repeats: false) { [weak self] _ in
         guard let self else { return }
-        if thenHome { self.show("idle", [:], pin: false); return }
+        // Never out from under someone reading or scrolling it: wait for the pointer to go.
+        if thenHome {
+          if self.pointerInside { self.closeTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in self?.homeWhenFree() } }
+          else { self.show("idle", [:], pin: false) }
+          return
+        }
         // Stay open while the pointer is over it; it goes when the pointer does,
         // and straight away if the pointer never came near it.
         self.pinned = false
         if self.entered { self.pointer() } else { self.close() }
       }
     }
+  }
+
+  private var pointerInside: Bool {
+    guard visible > 0, visibleWidth > 0 else { return false }
+    return NSRect(x: notchRect.midX - visibleWidth / 2, y: top - visible, width: visibleWidth, height: visible)
+      .insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation)
+  }
+
+  private func homeWhenFree() {
+    guard isOpen else { return }
+    if pointerInside { closeTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in self?.homeWhenFree() }; return }
+    show("idle", [:], pin: false)
   }
 
   /** Out of the way, with what it was showing kept for when the pointer comes back. */

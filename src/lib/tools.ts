@@ -99,10 +99,38 @@ function describe(name: string, spec: ArgSpec): { type: 'STRING' | 'NUMBER'; des
   };
 }
 
+/**
+ * Their own words asking for it, on everything that changes something.
+ *
+ * A model that does not understand a sentence reaches for the nearest tool
+ * rather than saying so: "goon session" became a calendar event, again and
+ * again. A rule against guessing was in the prompt and did not hold. So
+ * every action has to quote what asked for it, and the turn checks the quote
+ * against what was actually said (`askedFor`): an action nobody's words ask
+ * for is refused before it runs, and the model is told to ask instead.
+ */
+export const ASKED = 'asked';
+
+export function askedFor(quote: string, said: string): boolean {
+  const words = (s: string) =>
+    s.toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').split(/\s+/).filter((w) => w.length > 1);
+  const wanted = words(quote);
+  if (wanted.length === 0) return false;
+  const have = new Set(words(said));
+  return wanted.filter((w) => have.has(w)).length / wanted.length >= 0.6;
+}
+
 /** One ability, as something the model can call. */
 export function declarationFor(ability: Ability): FunctionDeclaration {
   const properties: FunctionDeclaration['parameters']['properties'] = {};
   const required: string[] = [];
+  if (!ability.reads) {
+    properties[ASKED] = {
+      type: 'STRING',
+      description: 'Their own words, copied exactly from what they said, that ask for this. If nothing they said asks for it, do not call this tool: ask_back what they meant.',
+    };
+    required.push(ASKED);
+  }
 
   for (const [name, spec] of Object.entries(ability.args)) {
     if (NOT_THE_MODELS_TO_SET.has(name)) continue;

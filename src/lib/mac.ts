@@ -111,6 +111,16 @@ function heard(m: Record<string, unknown>) {
       detail: m.detail ? String(m.detail) : undefined,
     });
     jobs.delete(id);
+  } else if (m.t === 'news') {
+    const news: MacNews = {
+      what: String(m.what ?? ''),
+      state: String(m.state ?? 'done'),
+      said: String(m.said ?? ''),
+      task: m.task ? String(m.task) : undefined,
+      speak: m.speak === true,
+    };
+    noteMacWork({ what: news.what, state: news.state, said: news.said, task: news.task });
+    newsListeners.forEach((listener) => listener(news));
   } else if (m.t === 'think') {
     void answer(String(m.id ?? ''), String(m.instruction ?? ''), String(m.text ?? ''));
   }
@@ -251,21 +261,118 @@ function sameLook(next: Look): boolean {
 }
 
 /**
+ * Whether the Mac can take a job now, asking it once if it has gone quiet.
+ *
+ * The hello is once a minute, so a Mac opened thirty seconds ago still reads
+ * as asleep — and "your Mac isn't answering" said to someone looking at their
+ * open laptop is the answer that teaches them to stop asking. One hello and a
+ * few seconds' wait costs two Realtime messages and only ever runs when the
+ * answer would otherwise have been no.
+ */
+export async function macReachable(waitMs = 3_000): Promise<boolean> {
+  if (status.state === 'connected') return true;
+  if (!channel || status.state !== 'waiting') return false;
+  send({ t: 'hello' });
+  const until = Date.now() + waitMs;
+  while (Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    if (macStatus().state === 'connected') return true;
+  }
+  return false;
+}
+
+/**
+ * What the Mac was last asked to do, and how it went.
+ *
+ * Without it every sentence was read as if the conversation had just started,
+ * so "order the large one instead" or "finish the rest" went to the phone's
+ * tools — the person had to say "on my Mac" every time to be understood. Held
+ * here and printed into the turn's context, so the model can see the work in
+ * progress the way someone sitting beside them would.
+ */
+export type MacWork = { what: string; state: string; said: string; task?: string; at: number };
+let work: MacWork | null = null;
+
+/**
+ * What the Mac did, as it happens — including what was asked of it at the
+ * Mac itself. The phone is the one talking to the glasses, and it used to
+ * know only about jobs it had sent; something started at the keyboard, or a
+ * job of its own that outlived its wait, was invisible to it, so "how did
+ * that go" or "make it the large one" had nothing to go on.
+ */
+export type MacNews = { what: string; state: string; said: string; task?: string; speak: boolean };
+const newsListeners = new Set<(news: MacNews) => void>();
+
+export function onMacNews(listener: (news: MacNews) => void): () => void {
+  newsListeners.add(listener);
+  return () => {
+    newsListeners.delete(listener);
+  };
+}
+
+export function noteMacWork(next: Omit<MacWork, 'at'>): void {
+  work = { ...next, at: Date.now() };
+}
+
+export function macWork(): MacWork | null {
+  return work;
+}
+
+const WORK_STATE: Record<string, string> = {
+  ask: 'It asked them something and is waiting on the answer',
+  confirm: 'It is waiting on their yes',
+  done: 'It finished',
+  failed: 'It did not finish',
+  answered: 'Grove answered them there',
+  stopped: 'It was stopped',
+  working: 'It is still going on the Mac, unattended (a game, or a long job); "stop" stops it',
+};
+
+/**
+ * The Mac, in a few lines, for the volatile half of the prompt.
+ *
+ * Facts rather than instructions: whether it can be reached and what it was
+ * just doing. The rules about what to do with that live in the system prompt,
+ * where they are cached; this changes, so it rides with the question.
+ */
+export function macContext(now = Date.now()): string {
+  const ago = (at: number) => Math.max(1, Math.round((now - at) / 60_000));
+  const reach =
+    status.state === 'connected'
+      ? `Their Mac${status.mac ? ` (${status.mac})` : ''}: connected.`
+      : status.state === 'waiting'
+        ? `Their Mac: not answering${lastHeard ? ` for ${ago(lastHeard)} min` : ''} — asleep, lid shut, offline or Grove not open on it.`
+        : status.state === 'refused'
+          ? `Their Mac: the link is not working${status.note ? ` (${status.note})` : ''}.`
+          : 'Their Mac: not linked to Grove yet (Settings, Your Mac).';
+  const recent = work && now - work.at < 30 * 60_000 ? work : null;
+  // Said with the fact rather than left to a rule, because a model told a
+  // Mac is asleep still reached for it when the job was obviously a Mac job.
+  const blocked = status.state === 'connected' ? '' : ' Nothing can be done on it until that changes.';
+  if (!recent) return reach + blocked;
+  const said = recent.said.replace(/\s+/g, ' ').trim().slice(0, 220);
+  return [
+    reach + blocked,
+    `On the Mac ${ago(recent.at)} min ago: ${recent.what}. ${WORK_STATE[recent.state] ?? 'It stopped'}${said ? `: "${said}"` : ''}${recent.task ? ` (task ${recent.task})` : ''}.`,
+  ].join('\n');
+}
+
+/**
  * Something for the Mac to do. Resolves with what to say, including when the
  * Mac is not there — the caller always gets a sentence, never a hang.
  */
-export function macJob(kind: string, args: Record<string, string>, timeoutMs = 20_000): Promise<MacResult> {
-  if (status.state !== 'connected') {
-    return Promise.resolve({
+export async function macJob(kind: string, args: Record<string, string>, timeoutMs = 20_000): Promise<MacResult> {
+  if (!(await macReachable())) {
+    return {
       ok: false,
       spoken:
         status.state === 'signed-out'
           ? 'Your Mac isn’t connected yet. Sign in with Noctus in Settings, Your Mac, and on the Mac.'
           : 'Your Mac isn’t answering. It needs to be awake with Grove open and signed in.',
-    });
+    };
   }
   const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
-  return new Promise((resolve) => {
+  return new Promise<MacResult>((resolve) => {
     const timer = setTimeout(() => {
       jobs.delete(id);
       resolve({ ok: false, spoken: 'Your Mac didn’t answer in time.' });

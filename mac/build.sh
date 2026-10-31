@@ -31,6 +31,11 @@ if [ -f "$root/.env" ]; then
   model="$(grep -E '^EXPO_PUBLIC_GEMINI_MODEL=' "$root/.env" | head -1 | cut -d= -f2- | tr -d '"' || true)"
   [ -n "${key:-}" ] && /usr/libexec/PlistBuddy -c "Add :GroveGeminiKey string $key" "$app/Contents/Info.plist"
   [ -n "${model:-}" ] && /usr/libexec/PlistBuddy -c "Add :GroveModel string $model" "$app/Contents/Info.plist"
+  # Optional, for GIF reactions (Gifs.swift): a GIPHY key, or a Tenor one.
+  giphy="$(grep -E '^GIPHY_API_KEY=' "$root/.env" | head -1 | cut -d= -f2- | tr -d '"' || true)"
+  tenor="$(grep -E '^TENOR_API_KEY=' "$root/.env" | head -1 | cut -d= -f2- | tr -d '"' || true)"
+  [ -n "${giphy:-}" ] && /usr/libexec/PlistBuddy -c "Add :GroveGiphyKey string $giphy" "$app/Contents/Info.plist"
+  [ -n "${tenor:-}" ] && /usr/libexec/PlistBuddy -c "Add :GroveTenorKey string $tenor" "$app/Contents/Info.plist"
   # Noctus's Supabase project, for signing in. The anon key is a public key by
   # design; the account's own token is what opens anything.
   supa="$(grep -E '^EXPO_PUBLIC_NOCTUS_SUPABASE_URL=' "$root/.env" | head -1 | cut -d= -f2- | tr -d '"' || true)"

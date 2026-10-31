@@ -1553,12 +1553,128 @@ that bear on it, capped at about 1200 characters. That call writes the choice
 into the goal ("put on Interstellar, they like Nolan"), so the browser's moves
 never carry the memory at all.
 
+**A task picks its tab; it is not handed a new one.** A new tab every time
+fixed "text my brother" landing on Instagram and caused the opposite failure:
+YouTube open, "now play this song", a second YouTube. So a task starts with no
+tab and its first move sees their open ones, marked in front and last task's,
+and takes one already on the right site or opens a new one. Readiness asks
+Chrome, never a remembered tab: checking the last task's tab after it was
+closed failed every task for an afternoon, each reported as Automation being
+off. A tab closed mid-task is noticed and replaced, not fatal.
+
+**Chess is a board, not buttons.** The reader names every piece by square
+(chess.com classes, lichess transforms) and `move` turns squares into a drag:
+page events first, a real mouse drag if the page ignores them. A board found
+makes the run a game, which goes until it ends (forty minutes, five hundred
+steps), and waiting on the opponent watches the board instead of calling the
+model. The loop guard compares the whole move, from and to included; it
+compared label and text only, so every chess move looked like the same one
+and the third was called going in circles. It plays legal, weak chess.
+
+A phone run answers the phone after fifty seconds with `working` and carries
+on; a song not in the library plays on YouTube rather than opening Music's
+search, which played nothing. Library search tries title and artist split
+both ways, since "Feel Good Inc. Gorillaz" is no field's value.
+
+**The Mac remembers the last twenty minutes, in layers.** "Open YouTube",
+then "put on the Fred again set": the second sentence used to be decided as
+if nothing had come before, so it opened another YouTube or played the set in
+Music. `Recent.swift` keeps what was said, what Grove did and how it ended
+(and where), in memory only, and it rides with every decision and with the
+browser agent's first move. The decision writes the place into the goal ("in
+the YouTube tab already open") rather than leaving "this" to be guessed.
+
+**Asking is a field, not an option.** Offered "ask" beside "do", the model
+chose "do" and started a chess game nobody said it should play. So every
+"do" fills `question` by `Thinking.askRule` (theirs, consequential, not
+already settled), and a question means nothing starts. The same rule is in
+the agent's brief, so a fork found mid-task is asked the same way. "I'll
+play" sets the game up and stops; "stop" or "I've got it" is a `stop`
+decision. A new task stops a running one first: two loops once drove the
+same tab.
+
+**Sight for what text cannot carry.** A page that is mostly canvas, video
+or frame, or a model that asks to `look`, gets a picture of the Chrome
+window (`screencapture -l`, Screen Recording) and may click a point on it.
+A script click that changes nothing is pressed again with the real mouse,
+only then, so a click that worked is never doubled.
+
+**Stop is a generation, not a flag.** Every start, resume or stop moves
+`current` on, and a run whose number is stale ends at its next step. The flag
+it replaced was reset by the next run to start: Stop pressed six times while
+a chess game kept moving, and closing its tab sent it back to chess.com.
+
+**The phone hears everything the Mac does.** `news {what, state, said, task,
+speak}` goes to the phone when any Mac job ends and for every ask decided at
+the Mac, so the phone, which is what talks to the glasses, has the context
+for the next sentence. It is spoken only when the phone started the job and
+had stopped waiting, and only while Grove is resting; a question opens the
+window, since it is part of a job they asked for. News and job results are
+held in an outbox through a reconnect rather than lost to one.
+
+**An action needs the words that asked for it.** Every non-read tool takes a
+required `asked` quote, and `askedFor` checks it against this sentence and
+the one before. "goon session" became calendar events whenever the model
+did not understand; now an action nobody's words ask for is refused before
+it runs and the model is told to ask_back. The opening glance is a greeting
+for the hour and never remarks on Grove's own work.
+
 Texts go through Messages, not a website (`agent.message`): the person is
 found in Contacts by name or relation, a pick among several is remembered,
 and the exact words are read back before sending.
 
+**GIF reactions** are a toy, off until switched on in the notch's settings.
+The search words ride on the decision already being made (`gif` in
+`Thinking.decide`), so a reaction costs one GIF search and no model call, and
+it plays in its own corner window (`Popup.swift`) rather than on the card,
+which is for what happened. Searched on GIPHY with `GIPHY_API_KEY` from
+`.env`, written by `build.sh` into the built Info.plist only.
+
+**It can see what you are doing, roughly** (`Context.swift`): the app in
+front, its window title, and the song in Music, a few hundred characters on
+every ask and nothing read from inside a window. "What do you think of this
+song" used to be answered about the clipboard, because a word gate decided
+"this" meant what was copied; now the clipboard is used only when it is named,
+and the model reads "this" against the screen. Opening the notch gets a
+one-line remark on the same picture in place of the greeting, only when
+something changed and never twice in three minutes.
+
 Chrome needs View › Developer › Allow JavaScript from Apple Events ticked once.
 It is a security setting, so Grove says where it is and does not flip it.
+
+### Phone or Mac, without being told
+
+Every Mac request used to need "on my Mac". "Play wordle" went nowhere, and
+"order the green curry instead" went to the phone's food hand-off while the Mac
+sat on the Uber Eats cart it had been building. **Nothing in the turn said what
+the Mac was doing**, so every sentence was read as if the conversation had just
+started.
+
+So `macContext()` (mac.ts) puts a few lines of fact into the per-turn context:
+whether the Mac can be reached, and what it last did with its state and task
+id, for half an hour. The rules for using them ("Phone or Mac" in `TOOL_RULES`)
+are in the cached half. **The phone is the default.** The Mac is for what needs
+a screen and a signed-in browser, and a sentence that carries on Mac work stays
+there, as `answer` plus `task` on `mac.use`. That resumes the same task in the
+same tab, which the Mac keeps for ten minutes after its last step. Past that,
+`mac.use` restarts it instead of saying "I lost track".
+
+**A Mac that cannot be reached is explained by the model, not a canned line.**
+The context says so, and the model, told nothing can be done on it, answers
+about this job and reaches for a phone tool if one fits ("order me a burrito"
+falls back to the Uber Eats hand-off). If it calls a Mac tool anyway, brain.ts
+hands the call back as a result rather than running it, so the reply is still
+the model's. That costs one more round, only on that path. `macReachable()`
+sends one hello and waits three seconds before saying no, because the
+heartbeat is a minute and a Mac opened thirty seconds ago otherwise reads as
+asleep.
+
+Measured live: wordle and Instagram reach the Mac unprompted; calendar and
+"play some music" stay on the phone. That last one needed the phone music tool
+to say it is the default, since "the Mac is on" was being read as a reason.
+Carrying on with a pending order and "finish the rest of them" both resumed
+the right task. With the Mac asleep, all three replies said so in their own
+words with no extra call.
 
 ## Checks
 

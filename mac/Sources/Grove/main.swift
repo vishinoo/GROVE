@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     link = Link(account: account)
     shortcut = Shortcut()
 
+    notch.onGlance = { [weak self] in self?.remark() }
     notch.onMessage = { [weak self] message in self?.fromPanel(message) }
 
     link.onLook = { [weak self] incoming in
@@ -107,9 +108,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       }
     }
 
+    // `open Grove.app --args --ask "text"` asks the notch at launch, as if typed into it.
+    // Several, as "first || then", are asked 35 seconds apart: a conversation in layers.
+    if let i = CommandLine.arguments.firstIndex(of: "--ask"), i + 1 < CommandLine.arguments.count {
+      for (k, text) in CommandLine.arguments[i + 1].components(separatedBy: " || ").enumerated() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3 + Double(k) * 35) { self.askFree(text, earlier: "") }
+      }
+    }
+
+    // `open Grove.app --args --gif URL` shows the reaction pop-up at launch, to check it draws.
+    if let i = CommandLine.arguments.firstIndex(of: "--gif"), i + 1 < CommandLine.arguments.count {
+      let url = CommandLine.arguments[i + 1]
+      DispatchQueue.main.asyncAfter(deadline: .now() + 2) { Task { @MainActor in await Popup.show(url); Log.say("test: gif shown") } }
+    }
+
+    // `open Grove.app --args --react "what happened"` picks and shows a reaction for it, to test the rule in Gifs.swift.
+    if let i = CommandLine.arguments.firstIndex(of: "--react"), i + 1 < CommandLine.arguments.count {
+      let happened = CommandLine.arguments[i + 1]
+      DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.react(to: happened, said: "") }
+    }
+
     // `open Grove.app --args --peek` opens the panel once at launch, to check it draws.
     if CommandLine.arguments.contains("--peek") {
-      DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.notch.show("idle", [:], pin: true) }
+      DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.notch.show("idle", [:], pin: true); self.remark() }
     }
   }
 
@@ -159,12 +180,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // A command is done, not discussed: the model cannot press play, and
     // asked to, it says so politely, which is the worst answer there is.
     if let job = Commands.job(for: instruction) {
+      Recent.said(instruction, did: "\(Jobs.title(for: job)) (\(job.kind))")
       notch.close()
       run(job) { _, _, _ in }
       return
     }
     let clip = NSPasteboard.general.string(forType: .string) ?? ""
-    let aboutClip = instruction.lowercased().contains("copied") || instruction.lowercased().contains("this")
+    // Only when they say so. "This" used to count, which sent "what do you think
+    // of this song" to whatever was on the clipboard; "this" is for the model to
+    // read against what is on their screen (Context.swift).
+    let aboutClip = instruction.range(of: #"\b(copied|clipboard|what i copied)\b"#, options: [.regularExpression, .caseInsensitive]) != nil
     if aboutClip {
       captured = Captured(text: clip, app: nil, element: nil, viaClipboard: true)
       think(instruction)
@@ -174,19 +199,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     notch.show("thinking", ["text": "", "ask": instruction], pin: true)
     Log.say("ask: \(instruction.prefix(80))")
     Task { @MainActor in
-      let decision = await Thinking.decide(earlier.isEmpty ? instruction : earlier + "Now they say: " + instruction, manner: self.look.manner, about: self.look.about)
+      let now = await Context.now()
+      let decision = await Thinking.decide(earlier.isEmpty ? instruction : earlier + "Now they say: " + instruction, manner: self.look.manner, about: self.look.about, now: now.text, recent: Recent.text)
       Log.say("ask: decided \(String(describing: decision).prefix(100))")
       switch decision {
       case .music(let action, let what, _, let say):
+        Recent.said(instruction, did: "Music: \(action) \(what)")
         let kinds = ["pause": "music.pause", "resume": "music.resume", "next": "music.next", "previous": "music.previous", "louder": "volume.up", "quieter": "volume.down"]
         let kind = kinds[action] ?? "music.play"
         self.run(Job(id: UUID().uuidString, kind: kind, args: kind == "music.play" ? ["what": what, "say": say] : ["say": say], fromPhone: false)) { _, _, _ in }
       case .act(let goal, let say):
+        Recent.said(instruction, did: "On Chrome: \(goal)")
         self.runAgent(Job(id: UUID().uuidString, kind: "agent.start", args: ["goal": goal, "say": say], fromPhone: false)) { _, _, _ in }
       case .message(let to, let text):
+        Recent.said(instruction, did: "Text to \(to): \(text)")
         self.runAgent(Job(id: UUID().uuidString, kind: "agent.message", args: ["to": to, "text": text, "goal": "Text \(to)"], fromPhone: false)) { _, _, _ in }
-      case .answer(let text):
+      case .answer(let text, let gif):
+        Recent.said(instruction, did: "Answered: \(text)")
+        self.link.news(what: "Asked on the Mac: \(instruction)", state: "answered", said: text)
         self.notch.show("answer", ["ask": instruction, "text": text, "via": "mac"], pin: true)
+        self.react(gif)
+      case .ask(let question):
+        // Shown as an answer, so the reply box under it carries the question
+        // back with their answer ("follows"), and Recent has it too.
+        Recent.said(instruction, did: "Asked them first: \(question)")
+        self.link.news(what: "Asked on the Mac: \(instruction)", state: "ask", said: question)
+        self.notch.show("answer", ["ask": instruction, "text": question, "via": "mac"], pin: true)
+      case .stop(let line):
+        Recent.said(instruction, did: "Stopped what was going on the Mac")
+        self.link.news(what: "On the Mac: \(instruction)", state: "stopped", said: line)
+        self.agent.stop()
+        self.notch.show("done", ["title": "Stopped", "text": line.isEmpty ? "All yours." : line, "ok": true], pin: false, closeAfter: 3)
       case nil:
         self.notch.show("answer", ["ask": instruction, "text": "I couldn't reach anything to think with. Check your connection and try again.", "failed": true], pin: true)
       }
@@ -254,6 +297,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     case "shortcut":
       setShortcut(option: (message["option"] as? Bool) ?? false)
       showSettings()
+    case "gifs":
+      Gifs.on = (message["on"] as? Bool) ?? false
+      showSettings()
     case "permissions":
       Permission.requestAll { [weak self] in self?.showSettings() }
     case "signin":
@@ -276,14 +322,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     if job.kind.hasPrefix("agent.") { runAgent(job, reply: reply); return }
     let title = Jobs.title(for: job)
+    if job.fromPhone { Recent.said(title, did: job.kind, from: true) }
     if job.fromPhone { notch.show("job", ["title": title, "from": "From your iPhone", "steps": Jobs.steps(for: job), "at": 0], pin: true) }
     Jobs.run(job) { [weak self] ok, spoken in
       guard let self else { return }
+      // Not in their library: played on YouTube instead, in their YouTube tab
+      // if one is open. Opening Music's catalogue search played nothing, and
+      // "play Feel Good Inc." is a request to hear it, not to search for it.
+      if job.kind == "music.play", spoken.hasPrefix(Music.elsewhere) {
+        let what = String(spoken.dropFirst(Music.elsewhere.count))
+        var args = job.args
+        args["goal"] = "Play \(what) on YouTube: the song itself, the official video or audio if there is one"
+        self.runAgent(Job(id: job.id, kind: "agent.start", args: args, fromPhone: job.fromPhone), reply: reply)
+        return
+      }
       if job.fromPhone || job.kind.hasPrefix("music.") || job.kind.hasPrefix("open.") {
         // Grove's own line when it had one ("Some Calvin Harris. You've earned it."),
         // the plain receipt when it did not, or when it went wrong.
         let said = ok ? (job.args["say"].flatMap { $0.isEmpty ? nil : $0 } ?? spoken) : spoken
+        Recent.ended(ok ? spoken : "failed: \(spoken)")
+        if !job.fromPhone { self.link.news(what: "On the Mac: \(title)", state: ok ? "done" : "failed", said: spoken) }
         self.notch.show("done", ["title": title, "text": said, "ok": ok], pin: false, closeAfter: said == spoken ? 2.8 : 4)
+        if ok && ["music.play", "music.next", "music.previous"].contains(job.kind) { self.reactToSong(said: said) }
       }
       reply(ok, spoken, [:])
     }
@@ -300,12 +360,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let first = said ?? ["agent.start": "Opening Chrome", "agent.message": "Finding them in Contacts"][job.kind] ?? "Carrying on"
     notch.show("job", ["title": goal.isEmpty ? "Carrying on" : goal, "from": from, "steps": [first], "at": 0], pin: true)
     agent.manner = look.manner
+    if job.fromPhone && job.kind == "agent.start" { Recent.said(goal, did: "On Chrome: \(goal)", from: true) }
+    agent.recent = Recent.text
+    // The phone waits on an answer and the job may be a whole game of chess,
+    // so a long run answers the phone once and carries on here. The check-in
+    // that used to end a phone run after a minute stopped chess mid-search.
+    final class Once { var done = false }
+    let once = Once()
+    let answer: (Bool, String, [String: String]) -> Void = { ok, said, detail in
+      guard !once.done else { return }
+      once.done = true
+      reply(ok, said, detail)
+    }
+    if job.fromPhone {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 50) {
+        answer(true, "It's still going on your Mac. I'll keep at it.", ["state": "working"])
+      }
+    }
     Task { @MainActor in
       // A run started here can take its time: someone is watching the notch.
       // The phone is waiting on an answer, so its runs check in sooner.
       let result: AgentResult
       switch job.kind {
-      case "agent.start": result = await self.agent.start(goal: goal, budget: job.fromPhone ? 60 : 240)
+      case "agent.start": result = await self.agent.start(goal: goal, budget: 240)
       case "agent.message": result = await self.agent.message(to: job.args["to"] ?? "", text: job.args["text"] ?? "")
       default: result = await self.agent.resume(task: job.args["task"] ?? "", answer: job.args["answer"] ?? "", approve: job.args["approve"] == "yes")
       }
@@ -321,8 +398,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Long enough to read what it found, then back to the ask box.
         let read = min(10, 2.5 + Double(result.spoken.count) * 0.04)
         self.notch.show("done", ["title": "Done", "text": result.spoken, "ok": result.state == "done"], pin: true, closeAfter: read, thenHome: true)
+        if result.state == "done" { self.react(to: "They asked for: \(goal)\nIt is done.", said: result.spoken) }
       }
-      reply(result.state != "failed", result.spoken, ["state": result.state, "task": result.task, "detail": result.detail])
+      Recent.ended("\(result.state): \(result.spoken)\(result.detail.isEmpty ? "" : " (on \(result.detail))")")
+      // The phone hears how it ended, always: it is what talks to the glasses,
+      // and the next thing said to it may be about this. Said aloud only when
+      // the phone started it and had stopped waiting ("still going on your Mac").
+      let late = once.done
+      self.link.news(what: job.fromPhone ? goal : "Asked on the Mac: \(goal)", state: result.state, said: result.spoken, task: result.task,
+                     speak: job.fromPhone && late && result.state != "stopped")
+      answer(result.state != "failed", result.spoken, ["state": result.state, "task": result.task, "detail": result.detail])
+    }
+  }
+
+  /**
+    A hello when they open the notch, for the hour, with a word about what they are doing. Not every
+    time: only when something changed (a new song, different work) and never
+    twice in three minutes, so it stays a remark rather than a ticker. Shown
+    in place of the greeting; its GIF goes through the usual rule.
+  */
+  private var remarked: (at: Date, signature: String)?
+  private func remark() {
+    // While Grove is driving the screen, what is in front is its own work.
+    guard !agent.running else { return }
+    Task { @MainActor in
+      let now = await Context.now()
+      if let last = remarked {
+        let age = Date().timeIntervalSince(last.at)
+        if age < 180 || (now.signature == last.signature && age < 1200) { return }
+      }
+      remarked = (Date(), now.signature)
+      guard let said = await Thinking.remark(now: now.text, manner: look.manner, about: look.about, recent: Recent.text) else { return }
+      Log.say("remark: \(said.line) [\(said.gif)]")
+      notch.send("remark", ["text": said.line])
+      react(said.gif)
+    }
+  }
+
+  /** A reaction GIF in the corner of the screen (Popup.swift), when they turned them on. Never holds anything up. */
+  private func react(_ words: String) {
+    guard Gifs.on, !words.isEmpty else { return }
+    Task { @MainActor in
+      if let url = await Gifs.find(words) { await Popup.show(url) }
+    }
+  }
+
+  /** The same, for a moment whose reaction was not picked with the reply: chosen now that it has happened. */
+  private func react(to happened: String, said: String) {
+    guard Gifs.on else { return }
+    Task { @MainActor in
+      self.react(await Gifs.choose(happened: happened, said: said, manner: self.look.manner))
+    }
+  }
+
+  /**
+    What is actually playing, not what was asked for: a skip, a bare "play" or
+    a playlist lands on a particular song, and the face should fit that song.
+    Asked of Music only when GIFs are on.
+  */
+  private func reactToSong(said: String) {
+    guard Gifs.on else { return }
+    Script.run(#"tell application "Music" to return (name of current track) & "|" & (artist of current track) & "|" & (genre of current track)"#) { [weak self] ok, out in
+      let bits = out.split(separator: "|", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
+      guard ok, bits.count == 3, !bits[0].isEmpty else { return }
+      let happened = "Now playing on their Mac: \u{201C}\(bits[0])\u{201D} by \(bits[1])\(bits[2].isEmpty ? "" : " (\(bits[2]))")."
+      // A song always gets a face; the genre is the fallback when the model offers none.
+      let fallback = bits[2].isEmpty ? "vibing to music" : "\(bits[2]) music vibing"
+      Task { @MainActor in
+        let words = await Gifs.choose(happened: happened, said: said, manner: self?.look.manner ?? "")
+        self?.react(words.isEmpty ? fallback : words)
+      }
     }
   }
 
@@ -404,6 +549,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       "phone": link.connected,
       "option": shortcut.useOption,
       "missing": missing,
+      "gifs": Gifs.on,
     ], pin: true)
   }
 

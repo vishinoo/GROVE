@@ -23,7 +23,7 @@
  * Grove is up, and the UI has to say so rather than quietly not happening.
  */
 
-import { macJob } from './mac';
+import { macJob, macWork, noteMacWork } from './mac';
 import {
   addReminder,
   openReminders,
@@ -2231,7 +2231,7 @@ function moodTerms(query: string): string[] {
 const MUSIC: Ability = {
   id: 'music.play',
   name: 'Music',
-  what: 'Plays something from your library, into whatever you are wearing.',
+  what: 'Plays music from their library on the phone, into whatever they are wearing. The music tool when their Mac is not connected, or when they say the phone.',
   where: 'device',
   wired: capabilities().remote,
   needs: ['music-permission'],
@@ -3250,7 +3250,7 @@ const NOW: Ability = {
 const MAC_MUSIC: Ability = {
   id: 'mac.music',
   name: 'Music on your Mac',
-  what: 'Plays, pauses or skips music in Apple Music on their laptop, or makes the laptop louder or quieter. Only when they say laptop, Mac or computer; music on the phone is the other music tool.',
+  what: 'Plays, pauses or skips music in Apple Music on their laptop, or makes the laptop louder or quieter. The music tool whenever the context says their Mac is connected, unless they say the phone. Songs not in their library play on YouTube.',
   where: 'device',
   wired: true,
   needs: [],
@@ -3276,6 +3276,7 @@ const MAC_MUSIC: Ability = {
     const kind = KINDS[action];
     if (!kind) return { ok: false, spoken: 'I can play, pause, skip, or change the volume on your Mac. Which?' };
     const result = await macJob(kind, kind === 'music.play' ? { what: (args.what || '').trim() } : {});
+    if (result.ok) noteMacWork({ what: `music: ${action}${args.what ? ` ${args.what.trim()}` : ''}`, state: 'done', said: result.spoken });
     return { ok: result.ok, spoken: result.spoken };
   },
 };
@@ -3283,7 +3284,7 @@ const MAC_MUSIC: Ability = {
 const MAC_OPEN: Ability = {
   id: 'mac.open',
   name: 'Open on your Mac',
-  what: 'Opens a web address or an app on their laptop. Only when they say laptop, Mac or computer.',
+  what: 'Opens a web address or an app on their laptop. The default for opening anything whenever their Mac is connected, unless they say the phone. To do something on a site rather than just open it, use the Mac browser tool.',
   where: 'device',
   wired: true,
   needs: [],
@@ -3296,6 +3297,7 @@ const MAC_OPEN: Ability = {
     if (!what) return { ok: false, spoken: 'What should I open on your Mac?' };
     const looksLikeLink = /^https?:\/\//i.test(what) || /^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(what);
     const result = await macJob(looksLikeLink ? 'open.url' : 'open.app', looksLikeLink ? { url: what } : { app: what });
+    if (result.ok) noteMacWork({ what: `opened ${what}`, state: 'done', said: result.spoken });
     return { ok: result.ok, spoken: result.spoken };
   },
 };
@@ -3311,21 +3313,26 @@ const MAC_OPEN: Ability = {
  * press-or-say-yes confirmation as everything else that cannot be undone, and
  * only a confirmed re-run sends `approve` — the one thing the Mac will press a
  * buy, send or submit button for. The model never gets to say yes for them.
+ *
+ * A finished task is kept too, for as long as the Mac keeps it (ten minutes
+ * since its last step). "Order the large one instead" and "finish the rest"
+ * are the same job carried on, in the tab it was done in; started fresh, the
+ * Mac would open a new tab and begin again from nothing.
  */
 let macTask: { id: string; at: number } | null = null;
 
 const MAC_USE: Ability = {
   id: 'mac.use',
   name: 'Use your Mac',
-  what: 'Does things on their laptop in its web browser, where they are signed in to everything: checks Instagram or other DMs, finds jobs, puts on a video, looks something up on a site, fills in a form, orders something. Call it straight away, without asking first, for anything that needs a website or an account no other tool here reaches (Instagram, LinkedIn, Uber Eats, a shop, any site), whether or not they said laptop; never ask "should I check your laptop?". If the Mac is not connected it says so itself. It asks them questions as it goes and waits for a yes before buying, sending or submitting. When it has just asked them something, their next sentence is the answer: call this again with answer.',
+  what: 'Does things on their laptop in its web browser, where they are signed in to everything: checks Instagram or other DMs, finds jobs, plays a web game like Wordle, puts on a video, looks something up on a site, fills in a form, orders something. Call it straight away, without asking first, for anything that needs a website or an account no other tool here reaches (Instagram, LinkedIn, Uber Eats, a shop, any site), whether or not they said laptop; never ask "should I check your laptop?". It asks them questions as it goes and waits for a yes before buying, sending or submitting. When it has just asked them something, or they change or carry on with what it is doing or just did, pass that as answer with the task id.',
   where: 'device',
   wired: true,
   needs: [],
   slow: true,
   args: {
     goal: { type: 'string', what: 'what to get done, in their words with every detail they gave' },
-    answer: { type: 'string', what: 'their answer, when the Mac just asked them something' },
-    task: { type: 'string', what: 'the task id the Mac gave, when answering' },
+    answer: { type: 'string', what: 'their answer when the Mac asked them something, or a change or next step to the job it is doing or just did ("get the large one instead", "finish the rest"), written out in full' },
+    task: { type: 'string', what: 'the task id of that job, from the Mac line in the context' },
     stop: { type: 'string', what: '"yes" when they say stop, cancel or enough while the Mac is doing something' },
     confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
   },
@@ -3336,11 +3343,15 @@ const MAC_USE: Ability = {
     'check linkedin for jobs on my computer',
     'stop what my mac is doing',
     'check my instagram dms',
+    'play wordle',
   ],
   run: async (args) => {
     if (/^(yes|true|stop)$/i.test((args.stop || '').trim())) {
       macTask = null;
-      return macJob('agent.stop', {});
+      const stopped = await macJob('agent.stop', {});
+      const last = macWork();
+      if (stopped.ok && last) noteMacWork({ ...last, state: 'stopped', said: stopped.spoken });
+      return stopped;
     }
     const fresh = macTask && Date.now() - macTask.at < 10 * 60_000 ? macTask.id : '';
     const task = (args.task || '').trim() || fresh;
@@ -3351,15 +3362,32 @@ const MAC_USE: Ability = {
     let result;
     // A new goal is a new task. Resuming whatever was pending because an
     // answer argument came along with it is how an old job came back.
-    if (task && (approve || (answer && (!goal || args.task)))) {
+    const resuming = Boolean(task && (approve || (answer && (!goal || args.task))));
+    if (resuming) {
       result = await macJob('agent.resume', { task, answer, approve: approve ? 'yes' : '' }, 88_000);
+      // The Mac forgets a task ten minutes after its last step. Carrying on
+      // with one it has dropped starts it again rather than saying "I lost
+      // track", which is a sentence about our bookkeeping, not their job.
+      if (!approve && result.state === 'failed' && /lost track/i.test(result.spoken)) {
+        const again = [goal || macWork()?.what, answer].filter(Boolean).join('. ');
+        if (again) result = await macJob('agent.start', { goal: again }, 88_000);
+      }
     } else if (goal) {
       result = await macJob('agent.start', { goal }, 88_000);
     } else {
       return { ok: false, spoken: 'What should I do on your Mac?' };
     }
 
-    macTask = result.task && (result.state === 'ask' || result.state === 'confirm') ? { id: result.task, at: Date.now() } : null;
+    macTask = result.task && result.state !== 'failed' ? { id: result.task, at: Date.now() } : null;
+    if (result.task || result.state) {
+      const before = macWork();
+      noteMacWork({
+        what: (resuming && before?.task === task ? `${before.what}; then: ${answer || 'yes'}` : goal || answer).slice(0, 240),
+        state: result.state ?? (result.ok ? 'done' : 'failed'),
+        said: result.spoken,
+        task: result.task,
+      });
+    }
     if (result.state === 'confirm') {
       return { ok: false, needsConfirming: true, spoken: result.spoken, confirmArgs: { task: result.task ?? '', answer: 'yes' } };
     }

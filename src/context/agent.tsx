@@ -59,6 +59,7 @@ import { isSpeaking, speak, stopSpeaking } from '@/lib/speak';
 import * as memory from '@/lib/memory';
 import * as life from '@/lib/life';
 import { dueToday, whatMatters, nextUp, type Attention, type NextUp } from '@/lib/attention';
+import { onMacNews } from '@/lib/mac';
 import { noteAnswered } from '@/lib/interrupt';
 import { learnWeek, noteTurn } from '@/lib/rhythms';
 import { forgetRapport, notice as noticeRapport } from '@/lib/rapport';
@@ -2137,6 +2138,35 @@ function shortFailure(text: string): string {
     },
     [exchange]
   );
+
+  /**
+   * The Mac's news, said into the glasses when it is theirs to hear.
+   *
+   * Only a job they started from here that outlived the phone's wait — the
+   * game that finished, the order that needs a yes — and only while Grove is
+   * resting, so it never talks over a turn. A question opens the window to
+   * answer it: they asked for this job, and the question is part of it,
+   * which is what separates it from Grove speaking first. Everything else the
+   * Mac reports is recorded by mac.ts for the next sentence and not said.
+   */
+  useEffect(() => {
+    return onMacNews((news) => {
+      if (!news.speak || !news.said || !mounted.current) return;
+      const resting = stateNow.current === 'idle' || stateNow.current === 'asleep';
+      if (!resting || running.current || isSpeaking() || awaitingYes.current) return;
+      const asks = news.state === 'ask' || news.state === 'confirm';
+      setCaption(news.said);
+      if (!asks) hushAfter.current = turnSeq.current;
+      utter(news.said, asks);
+      const account = live.current.uid;
+      if (account && account !== 'anon') {
+        void transcript.record(account, { said: '', replied: news.said }).then((entries) => {
+          if (mounted.current) setActivity(entries);
+        });
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* -------------------------------------------------------------- the ring */
 

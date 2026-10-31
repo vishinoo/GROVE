@@ -101,6 +101,27 @@ enum Jobs {
   playlist wins, then a song or artist; nothing named shuffles the library.
 */
 enum Music {
+  /** The start of the line `play` answers with when the song is not theirs: main.swift plays it on YouTube. */
+  static let elsewhere = "elsewhere:"
+
+  /**
+    The ways a request can name a song. People say the title and the artist in
+    one breath — "Feel Good Inc. Gorillaz" — and Music's search wants one
+    field at a time, so that found nothing, opened the catalogue and played
+    nothing. Each split is tried as a title with the rest as the artist,
+    both ways round, after the whole phrase.
+  */
+  static func tries(_ q: String) -> [(String, String)] {
+    let words = q.replacingOccurrences(of: #"(?i)\s+by\s+"#, with: " ", options: .regularExpression).split(separator: " ").map(String.init)
+    var out: [(String, String)] = [(q, "")]
+    guard words.count > 1 else { return out }
+    for k in stride(from: words.count - 1, through: 1, by: -1) {
+      out.append((words.prefix(k).joined(separator: " "), words.dropFirst(k).joined(separator: " ")))
+      out.append((words.dropFirst(words.count - k).joined(separator: " "), words.prefix(words.count - k).joined(separator: " ")))
+    }
+    return Array(out.prefix(12))
+  }
+
   /**
     A playlist when one is asked for, and only a playlist: "play my agent
     playlist" once found a song called "FREE AGENTS" instead, because the
@@ -146,16 +167,25 @@ enum Music {
           return "playlist|" & name of found
         end if
         \(playlistOnly ? "return \"none\"" : """
-        set hits to (search library playlist 1 for wanted)
-        if (count of hits) > 0 then
-          play item 1 of hits
-          delay 0.6
-          try
-            return "song|" & name of current track & "|" & artist of current track
-          on error
-            return "song|" & name of item 1 of hits & "|"
-          end try
-        end if
+        repeat with t in {\(Music.tries(q).map { "{\"\($0.0)\", \"\($0.1)\"}" }.joined(separator: ", "))}
+          set hint to item 2 of t
+          if hint is "" then
+            set hits to (search library playlist 1 for (item 1 of t))
+          else
+            set hits to (search library playlist 1 for (item 1 of t) only songs)
+          end if
+          repeat with h in hits
+            if hint is "" or (artist of h) contains hint then
+              play h
+              delay 0.6
+              try
+                return "song|" & name of current track & "|" & artist of current track
+              on error
+                return "song|" & name of h & "|"
+              end try
+            end if
+          end repeat
+        end repeat
         return "none"
         """)
       end tell
@@ -164,11 +194,10 @@ enum Music {
     Script.run(script) { ok, out in
       if !ok { done(false, "Music wouldn't respond. Grove may need permission to control it, in the Grove menu's checklist."); return }
       if out == "none" {
-        // Not in their library: Music's own search has the rest of the catalogue.
-        if !playlistOnly, let term = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-           let url = URL(string: "music://music.apple.com/search?term=\(term)") {
-          NSWorkspace.shared.open(url)
-          done(true, "\(q) isn't in your library, so I've searched for it in Music.")
+        // Not in their library. AppleScript cannot play the catalogue, and
+        // opening Music's search played nothing, so it goes to YouTube.
+        if !playlistOnly {
+          done(true, Music.elsewhere + q)
         } else {
           done(false, "I couldn't find a playlist called \(q).")
         }

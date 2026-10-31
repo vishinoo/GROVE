@@ -21,7 +21,7 @@
     phone → mac   hello {}                           settings {colour, label, stops, speed, warp, name, manner}
                   job {id, kind, args}               thought {id, kind, text}
     mac → phone   welcome {mac}                      done {id, ok, spoken, state?, task?, detail?}
-                  think {id, instruction, text}
+                  think {id, instruction, text}      news {what, state, said, task?, speak}
 
   "Connected" means heard from the phone in the last two and a half minutes;
   it says hello once a minute — about 90,000 messages a month, well inside
@@ -187,6 +187,9 @@ final class Link {
         backoff = 2
         Log.say("link: joined")
         broadcast(["t": "welcome", "mac": Host.current().localizedName ?? "Mac"])
+        let held = outbox
+        outbox = []
+        held.forEach(broadcast)
       } else {
         Log.say("link: join refused: \(payload["response"] ?? "")")
       }
@@ -215,6 +218,32 @@ final class Link {
     socket.send(.string(text)) { error in if let error { Log.say("link: send failed: \(error.localizedDescription)") } }
   }
 
+  /**
+    What the Mac did, for the phone, which is what talks to the glasses and
+    which has to know what the Mac is up to for the next sentence to make
+    sense. `speak` is for a result or a question the phone is no longer
+    waiting on: a job it started that outlived its wait.
+  */
+  func news(what: String, state: String, said: String, task: String = "", speak: Bool = false) {
+    deliver(["t": "news", "what": String(what.prefix(240)), "state": state, "said": String(said.prefix(400)), "task": task, "speak": speak])
+  }
+
+  /**
+    Sent now, or held until the link is back. A reconnect is a few seconds
+    every few minutes, and a result sent into one was lost: "send failed:
+    Socket is not connected", and the phone never heard how the job ended.
+  */
+  private var outbox: [[String: Any]] = []
+  private func deliver(_ message: [String: Any]) {
+    guard Thread.isMainThread else { DispatchQueue.main.async { self.deliver(message) }; return }
+    guard joined else {
+      outbox.append(message)
+      if outbox.count > 20 { outbox.removeFirst() }
+      return
+    }
+    broadcast(message)
+  }
+
   private func broadcast(_ message: [String: Any]) {
     var m = message
     m["from"] = "mac"
@@ -240,7 +269,7 @@ final class Link {
       onJob?(Job(id: id, kind: (m["kind"] as? String) ?? "", args: args, fromPhone: true)) { [weak self] ok, spoken, extra in
         var out: [String: Any] = ["t": "done", "id": id, "ok": ok, "spoken": spoken]
         extra.forEach { out[$0.key] = $0.value }
-        self?.broadcast(out)
+        self?.deliver(out)
       }
     case "thought":
       guard let id = m["id"] as? String, let waiting = pending.removeValue(forKey: id) else { return }

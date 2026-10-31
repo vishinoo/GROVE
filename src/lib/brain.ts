@@ -30,6 +30,7 @@
 import { abilityById, currentAccount, runAbility, type Ability } from './abilities';
 import type { GroveContext, GroveReply, Turn } from './grove';
 import { asToolResults, asUserTurn, lastModelTrouble, lightAfterAction, lightFallback, toolTurn, type ToolHistory } from './lightModel';
+import { macContext, macReachable } from './mac';
 import { factFrom, memoryData, MEMORY_RULES } from './memory';
 import { lately, loadLife, whoIsWho } from './life';
 import { rhythmLines, rhythms } from './rhythms';
@@ -40,7 +41,7 @@ import { ABILITIES } from './abilities';
 import { activePreset, fallback, mannerDirective } from './persona';
 import { bearingOn } from './bearing';
 import type { Proposal } from './offers';
-import { abilityIdFor, argsFromCall, declarationsFor } from './tools';
+import { abilityIdFor, argsFromCall, ASKED as ASKED_ARG, askedFor, declarationsFor } from './tools';
 
 /**
  * How many times the model may call tools before it has to answer.
@@ -142,7 +143,13 @@ const TOOL_RULES = `How to use your tools:
 - If they gave no gist at all ("email Priya"), use ask_back to ask what it should say.
 - Always give an email a short, natural subject line of your own — a few words saying what it is about, like "Running late" or "Slides for Thursday".
 - To recap mail and then send that recap to someone, first get the recap, then send its text with the send-email tool.
-- Ordering: food goes to the food tool (Uber Eats, or DoorDash if they say so); things to buy go to the shopping tool (Amazon unless they name Instacart, Walmart or Costco). "My usual" is in what you know about them above; if it is not there, ask_back what their usual is — do not search for it.
+- Phone or Mac: you run on their phone and can also drive their Mac (the Mac tools). Choose yourself; they should never have to say "on my Mac", and never ask which one.
+  - When the context says the Mac is connected, the Mac is the default for everything it can do: music, a video, a song on YouTube, a website, a web game (Wordle, chess), DMs, a shop's cart, a form, opening an app or a site. They are at the laptop, so that is where it should happen. Ask for one of those and it goes to the Mac whether or not they named it.
+  - The phone keeps what only the phone has: calendar, mail, texts, reminders, directions, rides, documents, and anything they say to do on the phone. When the Mac is not connected, everything is the phone's.
+  - The context says whether the Mac is reachable and what it was last doing. A sentence that carries on with that work ("order this instead", "finish the rest", "now the next one", "make it two") stays on the Mac: pass it as answer with that task id, written out in full rather than as "this".
+  - If the Mac is not reachable and the job needs it, do not call it. Say so in a sentence of your own about this job and what would let you do it, and if a phone tool gets them there another way, use that.
+- Ordering: food goes to the food tool (Uber Eats, or DoorDash if they say so); things to buy go to the shopping tool (Amazon unless they name Instacart, Walmart or Costco) — unless they are carrying on with ordering already under way on the Mac, which continues there. "My usual" is in what you know about them above; if it is not there, ask_back what their usual is — do not search for it.
+- When you do not understand what they mean — a word you do not know, a nickname, slang, a placeholder, a sentence that could be several things — ask_back one short question about it. Never reach for the nearest tool to have done something: an action they did not ask for is worse than a question.
 - For sending, booking, ordering, calling or messaging, just call the tool. The app asks the person to confirm before anything happens, so do not ask them yourself.
 - ALWAYS write a reply alongside a tool call. A tool call with no words is the one thing you must never send: the app then has to go and ask a second time what you meant to say, which costs the person a second of silence on every single request.
 - When you call a tool that DOES something — logs, sets, adds, switches, marks done, ticks off, starts, stops — write the line you would say once it has worked, in the same reply. The app holds it until the thing has actually happened and says it then, so write it as the reply and not as a promise: "Right, half marathon's on the list" rather than "I'll add that". If it fails, the app says so instead and your line is never spoken.
@@ -283,6 +290,9 @@ function unique(line: string, index: number, all: string[]): boolean {
  * of an email that was never about her number.
  */
 const PLUMBING = new Set(['contact.find', 'doc.recent']);
+
+/** The abilities that drive the Mac through the link (mac.ts), as opposed to the older bridge. */
+const MAC_HANDS = new Set(['mac.use', 'mac.music', 'mac.open']);
 
 function fedInto(read: RanTool, args: Record<string, string>): boolean {
   if (PLUMBING.has(read.ability.id)) return true;
@@ -622,7 +632,9 @@ async function runTurn(
 
   // Sums are worked out exactly and handed over as a fact; see calc.ts.
   const sum = calculate(userText);
-  const situation = contextFor(context, [roster, usual, friction].filter(Boolean));
+  // Whether the Mac can be reached and what it was just doing: a few lines,
+  // no I/O, and the reason "order this instead" needs no "on my Mac".
+  const situation = contextFor(context, [roster, usual, friction, macContext()].filter(Boolean));
   const contents: unknown[] = [
     ...(historyFor(history) as unknown[]),
     asUserTurn(
@@ -747,12 +759,50 @@ async function runTurn(
 
       const args = argsFromCall(call.args);
 
+      /*
+        A Mac that cannot be reached is the model's to explain, not a canned
+        line's.
+
+        The context already says when it is asleep, so this is only the case
+        where the model called it anyway — or it went quiet a minute ago.
+        Handed back as a result rather than run, the model says so about this
+        job, in this conversation, and can reach for a phone tool instead; run,
+        the turn could only have read out "your Mac isn't answering". One more
+        round, paid only on this path.
+      */
+      if (MAC_HANDS.has(ability.id) && !(await macReachable())) {
+        results.push({
+          name: call.name,
+          result: {
+            ok: false,
+            result: `Not done — the Mac cannot be reached. ${macContext()} Tell them in your own words, about this job, and use a phone tool instead if one gets them there.`,
+          },
+        });
+        continue;
+      }
+
       // The line. Anything that is not a pure read goes back to the turn,
       // which runs it through the path that has always handled doing things —
       // confirmation included. Whatever reads already ran are said first, so
       // "what's the weather and text Sam I'm late" answers the weather and then
       // asks about the text.
       if (!ability.reads) {
+        // Their words, or it does not run. Checked against this sentence and
+        // the one before it, since an answer to ask_back ("tomorrow at 3")
+        // finishes a request the previous sentence made.
+        const quote = String(args[ASKED_ARG] ?? '');
+        delete args[ASKED_ARG];
+        const lastSaid = [...history].reverse().find((t) => t.role === 'user')?.text ?? '';
+        if (!askedFor(quote, `${userText} ${lastSaid}`)) {
+          results.push({
+            name: call.name,
+            result: {
+              ok: false,
+              result: 'Not done: nothing they said asks for this. If you are not sure what they meant — a word you do not know, a nickname, a placeholder — ask_back what they mean. Never guess an action.',
+            },
+          });
+          continue;
+        }
         // What the model said alongside the call, where it said anything.
         // That is the reply it means to give once this has worked, it has the
         // whole conversation behind it, and it is already paid for — asking
