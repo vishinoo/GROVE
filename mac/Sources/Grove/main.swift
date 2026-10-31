@@ -60,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       self.refreshMenu()
     }
     link.onJob = { [weak self] job, reply in self?.run(job, reply: reply) }
+    link.onSaid = { [weak self] heard, replied in self?.reactToPhone(heard: heard, replied: replied) }
     link.onPaired = { [weak self] in self?.notch.show("done", ["title": "iPhone connected", "text": "Your phone and this Mac are one Grove now.", "ok": true], pin: false, closeAfter: 3) }
     account.onChange = { [weak self] session in
       guard let self else { return }
@@ -437,10 +438,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   /** A reaction GIF in the corner of the screen (Popup.swift), when they turned them on. Never holds anything up. */
   private func react(_ words: String) {
-    guard Gifs.on, !words.isEmpty else { return }
+    guard Gifs.on, !words.isEmpty, !Self.screenLocked else { return }
+    lastGif = Date()
     Task { @MainActor in
       if let url = await Gifs.find(words) { await Popup.show(url) }
     }
+  }
+  private var lastGif = Date.distantPast
+
+  /** Nobody is there to see a GIF on a locked or sleeping screen. */
+  private static var screenLocked: Bool {
+    let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+    return (session?["CGSSessionScreenIsLocked"] as? Bool) == true || CGDisplayIsAsleep(CGMainDisplayID()) != 0
+  }
+
+  /**
+    A face for something said to Grove on the phone, while they are at the
+    Mac. Not for every line: the shared rule leaves it empty when nothing
+    would add to it, and one a minute at most, never on top of a reaction
+    that is already up (the song it just played has its own).
+  */
+  private func reactToPhone(heard: String, replied: String) {
+    guard Gifs.on, !replied.isEmpty, Date().timeIntervalSince(lastGif) > 60, !Self.screenLocked else { return }
+    react(to: "They said to you on their phone: \(heard)", said: replied)
   }
 
   /** The same, for a moment whose reaction was not picked with the reply: chosen now that it has happened. */

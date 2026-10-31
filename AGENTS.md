@@ -1630,6 +1630,12 @@ it plays in its own corner window (`Popup.swift`) rather than on the card,
 which is for what happened. Searched on GIPHY with `GIPHY_API_KEY` from
 `.env`, written by `build.sh` into the built Info.plist only.
 
+What is said on the phone reaches the Mac's GIFs too (`said`, only while
+connected, kept nowhere): the same rule picks a face or none, at most one a
+minute, never over a reaction already up, never to a locked screen. Searches
+drop filler and keep the front, because the action comes first: the old
+fallback kept the last two words and searched "at chessboard".
+
 **It can see what you are doing, roughly** (`Context.swift`): the app in
 front, its window title, and the song in Music, a few hundred characters on
 every ask and nothing read from inside a window. "What do you think of this

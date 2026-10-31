@@ -20,6 +20,7 @@
 
     phone → mac   hello {}                           settings {colour, label, stops, speed, warp, name, manner}
                   job {id, kind, args}               thought {id, kind, text}
+                  said {heard, replied}              (a phone turn, for the Mac's GIFs only; not kept)
     mac → phone   welcome {mac}                      done {id, ok, spoken, state?, task?, detail?}
                   think {id, instruction, text}      news {what, state, said, task?, speak}
 
@@ -38,6 +39,7 @@ final class Link {
   var onLook: ((LookUpdate) -> Void)?
   var onJob: ((Job, @escaping (Bool, String, [String: String]) -> Void) -> Void)?
   var onStatus: ((Bool) -> Void)?
+  var onSaid: ((String, String) -> Void)?
 
   private(set) var connected = false
   private let account: Account
@@ -271,6 +273,8 @@ final class Link {
         extra.forEach { out[$0.key] = $0.value }
         self?.deliver(out)
       }
+    case "said":
+      onSaid?((m["heard"] as? String) ?? "", (m["replied"] as? String) ?? "")
     case "thought":
       guard let id = m["id"] as? String, let waiting = pending.removeValue(forKey: id) else { return }
       let text = (m["text"] as? String) ?? ""

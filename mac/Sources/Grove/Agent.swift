@@ -391,13 +391,14 @@ final class Agent {
           try? await _Concurrency.Task.sleep(nanoseconds: 1_000_000_000)
           break
         }
-        let before = await Browser.fingerprint()
+        await Browser.watch()
         var r = await Browser.js(Browser.clickJS(n))
         try? await _Concurrency.Task.sleep(nanoseconds: 900_000_000)
         // Pages that only listen to a real mouse (games, players, custom
         // controls) ignore a click from a script, and nothing changes. Only
-        // then is it pressed for real, so a click that worked is never doubled.
-        if r == "ok", await Browser.fingerprint() == before, let point = await Browser.screenPoint(of: n) {
+        // then is it pressed for real, so a click that worked is never
+        // doubled — and never a link, which may have opened a tab instead.
+        if r == "ok", !(await Browser.changed()), !(await Browser.isLink(n)), let point = await Browser.screenPoint(of: n) {
           await Browser.front()
           await Browser.realClick(point)
           r = "ok (pressed with the mouse; the page ignored a scripted click)"
@@ -988,7 +989,7 @@ enum Browser {
         if(l||st)board.push(l+(st&&l.toLowerCase().indexOf(st)<0?' {'+st+'}':''));
       });
       var text=(document.body?deepText(document.body):'').replace(/[ \\t]+/g,' ').replace(/\\n\\s*\\n+/g,'\\n').slice(0,2600);
-      var big=0;all('canvas,iframe,video').forEach(function(e){var r=e.getBoundingClientRect();big=Math.max(big,(Math.min(r.right,innerWidth)-Math.max(r.left,0))*(Math.min(r.bottom,innerHeight)-Math.max(r.top,0))/(innerWidth*innerHeight));});
+      var big=0;all('canvas,iframe').forEach(function(e){var r=e.getBoundingClientRect();big=Math.max(big,(Math.min(r.right,innerWidth)-Math.max(r.left,0))*(Math.min(r.bottom,innerHeight)-Math.max(r.top,0))/(innerWidth*innerHeight));});
       return JSON.stringify({url:location.href,title:document.title,items:out,board:board.join('\\n'),text:text,chess:groveChessText(),visual:big>0.25});
     })()
     """
@@ -1157,9 +1158,25 @@ enum Browser {
     return v.count == 2 ? CGPoint(x: v[0], y: v[1]) : nil
   }
 
-  /** Something that changes when a click did anything at all. */
-  static func fingerprint() async -> String {
-    await js("location.href+'|'+document.title+'|'+(document.body?document.body.innerHTML.length:0)+'|'+(document.activeElement?document.activeElement.tagName:'')")
+  /**
+    Starts counting every change to the page, so a click can be judged by
+    whether anything at all happened. Comparing the page's size missed an
+    attribute flipping (a like button, "false" to "true") and pressed it
+    again with the mouse, which undid it.
+  */
+  static func watch() async {
+    _ = await js("(function(){window.__groveMuts=0;if(window.__groveObs)window.__groveObs.disconnect();window.__groveObs=new MutationObserver(function(m){window.__groveMuts+=m.length;});window.__groveObs.observe(document.documentElement,{subtree:true,childList:true,attributes:true,characterData:true});return 'ok';})()")
+  }
+
+  /** Whether the page changed since `watch`. A page that went somewhere else has changed. */
+  static func changed() async -> Bool {
+    let n = await js("String(typeof window.__groveMuts==='number'?window.__groveMuts:-1)")
+    return n != "0"
+  }
+
+  /** A link or a field: a press that does its work without changing this page, so never pressed twice. */
+  static func isLink(_ n: Int) async -> Bool {
+    await js("(function(){var e=(window.__grove&&window.__grove[\(n)])||document.querySelector('[data-grove=\"\(n)\"]');return e&&e.closest('a[href],input,textarea,select')?'yes':'no';})()") == "yes"
   }
 
   static func clickJS(_ n: Int) -> String {

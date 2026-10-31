@@ -55,6 +55,18 @@ enum Recent {
 
 extension Thinking {
   /**
+    What a line about them may be made of. The same sentence as the phone's
+    (mannerDirective in persona.ts), so the two Groves have one character.
+    Told to be in a teasing manner and given a window title, it made things
+    up — "still poking that wave like it's going to hatch", their posture —
+    and every line was a dig. A friend who knows you jokes about what is
+    true, and mostly does not need to.
+  */
+  static let groundRule = """
+  Anything you say about them — a joke, a tease, a remark — comes only from what you actually know: what they just said, this conversation, what is in front of them, and what you remember about them. Never invent a habit, a body, a mood or a situation to make a line land (their posture, how they slept, what they have been doing all day, what they are avoiding). If you do not know it, do not say it. Be warm before you are clever: mostly just be good company and useful, tease rarely and lightly, never put them down, and match what they said — a hello gets a hello back, thanks gets a you're welcome.
+  """
+
+  /**
     When to ask before doing, shared by the decision and the browser agent so
     the two cannot drift. Asking well is a judgement about the job, not a list
     of jobs: the choices that are theirs (who plays, which of a few real

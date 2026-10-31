@@ -788,12 +788,12 @@ async function runTurn(
       // asks about the text.
       if (!ability.reads) {
         // Their words, or it does not run. Checked against this sentence and
-        // the one before it, since an answer to ask_back ("tomorrow at 3")
-        // finishes a request the previous sentence made.
+        // the two before it, since answers to ask_back ("call mom", "at 5")
+        // finish a request an earlier sentence made.
         const quote = String(args[ASKED_ARG] ?? '');
         delete args[ASKED_ARG];
-        const lastSaid = [...history].reverse().find((t) => t.role === 'user')?.text ?? '';
-        if (!askedFor(quote, `${userText} ${lastSaid}`)) {
+        const earlier = history.filter((t) => t.role === 'user').slice(-2).map((t) => t.text).join(' ');
+        if (!askedFor(quote, `${userText} ${earlier}`)) {
           results.push({
             name: call.name,
             result: {

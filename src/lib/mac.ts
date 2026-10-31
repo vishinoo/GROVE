@@ -303,6 +303,16 @@ let work: MacWork | null = null;
 export type MacNews = { what: string; state: string; said: string; task?: string; speak: boolean };
 const newsListeners = new Set<(news: MacNews) => void>();
 
+/**
+ * A turn said on the phone, for the Mac to react to with a GIF when they
+ * have those on and one fits. Only while connected, nothing waited on, and
+ * the Mac keeps none of it: it is a face, not a record.
+ */
+export function tellMac(heard: string, replied: string): void {
+  if (status.state !== 'connected' || !heard.trim() || !replied.trim()) return;
+  send({ t: 'said', heard: heard.slice(0, 300), replied: replied.slice(0, 400) });
+}
+
 export function onMacNews(listener: (news: MacNews) => void): () => void {
   newsListeners.add(listener);
   return () => {

@@ -59,7 +59,7 @@ import { isSpeaking, speak, stopSpeaking } from '@/lib/speak';
 import * as memory from '@/lib/memory';
 import * as life from '@/lib/life';
 import { dueToday, whatMatters, nextUp, type Attention, type NextUp } from '@/lib/attention';
-import { onMacNews } from '@/lib/mac';
+import { onMacNews, tellMac } from '@/lib/mac';
 import { noteAnswered } from '@/lib/interrupt';
 import { learnWeek, noteTurn } from '@/lib/rhythms';
 import { forgetRapport, notice as noticeRapport } from '@/lib/rapport';
@@ -980,6 +980,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     clearTimeout(holdTimer);
     if (!mine()) return;
 
+    tellMac(text, reply.text);
     history.current = [
       ...history.current,
       newTurn('user', text),
