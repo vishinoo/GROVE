@@ -29,6 +29,13 @@ import { Icon } from '@/components/icon';
 import { STATE_WORD } from '@/components/field';
 import { Glass } from '@/components/glass';
 import { Notice } from '@/components/ui';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
+
 import { Radius, Space, Type } from '@/constants/theme';
 import { useAgent } from '@/context/agent';
 import { useSession } from '@/context/session';
@@ -74,7 +81,7 @@ function TalkBody() {
   const tapField = () => (typing ? Keyboard.dismiss() : press());
 
   const { notice, dismissNotice } = useSession();
-  const { state, caption, heard, armed, ringSeen, route, next, due, press, say } =
+  const { state, caption, heard, armed, ringSeen, route, next, due, press, say, macBusy } =
     useAgent();
 
   // Recomputed on every render, and `next` is refreshed each minute, so the
@@ -248,6 +255,41 @@ function TalkBody() {
             is occasionally the right input even on a working build, in a
             meeting or on a train. It belongs to this page and leaves with it.
           */}
+          {/*
+            The Mac, still going, in the corner.
+
+            A job handed to the Mac used to put the whole phone into Working,
+            which is the wrong word and the wrong size: nothing is happening
+            on the phone, the phone is free, and a screen that says Working is
+            a screen you cannot ask anything else of. A dot and a few words
+            say the same thing and leave the microphone to you.
+          */}
+          {macBusy ? (
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                alignSelf: 'center',
+                gap: 8,
+                maxWidth: '86%',
+                marginBottom: 10,
+                paddingVertical: 7,
+                paddingHorizontal: 13,
+                borderRadius: Radius.pill,
+                backgroundColor: 'rgba(8,10,16,0.42)',
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.16)',
+              }}
+              accessibilityRole="text"
+              accessibilityLabel={`Still running on your Mac: ${macBusy}`}
+            >
+              <Pulse />
+              <Text numberOfLines={1} style={[Type.bodySm, { color: ON_FIELD_SOFT, flexShrink: 1 }]}>
+                On your Mac · {macBusy}
+              </Text>
+            </View>
+          ) : null}
+
           <View
             style={{
               flexDirection: 'row',
@@ -363,6 +405,30 @@ function TalkBody() {
  * that is actually about your day it is clutter, and it fell under the
  * composer whenever that sentence ran to two lines.
  */
+/**
+ * The Mac is still going.
+ *
+ * Breathing rather than spinning, which is the same rule the field keeps: a
+ * thing that spins reads as a loading spinner, and this is not Grove waiting
+ * — it is Grove getting on with something somewhere else while the phone
+ * stays yours.
+ */
+function Pulse() {
+  const life = useSharedValue(0.35);
+  useEffect(() => {
+    life.value = withRepeat(withTiming(1, { duration: 1100 }), -1, true);
+  }, [life]);
+  const style = useAnimatedStyle(() => ({ opacity: life.value }));
+  return (
+    <Animated.View
+      style={[
+        { width: 8, height: 8, borderRadius: 4, backgroundColor: ON_FIELD_SOFT },
+        style,
+      ]}
+    />
+  );
+}
+
 function greeting(
   next: NextUp,
   due: string | null,
@@ -383,10 +449,30 @@ function greeting(
   }
   if (due) return { line: `You asked me to remind you about ${due} today.` };
 
+  /*
+    A greeting, rather than the time of day stated at you.
+
+    "Afternoon." is correct and is not a hello. This is the first thing seen
+    on every launch and it was doing nothing but naming the hour, which reads
+    as a clock with an app around it.
+
+    Picked by the hour rather than at random, because this runs on every
+    render: a random line would change under you several times a second. The
+    hour is enough to vary it through the day and keep it still while you are
+    looking at it.
+  */
   const h = now.getHours();
-  const line =
-    h < 5 ? 'Still up?' : h < 12 ? 'Morning.' : h < 18 ? 'Afternoon.' : h < 22 ? 'Evening.' : 'Late one.';
-  return { line, plain: true };
+  const set =
+    h < 5
+      ? ['Still up?', 'Late one.', 'Can’t sleep?']
+      : h < 12
+        ? ['Morning.', 'Morning — how’s it going?', 'Morning. What’s first?']
+        : h < 18
+          ? ['Afternoon.', 'Hey — how’s the day going?', 'Afternoon. What do you need?']
+          : h < 22
+            ? ['Evening.', 'Hey, how was today?', 'Evening — how’d it go?']
+            : ['Late one.', 'Still going?', 'Winding down?'];
+  return { line: set[h % set.length], plain: true };
 }
 
 function minutesUntil(at: Date, now: Date): number {

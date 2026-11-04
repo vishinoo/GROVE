@@ -1069,11 +1069,39 @@ section('A reply is finished before the microphone opens');
     'a reply that ends on its own waits for the tail'
   );
 
-  // Barge-in, which must not.
-  const barge = agent.slice(agent.indexOf('// Barge-in.'), agent.indexOf('// Barge-in.') + 260);
+  /*
+   * Barge-in, which must not wait — and must not guillotine either.
+   *
+   * This used to assert `stopSpeaking()` right there in the press, because
+   * the press stopped the voice dead and then opened the microphone. Correct,
+   * and it sounded awful: a reply cut off mid-word reads as the app having
+   * crashed rather than as having heard you.
+   *
+   * The voice now runs into the gap where the recogniser has agreed to start
+   * but no microphone is capturing yet, and stops at the first level reading.
+   * So what has to hold is different and stronger: the listen starts at once,
+   * and the voice is guaranteed to stop by something — the level reading, or
+   * the backstop for a build that reports none.
+   */
+  const barge = between(agent, 'Barge-in, without the guillotine.', "if (current === 'listening')", {
+    min: 200,
+    max: 2000,
+  });
+  check(barge !== null, 'the barge-in is where it is expected to be');
   check(
-    /stopSpeaking\(\)/.test(barge) && !/SPEECH_TAIL_MS/.test(barge),
-    'and a press interrupts without waiting'
+    barge !== null && /beginListening\(false, false, \{ hushSpeech: true \}\)/.test(barge),
+    'a press interrupts without waiting for anything'
+  );
+  check(
+    barge !== null && !/SPEECH_TAIL_MS/.test(barge),
+    'and never pays the speech tail, which is for a reply that ended on its own'
+  );
+  const hush = between(agent, 'if (opts.hushSpeech) stopSpeaking();', 'armSilence();', { min: 10, max: 400 });
+  check(hush !== null, 'the voice is stopped at the first level reading');
+  check(
+    /if \(opts\.hushSpeech\) \{\s*\n\s*setTimeout\(/.test(agent) && /BARGE_TAIL_MS/.test(agent),
+    'and by a backstop, so a build that reports no levels still stops talking',
+    'otherwise interrupting on such a build leaves Grove speaking for ever'
   );
 
   /*
@@ -1588,6 +1616,81 @@ section('The rest of what they asked for');
     'two things armed at once is one press deciding the wrong one');
   check(/await carryOn\(outcome\.ok\)/.test(agent) && (agent.match(/carryOn\(outcome\.ok\)/g) || []).length >= 2,
     'and it carries on from both the pressed path and the unpressed one');
+}
+
+/**
+ * A press always means "I want to say something".
+ *
+ * "Press while listening means stop" was right for as long as listening only
+ * ever happened because somebody pressed. The grace window broke that without
+ * editing the line: Grove is in 'listening' for three seconds after **every
+ * single reply**, so a press in those three seconds — exactly when you have
+ * heard the answer and want to ask the next thing — was read as stop, dropped
+ * to Ready, and swallowed the question. Press again and it worked.
+ *
+ * That is the whole of "sometimes it takes the click and sometimes it
+ * doesn't", and it is the third time the grace window has made a sentence
+ * elsewhere untrue without touching it. The other two were the music and the
+ * unprompted microphone.
+ */
+section('A press is never swallowed');
+{
+  const agent = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
+
+  const listening = between(agent, 'A window Grove opened itself is not a listen they started.',
+    "trigger.notePress('stopped listening')", { min: 400, max: 2600 });
+  check(listening !== null, 'the press-while-listening branch is where it is expected to be');
+  check(
+    listening !== null && /if \(quietListen\.current\) \{/.test(listening),
+    'a press into a window Grove opened itself starts a listen',
+    'otherwise every press in the three seconds after a reply is read as stop'
+  );
+  check(
+    listening !== null && /beginListening\(false\)/.test(listening),
+    'and starts a real one, with the chime and the full window'
+  );
+
+  /*
+   * The flag has to mean what the branch assumes. It is set for a window
+   * opened on spec and cleared the moment a word is heard — so a press
+   * mid-sentence still settles what was said, which is what a press means
+   * once you have started talking.
+   */
+  check(/quiet: !listenAfter/.test(agent), 'a grace window is marked as one, and a question window is not');
+  check(
+    /quietListen\.current = false;/.test(agent) && /onPartial/.test(agent),
+    'and the mark is cleared as soon as a word arrives'
+  );
+}
+
+/**
+ * Nothing in a render path picks at random.
+ *
+ * The greeting is computed inside render, so a `Math.random()` in it would
+ * change the line several times a second while somebody was reading it. It
+ * reads as the app being broken, and it is invisible to every other gate.
+ */
+section('What is on screen holds still');
+{
+  const talk = fs.readFileSync(path.join(ROOT, 'src/app/(app)/index.tsx'), 'utf8');
+  const hello = between(talk, 'function greeting(', '\nfunction ', { min: 300, max: 3000 });
+  check(hello !== null, 'the greeting is where it is expected to be');
+  check(
+    hello !== null && !/Math\.random/.test(hello),
+    'the greeting does not change while you are reading it',
+    'it runs on every render, so a random pick flickers several times a second'
+  );
+  check(
+    hello !== null && /h % set\.length/.test(hello),
+    'and varies through the day instead'
+  );
+
+  // The Mac, in the corner rather than across the middle.
+  check(/macBusy/.test(talk), 'the Talk screen shows what the Mac is still doing');
+  check(
+    /macBusy: string \| null;/.test(fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8')),
+    'and the agent publishes it as its own thing, not as the phone being busy'
+  );
 }
 
 section('Listening does not stop the music');

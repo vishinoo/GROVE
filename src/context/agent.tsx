@@ -29,7 +29,8 @@
  *   spoken when it arrives.
  */
 
-import { fillDemoMemory } from '@/lib/demoMemory';
+import { clearDemoMemory, fillDemoMemory, hasDemoMemory } from '@/lib/demoMemory';
+import { hasSeenOnboarding } from '@/lib/firstRun';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
@@ -59,7 +60,8 @@ import { isSpeaking, speak, stopSpeaking } from '@/lib/speak';
 import * as memory from '@/lib/memory';
 import * as life from '@/lib/life';
 import { dueToday, whatMatters, nextUp, type Attention, type NextUp } from '@/lib/attention';
-import { onMacNews, tellMac } from '@/lib/mac';
+import { onMacHeard, onMacNews, tellMac } from '@/lib/mac';
+import { advance as advanceReading, currentPart, isLastPart, pause as pauseReading, startReading } from '@/lib/reading';
 import { noteAnswered } from '@/lib/interrupt';
 import { learnWeek, noteTurn } from '@/lib/rhythms';
 import { forgetRapport, notice as noticeRapport } from '@/lib/rapport';
@@ -157,6 +159,17 @@ const SILENCE_TIMEOUT_MS = 5000;
  */
 const SPEECH_TAIL_MS = 500;
 
+/**
+ * How long Grove's voice may run on after you interrupt it.
+ *
+ * Only a backstop. The voice really stops at the first level reading from
+ * the recogniser, which is the first instant a microphone is genuinely
+ * capturing — so nothing Grove says can reach the transcript, and the reply
+ * finishes a beat instead of being cut off mid-word. This is what catches a
+ * build whose native half reports no levels at all.
+ */
+const BARGE_TAIL_MS = 900;
+
 const GRACE_MS = 3000;
 const ANSWER_MS = 12_000;
 
@@ -199,6 +212,16 @@ type AgentValue = {
   armed: boolean;
   /** A ring has actually pressed something, so hardware is really there. */
   ringSeen: boolean;
+  /**
+   * What the Mac is still doing, when it has gone off and carried on without
+   * the phone. Null when there is nothing running there.
+   *
+   * The phone used to simply say "Working" for this, which is the wrong word
+   * and the wrong place: nothing is happening on the phone, the phone is
+   * free, and a whole screen saying Working is a screen you cannot ask
+   * anything else of. It belongs in the corner, not across the middle.
+   */
+  macBusy: string | null;
   /** The live audio route — the glasses, when they're on. */
   route: trigger.AudioRoute;
   /** Something the user should know about, e.g. a denied microphone. */
@@ -230,6 +253,9 @@ type AgentValue = {
   due: string | null;
   /** Demo only: fills memory with what is known about the author. See demoMemory.ts. */
   fillDemo: () => Promise<void>;
+  /** Takes the sample life back out, and says whether any of it is in there. */
+  clearDemo: () => Promise<void>;
+  demoIsIn: () => Promise<boolean>;
 
   /** Things they said they did not understand, hardest first. */
   struggles: struggles.Struggle[];
@@ -283,6 +309,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
    * saying "enough" (`closing.ts`), and anything Grove says unprompted.
    */
   const hushAfter = useRef(-1);
+  /** Says the current part of whatever is being read aloud (set below, once utter exists). */
+  const readOn = useRef<() => void>(() => {});
   /*
     The rest of what one sentence asked for.
 
@@ -303,7 +331,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const [due, setDue] = useState<string | null>(null);
   const [stuck, setStuck] = useState<struggles.Struggle[]>([]);
   /** So a listen can retry itself without `press` being rebuilt. */
-  const beginListeningRef = useRef<((continuous: boolean, retrying?: boolean) => void) | null>(null);
+  const beginListeningRef = useRef<((continuous: boolean, retrying?: boolean, opts?: { window?: number; quiet?: boolean }) => void) | null>(null);
 
   const setState = useCallback(
     (next: AgentState | ((current: AgentState) => AgentState)) => {
@@ -400,6 +428,22 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const [armed, setArmed] = useState(false);
   /** Set once a real press arrives, which is the only proof a ring exists. */
   const [ringSeen, setRingSeen] = useState(() => trigger.hasHeardRing());
+  /*
+    What the Mac is up to, watched from here as well.
+
+    Its own subscription rather than a branch inside the one that already
+    exists, because that one belongs to another piece of work and listeners
+    are a set — two readers of the same news cost nothing and cannot tread on
+    each other.
+  */
+  const [macBusy, setMacBusy] = useState<string | null>(null);
+  useEffect(
+    () =>
+      onMacNews((news) => {
+        setMacBusy(news.state === 'working' ? (news.what || 'something on your Mac').trim() : null);
+      }),
+    []
+  );
   const [route, setRoute] = useState<trigger.AudioRoute>(() => trigger.currentRoute());
   const [problem, setProblem] = useState<string | null>(null);
   const [persona, setPersona] = useState<Persona>(DEFAULT_PERSONA);
@@ -674,6 +718,21 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     if (!mounted.current) return;
     setFacts(f);
     setLifeMemory(l);
+  }, []);
+
+  const clearDemo = useCallback(async () => {
+    const account = live.current.uid;
+    if (!account || account === 'anon') return;
+    await clearDemoMemory(account);
+    const [f, l] = await Promise.all([memory.loadFacts(account), life.loadLife(account)]);
+    if (!mounted.current) return;
+    setFacts(f);
+    setLifeMemory(l);
+  }, []);
+
+  const demoIsIn = useCallback(async () => {
+    const account = live.current.uid;
+    return Boolean(account && account !== 'anon') && hasDemoMemory(account);
   }, []);
 
   const forgetFact = useCallback(async (id: string) => {
@@ -1216,6 +1275,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // full sentence; out loud it gets a short one.
     // Held, not done. The ability stopped short of the irreversible part and
     // said what it is about to do; the press decides whether it happens.
+    // Something to read aloud: a session, said part by part (reading.ts).
+    if (outcome.read) {
+      if (outcome.read.text) startReading(outcome.read.title ?? '', outcome.read.text);
+      if (mine()) readOn.current();
+      return;
+    }
     if (outcome.needsConfirming) {
       awaitingYes.current = { ability, args: outcome.confirmArgs ?? reply.args, at: Date.now() };
       if (!mounted.current) return;
@@ -1679,7 +1744,7 @@ function shortFailure(text: string): string {
     async (
       continuous: boolean,
       retrying = false,
-      opts: { window?: number; quiet?: boolean } = {}
+      opts: { window?: number; quiet?: boolean; hushSpeech?: boolean } = {}
     ) => {
       const window = opts.window ?? SILENCE_TIMEOUT_MS;
       // Re-taking the session is asynchronous, and the state says 'listening'
@@ -1814,6 +1879,11 @@ function shortFailure(text: string): string {
             // arrived, because from there on the pause belongs to onPartial.
             if (!micLive) {
               micLive = true;
+              // Interrupted: the voice runs on until exactly here, the first
+              // instant the microphone is really capturing. A beat of Grove
+              // finishing its sentence, and not one sample of it in what gets
+              // transcribed.
+              if (opts.hushSpeech) stopSpeaking();
               if (!heardSomething && turn === listenSeq.current) armSilence();
             }
             if (mounted.current) setLevel(value);
@@ -1896,6 +1966,13 @@ function shortFailure(text: string): string {
       // That happens coming back from the background, and the person hears
       // nothing at all — so it is worth exactly one more go.
       openedAt.current = Date.now();
+
+      // If no level ever arrives, the voice must still stop.
+      if (opts.hushSpeech) {
+        setTimeout(() => {
+          if (turn === listenSeq.current) stopSpeaking();
+        }, BARGE_TAIL_MS);
+      }
 
       armSilence();
     },
@@ -2159,11 +2236,23 @@ function shortFailure(text: string): string {
     // set makes the next resting state report work nobody is waiting for.
     running.current = false;
 
-    // Barge-in. Stop talking and start listening, in that order.
+    /*
+      Barge-in, without the guillotine.
+
+      This used to stop the voice dead and then open the microphone, which is
+      correct and sounds awful: a reply cut off mid-word reads as the app
+      having crashed rather than as having heard you.
+
+      The microphone takes a few hundred milliseconds to come up after the
+      recogniser agrees to start, and during that gap nothing is being
+      recorded. So the voice is allowed to run into exactly that gap and is
+      stopped at the first level reading — the first instant a microphone is
+      really capturing. Grove finishes a beat, and none of what it said can
+      land in the transcript.
+    */
     if (current === 'speaking' || isSpeaking()) {
       trigger.notePress('interrupted · listening');
-      stopSpeaking();
-      void beginListening(false);
+      void beginListening(false, false, { hushSpeech: true });
       return;
     }
     if (current === 'listening') {
@@ -2172,6 +2261,32 @@ function shortFailure(text: string): string {
       // treat it as a fresh press instead of a stop.
       if (!isListening()) {
         trigger.notePress('listening had stalled · started again');
+        void beginListening(false);
+        return;
+      }
+      /*
+        A window Grove opened itself is not a listen they started.
+
+        "Press while listening means stop" was right for as long as listening
+        only ever happened because somebody pressed. The grace window broke
+        that without touching this line: Grove is now in 'listening' for three
+        seconds after **every single reply**, and pressing in those three
+        seconds — which is exactly when you have just heard the answer and
+        want to ask the next thing — was read as stop, dropped to Ready, and
+        swallowed the question. Press again and it worked. That is the whole
+        of "sometimes it takes the click and sometimes it doesn't".
+
+        `quietListen` already tells the two apart: it is set for a window
+        Grove opened on spec and cleared the moment a word is heard. So a
+        press into a silent grace window starts a real listen, with the chime
+        and the full window, which is what the press meant.
+
+        Same shape as the music bug and the unprompted-microphone bug: the
+        grace window made a sentence elsewhere untrue without editing it.
+      */
+      if (quietListen.current) {
+        trigger.notePress('press during the grace window · listening properly');
+        listenSeq.current += 1;
         void beginListening(false);
         return;
       }
@@ -2190,8 +2305,8 @@ function shortFailure(text: string): string {
     // protect — barge in like any other state.
     if (current === 'thinking' || current === 'working') {
       trigger.notePress(`interrupted ${current} · listening`);
-      stopSpeaking();
-      void beginListening(false);
+      // A holding line may be mid-sentence, so it gets the same beat.
+      void beginListening(false, false, { hushSpeech: true });
       return;
     }
 
@@ -2210,6 +2325,25 @@ function shortFailure(text: string): string {
     },
     [exchange]
   );
+
+  /**
+   * What they told the Mac is what they told Grove. It was kept on neither:
+   * "I'm working on a psych midterm" was gone by morning, and being told
+   * something was wrong changed nothing. A conversation at the Mac joins the
+   * same buffer as one here, and a stated fact or correction applies now.
+   */
+  useEffect(() => {
+    return onMacHeard((heard) => {
+      const account = live.current.uid;
+      if (!account || account === 'anon') return;
+      if (heard.said) void afterTurn(account, heard.said, heard.replied ?? '');
+      void (async () => {
+        if (heard.wrong) await memory.correctFacts(account, heard.wrong);
+        if (heard.line) await memory.remember(account, { key: 'note', value: heard.line, source: 'told' });
+        if ((heard.wrong || heard.line) && mounted.current) setFacts(await memory.loadFacts(account));
+      })();
+    });
+  }, []);
 
   /**
    * The Mac's news, said into the glasses when it is theirs to hear.
@@ -2239,6 +2373,30 @@ function shortFailure(text: string): string {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * Reading aloud, a part at a time. A part that finishes on its own moves the
+   * place on and the next one follows; a press starts a new turn, so the part
+   * it cut off is where the place stays, and "carry on" starts it again. Each
+   * part but the last is said as mid-turn speech, so no listening window
+   * opens between them; the last one ends like any reply.
+   */
+  readOn.current = () => {
+    const part = currentPart();
+    if (!part || !mounted.current) return;
+    const turn = turnSeq.current;
+    const last = isLastPart();
+    setCaption(part);
+    utter(part, false, !last, () => {
+      if (turn !== turnSeq.current) {
+        pauseReading();
+        return;
+      }
+      // After the speech's own bookkeeping, not inside it, or the state it
+      // sets would land on top of the next part's.
+      if (advanceReading()) setTimeout(() => turn === turnSeq.current && readOn.current(), 0);
+    });
+  };
 
   /* -------------------------------------------------------------- the ring */
 
@@ -2312,11 +2470,37 @@ function shortFailure(text: string): string {
     // An audio session lost to a phone call is never handed back on its own,
     // so every return to the foreground re-takes it. Without this the ring
     // works until the first interruption and then silently stops.
+    /*
+      Opening Grove is saying something is coming, so the microphone is already
+      open and the first word lands: no press, no waiting for a screen. This is
+      not Grove starting a conversation, which is what "nothing unprompted opens
+      the microphone" is about; they just picked it up.
+
+      Only on really arriving. iOS also reports 'active' coming back from a
+      permission sheet or Control Center, which goes through 'inactive' and
+      never 'background', and nobody has opened anything then. Not over a turn,
+      Grove talking, or a press it is waiting for, and never during the intro.
+      It chimes like a press, because this is the one cue they have, and shuts
+      itself after the long window if nothing is said.
+    */
+    const openMic = async () => {
+      if (!(await hasSeenOnboarding()) || cancelled || !mounted.current) return;
+      const resting = stateNow.current === 'idle' || stateNow.current === 'asleep';
+      if (!resting || running.current || isSpeaking() || awaitingYes.current) return;
+      void beginListeningRef.current?.(false, false, { window: ANSWER_MS });
+    };
+    let lastAppState: AppStateStatus = AppState.currentState;
     const onAppState = (next: AppStateStatus) => {
       if (next === 'active') {
-        void arm();
-        }
+        const arrived = lastAppState === 'background';
+        void arm().then(() => {
+          if (arrived) void openMic();
+        });
+      }
+      lastAppState = next;
     };
+    // The launch itself is the first arrival.
+    if (AppState.currentState === 'active') setTimeout(() => void openMic(), 600);
     const appSub = AppState.addEventListener('change', onAppState);
 
     // A quiet heartbeat, because the ring going dead in a pocket is the worst
@@ -2407,6 +2591,7 @@ function shortFailure(text: string): string {
       level,
       armed,
       ringSeen,
+      macBusy,
       route,
       problem,
       persona,
@@ -2421,6 +2606,8 @@ function shortFailure(text: string): string {
       next,
       due,
       fillDemo,
+      clearDemo,
+      demoIsIn,
       struggles: stuck,
       gotStruggle,
       forgetStruggle,
@@ -2437,6 +2624,7 @@ function shortFailure(text: string): string {
       level,
       armed,
       ringSeen,
+      macBusy,
       route,
       problem,
       persona,
@@ -2451,6 +2639,8 @@ function shortFailure(text: string): string {
       next,
       due,
       fillDemo,
+      clearDemo,
+      demoIsIn,
       stuck,
       gotStruggle,
       forgetStruggle,
