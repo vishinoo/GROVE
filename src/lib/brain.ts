@@ -33,6 +33,7 @@ import type { GroveContext, GroveReply, Turn } from './grove';
 import { asToolResults, asUserTurn, lastModelTrouble, lightAfterAction, lightFallback, toolTurn, type ToolHistory } from './lightModel';
 import { macContext, macReachable } from './mac';
 import { readingContext } from './reading';
+import { musicPlace, musicPlaceContext } from './place';
 import { factFrom, memoryData, MEMORY_RULES } from './memory';
 import { lately, loadLife, whoIsWho } from './life';
 import { rhythmLines, rhythms } from './rhythms';
@@ -145,6 +146,8 @@ const TOOL_RULES = `How to use your tools:
 - If they gave no gist at all ("email Priya"), use ask_back to ask what it should say.
 - Always give an email a short, natural subject line of your own — a few words saying what it is about, like "Running late" or "Slides for Thursday".
 - To recap mail and then send that recap to someone, first get the recap, then send its text with the send-email tool.
+- Music when the Mac is connected: the context says where music plays. When it says not chosen yet, the app asks them once; their answer ("the Mac", "my phone") is the music switch tool with that place, and then play what they asked for. When they say to move or switch the music to the other device, it is the music switch tool with move "yes".
+- Ordering food, shopping and texting are done on the Mac by their usual tools when the Mac is connected; just call them, and pass the Mac task id with an answer when carrying on with one.
 - Phone or Mac: you run on their phone and can also drive their Mac (the Mac tools). Choose yourself; they should never have to say "on my Mac", and never ask which one.
   - When the context says the Mac is connected, the Mac is the default for everything it can do: music, a video, a song on YouTube, a website, a web game (Wordle, chess), DMs, a shop's cart, a form, opening an app or a site. They are at the laptop, so that is where it should happen. Ask for one of those and it goes to the Mac whether or not they named it.
   - The phone keeps what only the phone has: calendar, mail, texts, reminders, directions, rides, documents, and anything they say to do on the phone. When the Mac is not connected, everything is the phone's.
@@ -569,6 +572,32 @@ export async function askWithTools(
   return { ...reply, offer: proposed.offer };
 }
 
+/**
+ * Where music plays is theirs to say once, not the model's to guess each time.
+ * With the Mac there and no choice made, the turn asks; once made, a call to
+ * the other device's player is moved to the chosen one, so "play some Drake"
+ * is not on the phone one day and the Mac the next. Saying which, and moving
+ * what is playing, is the music switch tool's job. Null when nothing changes.
+ */
+async function musicRoute(
+  ability: Ability,
+  args: Record<string, string>
+): Promise<'ask' | { ability: Ability; args: Record<string, string> } | null> {
+  const starts = ability.id === 'music.play' || (ability.id === 'mac.music' && /^(play|shuffle)$/i.test(String(args.action ?? '')));
+  if (!starts || !(await macReachable())) return null;
+  const place = await musicPlace();
+  if (!place) return 'ask';
+  if (place === 'mac' && ability.id === 'music.play') {
+    const mac = abilityById('mac.music');
+    return mac ? { ability: mac, args: { ...args, action: 'play', what: String(args.what ?? '') } } : null;
+  }
+  if (place === 'phone' && ability.id === 'mac.music') {
+    const phone = abilityById('music.play');
+    return phone ? { ability: phone, args: { what: String(args.what ?? '') } } : null;
+  }
+  return null;
+}
+
 async function runTurn(
   history: Turn[],
   userText: string,
@@ -641,7 +670,8 @@ async function runTurn(
   // no I/O, and the reason "order this instead" needs no "on my Mac".
   // What is being read aloud and where it stopped, so "a note on that" or
   // "put that in Quizlet" has a passage to work from (reading.ts).
-  const situation = contextFor(context, [roster, usual, friction, macContext(), readingContext()].filter(Boolean));
+  await musicPlace();
+  const situation = contextFor(context, [roster, usual, friction, macContext(), musicPlaceContext(), readingContext()].filter(Boolean));
   const contents: unknown[] = [
     ...(historyFor(history) as unknown[]),
     asUserTurn(
@@ -794,6 +824,12 @@ async function runTurn(
       // confirmation included. Whatever reads already ran are said first, so
       // "what's the weather and text Sam I'm late" answers the weather and then
       // asks about the text.
+      // Where music plays is asked once and then kept: see `musicRoute`.
+      const routed = await musicRoute(ability, args);
+      if (routed === 'ask') return { text: 'Your Mac or your phone?', args: {}, fact, ran, expectsReply: true };
+      const musicAbility = routed?.ability ?? ability;
+      const musicArgs = routed?.args ?? args;
+
       if (!ability.reads) {
         // Their words, or it does not run. Checked against this sentence and
         // the two before it, since answers to ask_back ("call mom", "at 5")
@@ -843,8 +879,8 @@ async function runTurn(
         );
         return {
           text: said,
-          ability,
-          args,
+          ability: musicAbility,
+          args: musicArgs,
           plan,
           fact,
           ran,

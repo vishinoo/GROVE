@@ -145,3 +145,30 @@ export function closing(said: string): Closing {
 
   return { text, closed: false };
 }
+
+/**
+ * "Never mind", and a bare "stop" while something is going.
+ *
+ * Handed to the model, "stop" cost a holding line and a round trip — "one
+ * second" and then "stopped" — which is the wrong sound for the one sentence
+ * that means stop making sounds. So the whole-sentence forms are read here and
+ * everything is stopped in code: the speech, a pending yes, a queued plan,
+ * whatever the Mac is doing, the reading.
+ *
+ * Two strengths. "Never mind", "forget it", "cancel", "scratch that" always
+ * mean drop it. "Stop" is only a cancel when there is something to stop; on
+ * its own, with music playing, it may mean the music, and that is the model's
+ * to work out.
+ */
+export function cancelling(said: string): 'always' | 'if-busy' | null {
+  const t = said
+    .toLowerCase()
+    .replace(/[.!?,]+/g, ' ')
+    .replace(/^\s*(ok(ay)?|actually|no|nah|um+|uh+|wait|grove|buddy|hey)\s+/g, '')
+    .replace(/\s+(please|thanks|thank you|grove|buddy)\s*$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (/^(never ?mind|forget it|forget about it|cancel( that| it)?|scratch that|don'?t worry about it|leave it)$/.test(t)) return 'always';
+  if (/^(stop|stop it|stop that|stop everything|hold on|that'?s enough)$/.test(t)) return 'if-busy';
+  return null;
+}

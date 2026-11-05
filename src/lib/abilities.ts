@@ -23,7 +23,9 @@
  * Grove is up, and the UI has to say so rather than quietly not happening.
  */
 
-import { macJob, macWork, noteMacWork } from './mac';
+import { macJob, macReachable, macWork, noteMacWork } from './mac';
+import { musicPlace, setMusicPlace, type Place } from './place';
+import { controlMusic, nowPlaying as phoneNowPlaying } from './trigger';
 import { move as moveReading, stopReading } from './reading';
 import {
   addReminder,
@@ -3419,6 +3421,53 @@ const MAC_NOTE: Ability = {
 };
 
 /**
+ * A hand-off done on the Mac instead of opened on the phone. Everything from
+ * here — the question, the yes, carrying on — is the Mac tool's, so it is the
+ * same path as asking for it there by name; only the goal is written for it.
+ */
+function onTheMac(args: Record<string, string>, goal: string): Promise<AbilityResult> {
+  return MAC_USE.run({ ...args, goal: args.task ? '' : goal });
+}
+
+/**
+ * Which device the music plays on, and moving it. "Change the song from my Mac
+ * to my phone" is the same song carrying on in the other place: what is
+ * playing is read, paused there, and found here.
+ */
+const MUSIC_SWITCH: Ability = {
+  id: 'music.where',
+  name: 'Music switch',
+  what: 'Chooses whether music plays on their phone or their Mac, and with move "yes" moves what is playing across. For "play it on my phone instead", "switch the music to the Mac", and for their answer when asked which one.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {
+    place: { type: 'string', what: '"mac" or "phone"', required: true },
+    move: { type: 'string', what: '"yes" to carry what is playing across to it' },
+  },
+  examples: ['move the song to my phone', 'move the music to my mac', 'play music on my mac from now on'],
+  run: async (args) => {
+    const place: Place | null = /mac|laptop|computer/i.test(args.place || '') ? 'mac' : /phone|glasses/i.test(args.place || '') ? 'phone' : null;
+    if (!place) return { ok: false, spoken: 'Your phone or your Mac?' };
+    await setMusicPlace(place);
+    if (!/^(yes|true)$/i.test((args.move || '').trim())) {
+      return { ok: true, spoken: place === 'mac' ? 'Music goes to your Mac from now on.' : 'Music stays on your phone from now on.' };
+    }
+    if (place === 'phone') {
+      const now = await macJob('music.now', {});
+      const song = (now.detail ?? '').trim();
+      await macJob('music.pause', {});
+      if (!song) return MUSIC.run({ what: '' });
+      return MUSIC.run({ what: song });
+    }
+    const here = phoneNowPlaying();
+    const song = [here.title, here.artist].filter(Boolean).join(' ');
+    await controlMusic('pause').catch(() => false);
+    return MAC_MUSIC.run({ action: 'play', what: song });
+  },
+};
+
+/**
  * Anything that can be done in a browser, done on the Mac (mac/Sources/Grove/Agent.swift).
  *
  * The Mac drives their own Chrome step by step and comes back with one of
@@ -3654,6 +3703,8 @@ const DELIVERY: Ability = {
     what: { type: 'string', what: 'the food, restaurant or cuisine — or their usual, looked up in memory' },
     app: { type: 'string', what: '"doordash" if they said DoorDash, otherwise Uber Eats' },
     confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
+    task: { type: 'string', what: 'when carrying on with this order on the Mac: the task id from the Mac line in the context' },
+    answer: { type: 'string', what: 'their answer when the Mac asked them something about this order, written out in full' },
   },
   // Named foods, because the keyword fallback matches on words and "order some
   // sushi" shares none with a description about delivery apps. These are the
@@ -3674,6 +3725,11 @@ const DELIVERY: Ability = {
     const what = (args.what || '').trim();
     const doordash = /door ?dash/i.test(args.app || '');
     const app = doordash ? 'DoorDash' : 'Uber Eats';
+    // With the Mac there, it orders: on the Mac's browser, signed in, with a
+    // yes for anything going in the basket and for paying. Nothing opens here.
+    if (args.task || (await macReachable())) {
+      return onTheMac(args, `Order ${what || 'food'} on ${app} (${doordash ? 'doordash.com' : 'ubereats.com'}). Find it, ask which one only if it is not obvious, and stop for their yes before anything goes in the cart and before placing the order.`);
+    }
 
     if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
       return {
@@ -3764,6 +3820,8 @@ const SHOP: Ability = {
     what: { type: 'string', what: 'what they want to buy, as specific as they said', required: true },
     store: { type: 'string', what: 'amazon, instacart (groceries), walmart or costco; amazon if they did not say' },
     confirmed: { type: 'string', what: 'never set this; the turn sets it after they say yes' },
+    task: { type: 'string', what: 'when carrying on with this on the Mac: the task id from the Mac line in the context' },
+    answer: { type: 'string', what: 'their answer when the Mac asked them something about this, written out in full' },
   },
   examples: [
     'order me a phone charger on amazon',
@@ -3776,6 +3834,9 @@ const SHOP: Ability = {
     if (!what) return { ok: false, spoken: 'What are we buying?' };
     const key = Object.keys(STORES).find((k) => (args.store || '').toLowerCase().includes(k)) ?? 'amazon';
     const store = STORES[key];
+    if (args.task || (await macReachable())) {
+      return onTheMac(args, `Find ${what} on ${store.name} and put it in the cart, asking which one if that is not obvious. Stop for their yes before it goes in the cart and before checkout.`);
+    }
 
     if (!/^(yes|confirmed?)$/i.test((args.confirmed || '').trim())) {
       return {
@@ -3941,9 +4002,14 @@ const MESSAGE: Ability = {
   ],
   run: async (args) => {
     const body = (args.body || '').trim();
-    if (!body) return { ok: false, spoken: 'Saying what?' };
+    if (!body && !args.task) return { ok: false, spoken: 'Saying what?' };
 
     const to = (args.to || '').trim();
+    // With the Mac there, Messages on the Mac sends it, after reading it back
+    // for a yes. The phone's own sheet would make them tap send themselves.
+    if (args.task || (await macReachable())) {
+      return onTheMac(args, `Text ${to || 'them'} through Messages: ${body}`);
+    }
     // A number goes straight in. A name is looked up in Google Contacts, which
     // is the one address book Grove can read — iOS keeps its own to itself.
     // When the lookup cannot settle on one number the sheet still opens with
@@ -4172,6 +4238,7 @@ export const ABILITIES: Ability[] = [
   READING,
   MAC_NOTE,
   MAC_INBOX,
+  MUSIC_SWITCH,
   MEMORY_CORRECT,
   RIDE,
   DELIVERY,

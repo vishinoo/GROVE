@@ -40,10 +40,10 @@ enum Jobs {
   static func run(_ job: Job, done: @escaping (Bool, String) -> Void) {
     switch job.kind {
     case "music.play": Music.play(job.args["what"] ?? "", playlistOnly: job.args["playlist"] == "yes", done: done)
-    case "music.pause": Music.transport("pause", spoken: "Paused.", done: done)
-    case "music.resume": Music.transport("play", spoken: "Playing.", done: done)
-    case "music.next": Music.transport("next track", spoken: "Skipped.", done: done)
-    case "music.previous": Music.transport("previous track", spoken: "Back one.", done: done)
+    case "music.pause": MainActor.assumeIsolated { Player.transport("pause", done: done) }
+    case "music.resume": MainActor.assumeIsolated { Player.transport("play", done: done) }
+    case "music.next": MainActor.assumeIsolated { Player.transport("next track", done: done) }
+    case "music.previous": MainActor.assumeIsolated { Player.transport("previous track", done: done) }
     case "music.shuffle": Music.simple("set shuffle enabled to true\n  if player state is not playing then play", spoken: "Shuffling.", done: done)
     case "volume.up": Music.volume(by: 12, done: done)
     case "volume.down": Music.volume(by: -12, done: done)
@@ -230,35 +230,6 @@ enum Music {
   static func volume(by step: Int, done: @escaping (Bool, String) -> Void) {
     let source = "set v to (output volume of (get volume settings)) + (\(step))\nif v > 100 then set v to 100\nif v < 0 then set v to 0\nset volume output volume v\nreturn v as text"
     Script.run(source) { ok, level in done(ok, ok ? "Volume \(level)." : "I couldn't change the volume.") }
-  }
-
-  /**
-    Pause, play, next: on whatever is playing, not only Music. With a song on
-    YouTube, "pause" paused Music, which was not playing, and said Paused. So
-    the transport goes to a video playing in Chrome when there is one, and
-    "play" resumes one this paused. Music gets it when nothing else has it.
-  */
-  nonisolated(unsafe) private static var pausedInChrome = false
-  static func transport(_ command: String, spoken: String, done: @escaping (Bool, String) -> Void) {
-    Task { @MainActor in
-      let js: String
-      switch command {
-      case "pause": js = "(function(){var v=Array.from(document.querySelectorAll('video,audio')).find(function(e){return !e.paused;});if(v){v.pause();return 'hit';}return '';})()"
-      case "play": js = pausedInChrome ? "(function(){var v=Array.from(document.querySelectorAll('video,audio')).find(function(e){return e.paused&&e.currentTime>0;});if(v){v.play();return 'hit';}return '';})()" : ""
-      default:
-        let button = command == "next track" ? ".ytp-next-button" : ".ytp-prev-button"
-        js = "(function(){var v=Array.from(document.querySelectorAll('video,audio')).find(function(e){return !e.paused;});var b=document.querySelector('\\(button)');if(v&&b){b.click();return 'hit';}return '';})()"
-      }
-      let hit = js.isEmpty ? false : await Browser.everyTab(js)
-      if command == "pause" { pausedInChrome = hit }
-      if command == "play" && hit { pausedInChrome = false }
-      if hit && command != "pause" { done(true, spoken); return }
-      Script.run("tell application \"Music\" to get player state") { ok, state in
-        // A pause that reached a video is done; Music is only stopped too if it is playing.
-        if command == "pause" && hit && !(ok && state == "playing") { done(true, spoken); return }
-        simple(command, spoken: spoken, done: done)
-      }
-    }
   }
 
   static func simple(_ command: String, spoken: String, done: @escaping (Bool, String) -> Void) {

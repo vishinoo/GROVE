@@ -239,6 +239,11 @@ export function musicPlaying(): boolean {
   return isAvailable() && nativeNowPlaying().playing;
 }
 
+/** What the phone is playing, for carrying it across to the Mac. Empty without the native half. */
+export function nowPlaying(): { title: string; artist: string; playing: boolean } {
+  return isAvailable() ? nativeNowPlaying() : { title: '', artist: '', playing: false };
+}
+
 export async function controlMusic(action: 'play' | 'pause' | 'next' | 'previous'): Promise<boolean> {
   if (!isAvailable()) return false;
   return nativeControlMusic(action);

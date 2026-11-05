@@ -60,8 +60,8 @@ import { isSpeaking, speak, stopSpeaking } from '@/lib/speak';
 import * as memory from '@/lib/memory';
 import * as life from '@/lib/life';
 import { dueToday, whatMatters, nextUp, type Attention, type NextUp } from '@/lib/attention';
-import { onMacHeard, onMacNews, tellMac } from '@/lib/mac';
-import { advance as advanceReading, currentPart, isLastPart, pause as pauseReading, startReading } from '@/lib/reading';
+import { macJob, macWork, noteMacWork, onMacHeard, onMacNews, tellMac } from '@/lib/mac';
+import { advance as advanceReading, currentPart, isLastPart, pause as pauseReading, startReading, stopReading } from '@/lib/reading';
 import { noteAnswered } from '@/lib/interrupt';
 import { learnWeek, noteTurn } from '@/lib/rhythms';
 import { forgetRapport, notice as noticeRapport } from '@/lib/rapport';
@@ -76,7 +76,7 @@ import {
   type Offer,
   type Proposal,
 } from '@/lib/offers';
-import { closing } from '@/lib/closing';
+import { cancelling, closing } from '@/lib/closing';
 import * as plan from '@/lib/plan';
 import { plainFailure } from '@/lib/failure';
 import * as struggles from '@/lib/struggles';
@@ -440,7 +440,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   useEffect(
     () =>
       onMacNews((news) => {
-        setMacBusy(news.state === 'working' ? (news.what || 'something on your Mac').trim() : null);
+        // What it is doing now, not what it was asked for. The goal does not
+        // change for the length of a run, so a pill carrying it says only
+        // that something is happening; the step says it is getting somewhere.
+        setMacBusy(
+          news.state === 'working' ? (news.said || news.what || 'something on your Mac').trim() : null
+        );
       }),
     []
   );
@@ -743,6 +748,39 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     setFacts(await memory.forgetAll(live.current.uid));
   }, []);
 
+  /**
+   * "Never mind", and a bare "stop" while something is going: speech, a
+   * pending yes, a queued plan, the Mac's job and the reading all stop, here,
+   * with a word, and nothing is sent to a model. True when it handled it.
+   */
+  const stopEverything = useRef<(text: string) => boolean>(() => false);
+  stopEverything.current = (text: string) => {
+    const cancel = cancelling(text);
+    if (cancel) {
+      const mac = macWork();
+      const macBusy = Boolean(mac && ['working', 'ask', 'confirm'].includes(mac.state) && Date.now() - mac.at < 30 * 60_000);
+      const busy = macBusy || Boolean(awaitingYes.current || queue.current || offered.current || currentPart() || isSpeaking());
+      if (cancel === 'always' || busy) {
+        ++turnSeq.current;
+        stopSpeaking();
+        stopReading();
+        awaitingYes.current = null;
+        offered.current = null;
+        queue.current = null;
+        if (macBusy && mac) {
+          void macJob('agent.stop', {});
+          noteMacWork({ ...mac, state: 'stopped', said: 'Stopped.' });
+        }
+        const line = busy ? 'Okay, stopped.' : 'No worries.';
+        setCaption(line);
+        hushAfter.current = turnSeq.current;
+        utter(line);
+        return true;
+      }
+    }
+    return false;
+  };
+
   /* ------------------------------------------------------------- talking */
 
   /**
@@ -798,6 +836,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       setState(restingState());
       return;
     }
+
+    // Stop everything, in code, and say so in a word: see `cancelling`.
+    if (stopEverything.current(text)) return;
 
     const turn = ++turnSeq.current;
     if (shut.closed) hushAfter.current = turn;
