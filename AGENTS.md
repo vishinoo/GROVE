@@ -456,6 +456,52 @@ their answer is the signal. The pulse is delayed so a fast turn makes no sound
 at all. The JS side probes for the native functions, so an update reaching an
 older binary is silent rather than broken.
 
+## Second nudges
+
+Two things made "pause" and "play" need saying twice, and neither was music.
+
+**Every AppleScript was one-shot.** `Script.run` drives Music, Chrome,
+Messages, Notes and the whole browser agent, and some of its failures mean
+"ask again" rather than "no": a scripting connection goes stale when an app is
+relaunched or was still coming up, and the answer is -609 *Connection is
+invalid*, -600 *Application isn't running*, or a timeout. Every one of them
+works on the next attempt — which is why the symptom was never a failure
+anybody saw. It was being told to pause and having to say it again, with
+nothing on screen either time to say why. Measured in a real log: a -609 on
+Music at 12:57:35, and fourteen seconds later the person typing *"can you
+initialize my music please"*.
+
+Retried exactly the way every network call here already is, with the same
+exclusions — never -1743 *not authorized*, never a syntax error or a missing
+object, where a second attempt only doubles the wait before the same honest
+answer. **Once more, never a loop.** `Browser.run` goes through the same door,
+so one fix covers Chrome, `Player` and Messages too.
+
+**And "play" after a pause was shuffling the library.** `play` arrived with
+nothing named, and what it meant depended on something the model could not
+see: whether anything was paused. If something was, it went to the library and
+started shuffling — pause your song, say "play", get your whole library on
+random. The second nudge was naming the song again.
+
+The model will not fix this and should not be asked to: **"play" is the
+word.** Measured against the live model with the song and its paused state in
+front of it, "play", "play it", "keep playing" and "start it again" all come
+back as `play`, because that is what the word means in English. A rule telling
+a model to call a thing by a name nobody uses is a rule that gets quietly
+ignored. So code decides, which is the rule this app is built on.
+
+Two places, because two different things know the answer. `Player` knows when
+Grove did the pausing, and knows it for a video in Chrome or Spotify as
+readily as for Music. Music itself knows when something else did it — a
+keyboard key, or a launch ago — and is the only one that can say so. A request
+for a *playlist* never takes the shortcut: a paused track whose name happens
+to match would otherwise answer for it.
+
+`play` naming the track already loaded is the same request wearing a name
+("play it" comes back as "Vancouver 3"), and finding it in the library again
+restarts it from the beginning rather than resuming where it stopped. Both are
+the same answer: carry on.
+
 ## Speaking first
 
 Everything else in Grove waits to be asked. `src/lib/attention.ts` is the part

@@ -39,7 +39,7 @@ enum Jobs {
 
   static func run(_ job: Job, done: @escaping (Bool, String) -> Void) {
     switch job.kind {
-    case "music.play": Music.play(job.args["what"] ?? "", playlistOnly: job.args["playlist"] == "yes", done: done)
+    case "music.play": MainActor.assumeIsolated { Music.start(job.args["what"] ?? "", playlistOnly: job.args["playlist"] == "yes", done: done) }
     case "music.pause": MainActor.assumeIsolated { Player.transport("pause", done: done) }
     case "music.resume": MainActor.assumeIsolated { Player.transport("play", done: done) }
     case "music.next": MainActor.assumeIsolated { Player.transport("next track", done: done) }
@@ -114,12 +114,58 @@ enum Music {
     name beats a partial one (names carry stray spaces, so both are trimmed),
     and Music is shown the playlist, not just the song it starts on.
   */
+  /**
+    "Play" after something was paused means carry on with it.
+
+    The model will not fix this and should not be asked to: **"play" is the
+    word**. Told to answer with "resume", it still says "play" for "play",
+    "play it", "keep playing" and "start it again" — measured, with the song
+    and its paused state in front of it — because that is what the word
+    means in English, and a rule telling a model to call a thing by a name
+    nobody uses is a rule that gets quietly ignored.
+
+    So code decides, which is the rule this app is built on. What arrived
+    was `play` with nothing named, and what that meant depended on something
+    the model could not see: whether anything was paused. If something was,
+    this went to the library and started **shuffling it** — pause your song,
+    say "play", and get your whole library on random. The second nudge was
+    naming the song again.
+
+    `play` naming the track that is already loaded is the same request
+    wearing a name ("play it" comes back as "Vancouver 3"), and re-finding
+    it in the library restarts it from the beginning rather than resuming
+    where it stopped. Both are the same answer: carry on.
+  */
+  @MainActor
+  static func start(_ what: String, playlistOnly: Bool = false, done: @escaping (Bool, String) -> Void) {
+    // Grove paused it, so Grove knows where it is — a video in Chrome or
+    // Spotify as readily as Music, which the script below cannot see.
+    if what.isEmpty, !playlistOnly, Player.hasPaused {
+      Log.say("music: play with nothing named, and something is paused — carrying on")
+      Player.transport("play", done: done)
+      return
+    }
+    play(what, playlistOnly: playlistOnly, done: done)
+  }
+
   static func play(_ what: String, playlistOnly: Bool = false, done: @escaping (Bool, String) -> Void) {
     let q = what.replacingOccurrences(of: "\"", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
     let script: String
     if q.isEmpty {
       script = """
       tell application "Music"
+        -- Paused, and they said nothing about what to play: carry on. Grove
+        -- may not have been the one that paused it — a keyboard key, or a
+        -- launch ago — so this is asked of Music rather than remembered.
+        if player state is paused then
+          play
+          delay 0.4
+          try
+            return "resumed|" & name of current track & "|" & artist of current track
+          on error
+            return "resumed||"
+          end try
+        end if
         set shuffle enabled to true
         play library playlist 1
         delay 0.6
@@ -134,6 +180,21 @@ enum Music {
       script = """
       tell application "Music"
         set wanted to "\(q)"
+        \(playlistOnly ? "" : """
+        -- "Play it" and "start it again" come back naming the song that is
+        -- already loaded. Finding it in the library again restarts it from
+        -- the beginning; what they asked for is where they left off.
+        if player state is paused then
+          try
+            set here to name of current track
+            if here contains wanted or wanted contains here then
+              play
+              delay 0.4
+              return "resumed|" & here & "|" & artist of current track
+            end if
+          end try
+        end if
+        """)
         set found to missing value
         repeat with p in (every user playlist)
           set n to name of p
@@ -218,6 +279,9 @@ enum Music {
         done(false, "Your \(bits[1]) playlist wouldn't start in Music.")
       case "playlist": done(true, "Playing your \(bits.count > 1 ? bits[1] : q) playlist.")
       case "library": done(true, "Shuffling your music.")
+      case "resumed":
+        let back = bits.count > 1 ? bits[1] : ""
+        done(true, back.isEmpty ? "Back on." : "Back on — \(back).")
       default:
         let title = bits.count > 1 ? bits[1] : "it"
         let artist = bits.count > 2 ? bits[2] : ""

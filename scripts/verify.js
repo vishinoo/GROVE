@@ -3561,6 +3561,140 @@ print("PREFIX\\t\\(Shortcut.sharesK(with: "iTerm2", option: false))")
   }
 });
 
+
+/*
+ * A script that was not ready is asked again
+ * ------------------------------------------
+ *
+ * Every AppleScript in this app — Music, Chrome, Messages, Notes, the agent's
+ * whole browser — goes through `Script.run`, and it was one-shot. Some of its
+ * failures mean "ask again" rather than "no": a scripting connection goes
+ * stale when an app is relaunched or is still coming up, and the answer is
+ * -609 "Connection is invalid", -600 "Application isn't running", or a
+ * timeout. All of them work on the next attempt.
+ *
+ * Which is why the symptom was never a failure anybody saw. It was being told
+ * to pause the music and having to say it again, with nothing on screen
+ * either time to say why. Measured in a real log: a -609 on Music at
+ * 12:57:35, and fourteen seconds later the person typing "can you initialize
+ * my music please".
+ *
+ * Retried the way every network call here already is, including the
+ * exclusions — never a permission, never a syntax error — because a second
+ * attempt at those only doubles the wait before the same honest answer.
+ */
+section('A script that was not ready is asked again');
+{
+  const script = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Script.swift'), 'utf8');
+  const list = script.match(/static let worthAnotherGo: Set<Int> = \[([^\]]*)\]/);
+  check(list !== null, 'the retryable errors are named in one place');
+  const codes = list === null ? [] : list[1].split(',').map((n) => Number(n.trim()));
+  check(
+    [-600, -609, -1712].every((n) => codes.includes(n)),
+    'a stale connection, an app not up yet and a timeout are all tried once more',
+    `got ${codes.join(', ')}`
+  );
+  check(
+    !codes.includes(-1743),
+    'and "not authorized" is not, because the second attempt fails identically',
+    'the same rule as never retrying a 401 — it only doubles the wait before the same answer'
+  );
+  check(
+    !codes.includes(-2741) && !codes.includes(-2740) && !codes.includes(-1728),
+    'nor a syntax error or a missing object, which are answers rather than bad timing'
+  );
+  // Once more, not until it works: a retry that can retry is a loop against
+  // an app that is genuinely gone.
+  check(
+    /attempt\(source, again: true, done: done\)/.test(script) &&
+      /attempt\(source, again: false, done: done\)/.test(script),
+    'exactly one more go, never a loop'
+  );
+  const retry = between(script, 'if again, worthAnotherGo.contains(number) {', 'Log.say("script: failed', { min: 120, max: 700 });
+  check(retry !== null, 'the retry is where it is expected to be');
+  check(
+    retry !== null && /asyncAfter\(deadline: \.now\(\) \+ 0\.4\)/.test(retry),
+    'after long enough for a launching app to finish, short enough that nobody notices'
+  );
+  // Everything that drives an app goes through this one door.
+  const agent = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Agent.swift'), 'utf8');
+  check(
+    /Script\.run\(bounded\)/.test(agent),
+    'and Browser.run goes through it, so Chrome, Player and Messages are covered by the same fix'
+  );
+}
+
+/*
+ * "Play" after a pause means carry on
+ * -----------------------------------
+ *
+ * `play` arrived with nothing named, and what it meant depended on something
+ * the model could not see: whether anything was paused. If something was,
+ * this went to the library and started SHUFFLING it. Pause your song, say
+ * "play", get your whole library on random — and the second nudge was naming
+ * the song again.
+ *
+ * The model will not fix this and should not be asked to: **"play" is the
+ * word.** Measured against the live model with the song and its paused state
+ * in front of it, "play", "play it", "keep playing" and "start it again" all
+ * come back as `play`, because that is what the word means in English. A rule
+ * telling a model to call a thing by a name nobody uses is a rule that gets
+ * quietly ignored. So code decides, which is the rule this app is built on.
+ *
+ * Two places, because two different things know the answer. `Player` knows
+ * when Grove did the pausing, and knows it for a video in Chrome or Spotify
+ * as readily as for Music. Music itself knows when something else did it — a
+ * keyboard key, or a launch ago — and is the only one that can say so.
+ */
+section('"Play" after a pause means carry on, not shuffle');
+{
+  const jobs = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Jobs.swift'), 'utf8');
+  const player = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Player.swift'), 'utf8');
+
+  check(
+    /case "music\.play": MainActor\.assumeIsolated \{ Music\.start\(/.test(jobs),
+    'a play job goes through the step that decides what "play" meant'
+  );
+  const start = between(jobs, '  static func start(_ what: String, playlistOnly: Bool = false', '  static func play(_ what: String', { min: 150, max: 900 });
+  check(start !== null, 'that step is where it is expected to be');
+  check(
+    start !== null && /if what\.isEmpty, !playlistOnly, Player\.hasPaused \{/.test(start),
+    'nothing named and something paused: carry on with it, wherever it is playing'
+  );
+  check(
+    /static var hasPaused: Bool \{ paused != nil \}/.test(player),
+    'and Player says so, since it is the only thing that knows about Chrome and Spotify'
+  );
+
+  // The half Player cannot answer: paused by a keyboard key, or before Grove
+  // was last launched.
+  const empty = between(jobs, 'tell application "Music"\n        -- Paused, and they said', 'set shuffle enabled to true', { min: 200, max: 900 });
+  check(empty !== null, 'the nothing-named script is where it is expected to be');
+  check(
+    empty !== null && /if player state is paused then\s*\n\s*play\b/.test(empty),
+    'a bare "play" asks Music whether it is paused before it shuffles anything',
+    'this is the one that turned a paused song into the whole library on random'
+  );
+  check(
+    /"play" is the\s+word/.test(jobs),
+    'and why this is code and not a rule in a prompt is written down where it was decided'
+  );
+
+  // "Play it" and "start it again" come back naming the loaded song.
+  const named = between(jobs, 'set wanted to "\\(q)"', 'set found to missing value', { min: 200, max: 1100 });
+  check(named !== null, 'the named script is where it is expected to be');
+  check(
+    named !== null && /here contains wanted or wanted contains here/.test(named),
+    'naming the song already loaded resumes it rather than finding it again',
+    'a library search restarts it from the beginning, which is not what "play it" asked for'
+  );
+  check(
+    named !== null && /\\\(playlistOnly \? "" : """/.test(named),
+    'and a request for a playlist never takes that shortcut',
+    'a paused track whose name happens to match would answer for the playlist'
+  );
+}
+
 /* ------------------------------------------------------------- verdict */
 
 /*

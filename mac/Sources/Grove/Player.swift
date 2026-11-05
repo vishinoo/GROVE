@@ -20,6 +20,8 @@ import CoreAudio
 enum Player {
   private enum Source: String { case music, chrome, spotify, system }
   nonisolated(unsafe) private static var paused: Source?
+  /** Something here paused something, so "play" with nothing named means carry on with it. */
+  static var hasPaused: Bool { paused != nil }
 
   @MainActor
   static func transport(_ command: String, done: @escaping (Bool, String) -> Void) {
