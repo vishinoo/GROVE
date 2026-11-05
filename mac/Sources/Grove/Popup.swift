@@ -29,7 +29,9 @@ enum Popup {
     might want one.
   */
   private static var lastShown = Date.distantPast
-  private static let apart: TimeInterval = 60
+  // Four minutes, not one. The narrowed set of moments does most of the work;
+  // this is what stops a run of good news becoming a slideshow.
+  private static let apart: TimeInterval = 4 * 60
 
   /** Whether a face would be allowed right now. Asked before the search, to save it. */
   static var welcome: Bool {

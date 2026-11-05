@@ -1705,6 +1705,36 @@ section('A reaction is a reaction, not a slideshow');
     /not a list of things to do and not a pattern to copy/.test(recent),
     'what just happened says outright that it is not a list of things to do'
   );
+
+  /*
+   * And a face is rare, from one list.
+   *
+   * The set of moments that get one was written out twice — once in
+   * `Gifs.choose`, once in `Thinking.decide` — so narrowing either would
+   * have left every hello still getting a face through the other path. Two
+   * copies of a rule is the fault this file exists to catch, and here it
+   * would have shown up as the fix appearing not to work.
+   */
+  const thinking = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Thinking.swift'), 'utf8');
+  check(
+    /static let faces: Set<String> = \[/.test(gifs),
+    'the moments that get a face are named in one place'
+  );
+  check(
+    /let faces = Gifs\.faces/.test(thinking) && !/let faces: Set<String> = \[/.test(thinking),
+    'and the answer path reads that list rather than keeping its own',
+    'two copies means narrowing one leaves the other firing'
+  );
+  for (const common of ['greeting', 'thanks', 'bad-luck']) {
+    check(
+      !new RegExp(`faces: Set<String> = \\[[^\\]]*\"${common}\"`).test(gifs),
+      `${common} gets no face: it is most of what gets said`,
+      'a reaction that arrives every time is not a reaction'
+    );
+  }
+  const apart = /apart: TimeInterval = (\d+)(?:\s*\*\s*(\d+))?/.exec(popup);
+  const seconds = apart ? Number(apart[1]) * (apart[2] ? Number(apart[2]) : 1) : 0;
+  check(seconds >= 180, `and no two are closer than ${seconds} seconds`);
   check(
     /ask them what they mean/.test(recent),
     'and that a sentence which makes no sense is asked about, not matched to an old task'

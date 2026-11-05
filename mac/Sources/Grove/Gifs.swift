@@ -25,9 +25,30 @@ enum Gifs {
     set { UserDefaults.standard.set(newValue, forKey: "grove.gifs") }
   }
 
+  /**
+    The moments that get a face at all.
+
+    Narrowed to the two that are worth interrupting someone for — something
+    genuinely funny, and something that actually went well — plus a song,
+    which is the one case where the picture is the point rather than a
+    comment on it.
+
+    Greeting, thanks, bad-luck and done are gone. They are most of what gets
+    said, so including them meant a face on nearly every exchange, and a
+    reaction that arrives every time is not a reaction: saying hello twice
+    produced two of them, which is how this came to feel like spam rather
+    than like a friend.
+
+    Named here and read by `Thinking.decide` as well, because it was written
+    out twice — so narrowing one list would have left every hello still
+    getting a face through the other path, which is worse than not narrowing
+    at all.
+  */
+  static let faces: Set<String> = ["joke", "good-news", "song"]
+
   /** How Grove picks its face. Shared by Thinking.decide and choose, so the two cannot drift apart. */
   static let rule = """
-    The GIF is the plain, obvious reaction a friend would send back, matching what actually happened at its size and in its mood: someone waving back at a hello, a thumbs up for thanks or a job done, cheering for good news, someone dancing or nodding along to a song in that song's mood, a sympathetic face for bad luck, a laugh only when something was genuinely funny. Never sarcasm or judgement (no eye rolls, facepalms, side eyes, blank stares or skeletons), never a joke about them, never a pun or a clever concept. Two or three plain words a GIF site understands, the reaction first. Leave it empty when no reaction fits: a plain fact, a question answered, bad news, anything private.
+    A GIF is rare. It is for the two moments worth interrupting someone for — something genuinely funny, and something that actually went well — and for a song, where the picture is the point: someone dancing or nodding along in that song's mood, a real laugh at something actually funny, cheering at good news that is actually good. Most exchanges get nothing, and nothing is the normal answer: a hello, a thank you, a plain fact, a question answered, a job done, bad luck, anything private. Never sarcasm or judgement (no eye rolls, facepalms, side eyes, blank stares or skeletons), never a joke about them, never a pun or a clever concept. Two or three plain words a GIF site understands, the reaction first, in English. Leave it empty unless you would actually send one.
     """
 
   /** Search words for a moment that has happened: what it was, and what Grove said about it. */
@@ -35,8 +56,7 @@ enum Gifs {
     let system = rule + (manner.isEmpty ? "" : "\nYour manner, which the face should match: \(manner.prefix(300))") + "\nFirst name the moment, one of greeting, thanks, good-news, bad-luck, joke, song, done, fact, question, other.\nReply as JSON: {\"moment\":\"...\",\"gif\":\"...\"}"
     let user = "\(happened)\nYou said: \(said.isEmpty ? "(nothing)" : said)"
     let obj = Thinking.parsed(await Thinking.call(system: system, user: user))
-    // The same gate as an answer's: a face only for a moment a friend would send one for.
-    let faces: Set<String> = ["greeting", "thanks", "good-news", "bad-luck", "joke", "song", "done"]
+    // The same gate as an answer's, from the same set, so the two cannot drift.
     let words = faces.contains(((obj?["moment"] as? String) ?? "").lowercased()) ? ((obj?["gif"] as? String) ?? "") : ""
     Log.say("gif: chose \"\(words)\" for \(happened.prefix(70).replacingOccurrences(of: "\n", with: " "))")
     return words
