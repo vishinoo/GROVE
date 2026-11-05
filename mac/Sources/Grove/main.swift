@@ -79,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     shortcut.useOption = UserDefaults.standard.bool(forKey: "grove.shortcut.option")
     shortcut.onTrigger = { [weak self] captured in self?.begin(captured) }
+    shortcut.onSummon = { [weak self] in self?.summon() }
     shortcut.onReady = { [weak self] in self?.refreshMenu() }
     // On screen for a second first: ⌘K Return landing as a question appears
     // would approve something nobody has had the chance to read.
@@ -158,6 +159,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // `open Grove.app --args --peek` opens the panel once at launch, to check it draws.
+    // `open Grove.app --args --job music.now` runs a phone job at launch, as the phone would send it.
+    if let i = CommandLine.arguments.firstIndex(of: "--job"), i + 1 < CommandLine.arguments.count {
+      let kind = CommandLine.arguments[i + 1]
+      DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+        self.run(Job(id: "test", kind: kind, args: [:], fromPhone: true)) { ok, spoken, extra in
+          Log.say("test: job \(kind) \(ok ? "ok" : "failed") — \(spoken) \(extra["detail"].map { "[\($0.prefix(80))]" } ?? "")")
+        }
+      }
+    }
     if CommandLine.arguments.contains("--peek") {
       DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.notch.show("idle", [:], pin: true); self.remark() }
     }
@@ -208,6 +218,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func askFree(_ instruction: String, earlier: String = "") {
     // A command is done, not discussed: the model cannot press play, and
     // asked to, it says so politely, which is the worst answer there is.
+    // "Never mind", or a bare "stop" with something going: everything stops,
+    // here, with a word, and no model is asked what it meant.
+    let t = instruction.lowercased().replacingOccurrences(of: #"[.!?,]+"#, with: " ", options: .regularExpression)
+      .replacingOccurrences(of: #"^\s*(ok(ay)?|actually|no|nah|wait|grove|buddy|hey)\s+"#, with: "", options: .regularExpression)
+      .trimmingCharacters(in: .whitespaces)
+    let always = t.range(of: #"^(never ?mind|forget it|forget about it|cancel( that| it)?|scratch that|don'?t worry about it|leave it)$"#, options: .regularExpression) != nil
+    let reading0 = MainActor.assumeIsolated { Speaker.shared.isReading }
+    let busy = agent.running || waitingYes != nil || reading0
+    if always || (busy && t.range(of: #"^(stop|stop it|stop that|stop everything|hold on|that'?s enough)$"#, options: .regularExpression) != nil) {
+      MainActor.assumeIsolated { Speaker.shared.pause() }
+      waitingYes = nil
+      if agent.running { agent.stop() }
+      Recent.said(instruction, did: "Stopped everything")
+      Log.say("ask: \(instruction.prefix(40)) → stopped everything\(busy ? "" : " (nothing was going)")")
+      notch.show("done", ["title": busy ? "Stopped" : "Okay", "text": busy ? "Okay, stopped." : "No worries.", "ok": true], pin: false, closeAfter: 2)
+      return
+    }
     // While the Mac is reading aloud, "stop" or "pause" is about the reading.
     let reading = MainActor.assumeIsolated { Speaker.shared.isReading }
     if reading, instruction.lowercased().range(of: #"^(stop|pause|wait|hold on|stop reading|pause there)\W*$"#, options: .regularExpression) != nil {
@@ -270,7 +297,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // back with their answer ("follows"), and Recent has it too.
         Recent.said(instruction, did: "Asked them first: \(question)")
         self.link.news(what: "Asked on the Mac: \(instruction)", state: "ask", said: question)
-        self.notch.show("answer", ["ask": instruction, "text": question, "via": "mac"], pin: true)
+        self.notch.show("answer", ["ask": instruction, "text": question, "via": "mac", "mic": AppDelegate.listensItself], pin: true)
+        _ = self.listenForAnswer(true)
       case .messageVia(let to, let text, let app):
         Recent.said(instruction, did: "\(app) message to \(to): \(text)")
         if Native.has(app) {
@@ -322,6 +350,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.notch.show("answer", ["ask": instruction, "text": "I couldn't reach anything to think with. Check your connection and try again.", "failed": true], pin: true)
       }
     }
+  }
+
+  /**
+    ⌘K with nothing highlighted: Grove, listening.
+
+    The same shape as `begin` — the panel and the microphone together — because
+    a shortcut that opens a box for you to type in has saved you a mouse and
+    nothing else. What it is for is saying something without touching
+    anything, so the microphone is the point and the box is the fallback.
+  */
+  private func summon() {
+    Log.say("⌘K: opening Grove\(AppDelegate.listensItself ? ", listening" : "")")
+    captured = nil
+    notch.show("idle", ["mic": AppDelegate.listensItself], pin: true)
+    if AppDelegate.listensItself { dictate() }
+  }
+
+  /**
+    Whether the microphone opens itself whenever Grove is waiting on them.
+
+    On by default: a question on screen with a microphone already open is the
+    difference between talking to something and operating it, and the whole
+    reason the ring and the glasses exist is not having to touch anything.
+
+    A switch all the same, because this is a microphone turning itself on in
+    a room, and the honest default for that is one somebody can turn off
+    without reading any code.
+  */
+  static var listensItself: Bool {
+    get { UserDefaults.standard.object(forKey: "grove.listen.auto") as? Bool ?? true }
+    set { UserDefaults.standard.set(newValue, forKey: "grove.listen.auto") }
+  }
+
+  /**
+    Grove has asked something and is waiting: open the microphone with it.
+
+    **Never in front of a confirmation.** Everything else here is a question
+    whose worst answer is a wrong sentence, and a confirmation's worst answer
+    is a purchase. A yes stays two deliberate keys (⌘K then Return) or a
+    press on the card, which is the rule the rest of this app is built on and
+    not one a convenience gets to soften. `npm run verify` checks it.
+  */
+  private func listenForAnswer(_ asking: Bool) -> Bool {
+    guard asking, AppDelegate.listensItself else { return false }
+    dictate()
+    return true
   }
 
   /** The mic beside the ask box: what is said fills the box, and is sent when they stop. */
@@ -402,6 +476,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     case "gifs":
       Gifs.on = (message["on"] as? Bool) ?? false
       showSettings()
+    case "listen":
+      AppDelegate.listensItself = (message["on"] as? Bool) ?? true
+      showSettings()
+    case "shared":
+      // Empty means Grove takes ⌘K everywhere, which is a thing somebody may
+      // well want; it is not the same as never having been set, so it is
+      // written rather than left to fall back to the default.
+      Shortcut.shared = ((message["apps"] as? String) ?? "")
+        .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+      Log.say("⌘K: shared with \(Shortcut.shared.isEmpty ? "nothing — Grove takes it everywhere" : Shortcut.shared.joined(separator: ", "))")
+      showSettings()
     case "permissions":
       Permission.requestAll { [weak self] in self?.showSettings() }
     case "signin":
@@ -424,6 +509,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       return
     }
     if job.kind.hasPrefix("agent.") { runAgent(job, reply: reply); return }
+    if job.kind == "music.now" {
+      Task { @MainActor in
+        let song = await Player.nowPlaying()
+        Log.say("player: now playing \(song.isEmpty ? "nothing" : song.prefix(60).description)")
+        reply(!song.isEmpty, song.isEmpty ? "Nothing's playing." : song, ["detail": song])
+      }
+      return
+    }
     if job.kind == "messages.read" {
       Task { @MainActor in
         guard let rows = await Inbox.recent(who: job.args["who"] ?? "") else { reply(false, Inbox.refused, [:]); return }
@@ -487,11 +580,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let goal = job.args["goal"] ?? ""
     let from = job.fromPhone ? "From your iPhone" : "On this Mac"
     let began = Date()
-    final class Pace { var next = Date().addingTimeInterval(25); var gap: TimeInterval = 45 }
+    final class Pace { var next = Date().addingTimeInterval(25); var gap: TimeInterval = 45; var told = Date.distantPast }
     let pace = Pace()
     agent.onStep = { [weak self] goal, steps in
       guard let self else { return }
       self.notch.show("job", ["title": goal, "from": from, "steps": steps, "at": max(0, steps.count - 1)], pin: true)
+      /*
+        What it is doing right now, quietly, for the phone's screen.
+
+        The phone showed the goal and nothing else for the whole run — "On
+        your Mac · order a burrito" sitting there unchanged for two minutes,
+        which says a job exists and nothing about whether it is getting
+        anywhere. The steps were already being written for the notch; they
+        simply never left the Mac except on the speaking cadence below,
+        which is deliberately slow because it interrupts.
+        Looking at a screen is not being interrupted, so these go often and
+        say nothing out loud. Every few seconds rather than every step: a
+        run makes about one a second, and a line nobody can read before it
+        changes is the same as no line.
+      */
+      if let step = steps.last, Date().timeIntervalSince(pace.told) > 3 {
+        pace.told = Date()
+        self.link.news(what: goal, state: "working", said: step, speak: false)
+      }
       // Word from a long job, the way someone doing it for you would give it:
       // soon, then less and less, so a whole game of chess is a few lines.
       // Only when they are not sitting here watching the notch.
@@ -535,7 +646,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       switch result.state {
       case "ask" where !job.fromPhone, "confirm" where !job.fromPhone:
         // Asked here, answered here: a box for the answer, or the two buttons for a yes.
-        self.notch.show("waiting", ["text": result.spoken, "task": result.task, "confirm": result.state == "confirm"], pin: true)
+        let asking = result.state != "confirm"
+        self.notch.show("waiting", ["text": result.spoken, "task": result.task, "confirm": !asking,
+                                    "mic": asking && AppDelegate.listensItself], pin: true)
+        _ = self.listenForAnswer(asking)
       case "ask", "confirm":
         self.notch.show("done", ["title": result.state == "confirm" ? "Waiting for your yes" : "A question", "text": result.spoken, "ok": true], pin: false, closeAfter: 6)
       case "stopped":
@@ -734,6 +848,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       "option": shortcut.useOption,
       "missing": missing,
       "gifs": Gifs.on,
+      "listen": AppDelegate.listensItself,
+      "shared": Shortcut.shared.joined(separator: ", "),
     ], pin: true)
   }
 

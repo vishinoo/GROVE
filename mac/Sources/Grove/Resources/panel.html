@@ -55,6 +55,8 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
 .set { display: grid; gap: 2px; }
 .set .line { display: flex; align-items: center; gap: 10px; min-height: 34px; border-bottom: 1px solid rgba(255,255,255,0.12); }
 .set .line:last-child { border-bottom: 0; }
+.set .line input { flex: 1; min-width: 0; background: rgba(8,10,16,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; color: #FFFFFF; font: 400 12.5px var(--sans); padding: 6px 10px; outline: none; -webkit-user-select: text; user-select: text; }
+.set .line input::placeholder { color: rgba(255,255,255,0.45); }
 .set .name { flex: 1; font-size: 13.5px; }
 .set .val { font-size: 12.5px; color: rgba(255,255,255,0.72); }
 .ask { display: flex; gap: 8px; }
@@ -211,6 +213,16 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     if (S.mode !== 'job') stop?.remove();
   };
 
+  /*
+    The microphone is drawn as on, never switched on from here.
+
+    Swift owns it — one `voice`, started where the decision to listen is made
+    — so the panel's job is to show what is already true. A card that started
+    the microphone itself would start it again on every re-render, and a card
+    re-renders whenever a step, a phone or a remark arrives.
+  */
+  const micOn = () => { if (S.data && S.data.mic) document.getElementById('mic')?.classList.add('on'); };
+
   const render = () => {
     const m = S.mode, d = S.data;
     S.flow = m === 'thinking' ? 2.6 : m === 'listening' ? 1.7 : m === 'job' ? 2.2 : 1;
@@ -224,6 +236,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
         <div class="chips" id="sugg">${pair()}</div>
         <form class="ask" id="ask"><input id="ask-input" placeholder="Ask, or tell it to do something" autocomplete="off"><button class="mic" type="button" id="mic" aria-label="Speak"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button><button class="chip" type="submit">Ask</button></form>`;
       wireAsk();
+      micOn();
     }
     if (m === 'listening') {
       setH(232);
@@ -262,6 +275,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
           <button class="icon" type="button" data-act="back" aria-label="Home" title="Home">${ICON.home}</button>
         </div>`;
       wireAsk();
+      micOn();
       setTimeout(() => document.activeElement?.blur(), 40);
       fit(m === 'rewrite' ? 280 : 270);
       // Send only appears once there is something to send; Return does the same.
@@ -295,7 +309,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
         ${d.confirm
           ? '<div class="chips"><button class="chip solid" data-act="approve">Yes, go ahead</button><button class="chip" data-act="decline">No</button></div><div class="small" id="yes-keys" style="margin-top:8px">⌘K then ⏎ to approve</div>'
           : `<form class="ask" id="ask"><input id="ask-input" placeholder="Your answer" autocomplete="off">${'<button class="mic" type="button" id="mic" aria-label="Speak"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>'}<button class="chip" type="submit">Send</button></form>`}`;
-      if (!d.confirm) wireAsk(true);
+      if (!d.confirm) { wireAsk(true); micOn(); }
       fit(280);
     }
     if (m === 'pair') {
@@ -307,16 +321,24 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     }
     if (m === 'settings') {
       const missing = d.missing || [];
-      setH(288);
+      setH(356);
       body.innerHTML = `
         <div class="row space"><span class="label" style="margin-left:34px">Settings</span></div>
         <div class="set">
           <div class="line"><span class="name">iPhone</span><span class="val">${d.phone ? 'Connected' : 'Not connected'}</span><button class="chip" data-act="pair">Get a code</button></div>
           <div class="line"><span class="name">Noctus</span><span class="val">${d.signedIn ? esc(d.email || 'Signed in') : 'Not signed in'}</span>${d.signedIn ? '<button class="chip" data-act="signout">Sign out</button>' : '<button class="chip solid" data-act="signin">Sign in</button>'}</div>
           <div class="line"><span class="name">Shortcut</span><button class="chip ${d.option ? '' : 'solid'}" data-short="0">⌘K</button><button class="chip ${d.option ? 'solid' : ''}" data-short="1">⌥⌘K</button></div>
+          <div class="line"><span class="name">Listen when asked</span><span class="val">The mic opens when Grove is waiting on you</span><button class="chip ${d.listen ? 'solid' : ''}" data-listen="1">On</button><button class="chip ${d.listen ? '' : 'solid'}" data-listen="0">Off</button></div>
+          <form class="line" id="shared-form"><span class="name">Apps that keep ⌘K</span><input id="shared" value="${esc(d.shared || '')}" placeholder="none — Grove takes it everywhere" autocomplete="off"><button class="chip" type="submit">Save</button></form>
           <div class="line"><span class="name">GIF reactions</span><span class="val">Pop-ups for songs, tasks, hellos</span><button class="chip ${d.gifs ? 'solid' : ''}" data-gifs="1">On</button><button class="chip ${d.gifs ? '' : 'solid'}" data-gifs="0">Off</button></div>
           <div class="line"><span class="name">Permissions</span><span class="val">${missing.length ? esc(missing.length + ' to allow') : 'All allowed'}</span>${missing.length ? '<button class="chip" data-act="permissions">Allow</button>' : ''}</div>
         </div>`;
+      fit(400);
+      // Saved on Return or on Save, never per keystroke: a half-typed list is
+      // a list, and writing it would share ⌘K with "Termin".
+      const form = document.getElementById('shared-form'), apps = document.getElementById('shared');
+      form?.addEventListener('submit', (e) => { e.preventDefault(); post({ t: 'shared', apps: apps.value }); });
+      apps?.addEventListener('focus', () => post({ t: 'focus' }));
     }
     if (m === 'synced') {
       setH(100);
@@ -336,6 +358,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     if (b.id === 'mic') { b.classList.add('on'); return post({ t: 'mic' }); }
     if (b.dataset.act === 'approve' || b.dataset.act === 'decline') return post({ t: b.dataset.act, task: S.data.task });
     if (b.dataset.gifs !== undefined) return post({ t: 'gifs', on: b.dataset.gifs === '1' });
+    if (b.dataset.listen !== undefined) return post({ t: 'listen', on: b.dataset.listen === '1' });
     if (b.dataset.short !== undefined) return post({ t: 'shortcut', option: b.dataset.short === '1' });
     if (b.dataset.run) { try { const r = JSON.parse(b.dataset.run); return post({ t: 'run', kind: r.kind, args: r.args }); } catch (err) { return; } }
     if (b.dataset.music) return post({ t: 'music', action: b.dataset.music });

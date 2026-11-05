@@ -3366,6 +3366,201 @@ section('A panel is as tall as what is in it');
   }
 }
 
+
+/*
+ * Grove listens when it is the one waiting — and never in front of a yes
+ * ---------------------------------------------------------------------
+ *
+ * A question on screen with a microphone already open is the difference
+ * between talking to something and operating it, and not having to touch
+ * anything is the whole reason the ring and the glasses exist. So when Grove
+ * asks, the microphone opens with the question.
+ *
+ * **Except in front of a confirmation**, and that exception is the whole
+ * reason this section exists. Every other prompt's worst answer is a wrong
+ * sentence; a confirmation's worst answer is a purchase. A yes stays two
+ * deliberate keys (⌘K then Return) or a press on the card — the rule the
+ * rest of this app is built on, and not one a convenience gets to soften.
+ *
+ * It is the easy thing to break, too: "in any capacity" is how the feature
+ * was asked for, the confirm card is a card like the others, and a later
+ * tidy-up that treated them all the same would read as consistency.
+ */
+section('Grove listens when it has asked, and never in front of a yes');
+{
+  const main = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/main.swift'), 'utf8');
+  const panel = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Resources/panel.html'), 'utf8');
+
+  check(
+    /private func listenForAnswer\(_ asking: Bool\) -> Bool \{\s*\n\s*guard asking, AppDelegate\.listensItself else \{ return false \}/.test(main),
+    'one function decides whether the microphone opens itself',
+    'scattered, the exception below would have to be remembered in each place'
+  );
+
+  // The agent's card is the one that is sometimes a question and sometimes a
+  // yes, so it is the one worth reading rather than grepping for.
+  const waiting = between(main, 'let asking = result.state != "confirm"', '_ = self.listenForAnswer(asking)', {
+    min: 60,
+    max: 500,
+  });
+  check(waiting !== null, 'the agent\'s question card is where it is expected to be');
+  check(
+    waiting !== null && /"confirm": !asking/.test(waiting) && /"mic": asking && AppDelegate\.listensItself/.test(waiting),
+    'a confirmation and a listening microphone are the same boolean, inverted',
+    'they cannot drift apart, because there is only one of them'
+  );
+  check(
+    !/listenForAnswer\(true\)[\s\S]{0,200}?"confirm": true/.test(main) &&
+      !/"confirm": true[\s\S]{0,300}?listenForAnswer\(true\)/.test(main),
+    'no confirmation anywhere opens the microphone',
+    'a yes is a press or two keys, never a sentence Grove heard'
+  );
+  check(
+    /static var listensItself: Bool/.test(main) && /grove\.listen\.auto/.test(main),
+    'and a microphone that opens itself can be switched off without reading any code'
+  );
+
+  // The panel shows the microphone; it must never start one.
+  check(
+    /const micOn = \(\) => \{ if \(S\.data && S\.data\.mic\)/.test(panel),
+    'the panel draws the microphone as on rather than switching it on',
+    'a card re-renders on every step, phone and remark; starting it there would start it each time'
+  );
+  const confirmCard = between(panel, "if (m === 'waiting')", "if (m === 'pair')", { min: 300, max: 1800 });
+  check(confirmCard !== null, 'the waiting card is where it is expected to be');
+  check(
+    confirmCard !== null && /if \(!d\.confirm\) \{ wireAsk\(true\); micOn\(\); \}/.test(confirmCard),
+    'and shows one only on the half of that card which is a question'
+  );
+}
+
+/*
+ * ⌘K opens Grove, except where it would be missed
+ * -----------------------------------------------
+ *
+ * The rule used to be "only when something is highlighted", which is a good
+ * rule for not taking somebody's shortcut and a bad one for being summoned:
+ * the point of a key is that it works when you have nothing in particular to
+ * say, and with nothing selected the way to reach Grove was to find the notch
+ * with a mouse.
+ *
+ * The old reasoning was not wrong, it was incomplete — it measured the cost
+ * of taking ⌘K and never the cost of having no key at all. The cost is not
+ * the same in every app, so neither is the answer: a short editable list of
+ * apps whose own ⌘K is worth more (a chord prefix, a terminal's clear, a
+ * quick switcher), and everywhere else the press opens Grove.
+ *
+ * Matched on a word's beginning, never inside one. Plain containment was the
+ * first version and was wrong both ways at once: "Code" — which is what VS
+ * Code calls itself — is inside **Xcode**, so a list meant to protect one
+ * editor's chords took the key from another by accident; and a strict word
+ * match would have missed "iTerm2".
+ */
+laterSection('⌘K opens Grove, except where it would be missed', async () => {
+  const shortcut = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Shortcut.swift'), 'utf8');
+  const main = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/main.swift'), 'utf8');
+
+  check(
+    /var onSummon: \(\(\) -> Void\)\?/.test(shortcut) && /shortcut\.onSummon = \{ \[weak self\] in self\?\.summon\(\) \}/.test(main),
+    'a press with nothing highlighted reaches Grove'
+  );
+  const none = between(shortcut, 'case .none:', 'case .unknown(let app):', { min: 80, max: 600 });
+  check(none !== null, 'the nothing-highlighted branch is where it is expected to be');
+  check(
+    none !== null && /if Shortcut\.sharesK\(with: front, option: useOption\) \{ return Unmanaged\.passUnretained\(event\) \}/.test(none),
+    'and goes to the app instead only when that app is on the list'
+  );
+  // An app that will not say whether anything is selected must get the same
+  // answer as one that said "nothing" — otherwise ⌘K does nothing in Chrome.
+  check(
+    /else if mine \{ self\?\.onSummon\(\) \}|else if mine \{ self\?\.onSummon\?\(\) \}/.test(shortcut),
+    'an app that will not say whether text is selected is answered the same way',
+    'Chrome and Electron apps do not say; silence there is the press doing nothing'
+  );
+  check(
+    /guard !option/.test(shortcut),
+    '⌥⌘K is never shared with anything, which is what choosing it means'
+  );
+  check(
+    /private func summon\(\)[\s\S]{0,400}?if AppDelegate\.listensItself \{ dictate\(\) \}/.test(main),
+    'and summoning Grove opens the microphone with it',
+    'a shortcut that opens a box to type in has saved a mouse and nothing else'
+  );
+
+  const swiftc = cp.spawnSync('which', ['swiftc'], { encoding: 'utf8' }).status === 0;
+  if (!swiftc) {
+    check(false, 'the app matching itself could not be run: no swiftc on this machine',
+      'the source checks above passed; which apps keep ⌘K was NOT tested');
+    return;
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-shortcut-'));
+  try {
+    // The real function, lifted out with its list, so what is tested is what ships.
+    const body = between(shortcut, 'static func sharesK(with app: String?, option: Bool) -> Bool {', '\n  }\n', { min: 200, max: 1800 });
+    const list = shortcut.match(/static let sharedByDefault = \[([^\]]*)\]/);
+    check(body !== null && list !== null, 'the matcher and its default list are where they are expected to be');
+    if (body === null || list === null) return;
+    const apps = [
+      ['Code', true], ['Visual Studio Code', true], ['Visual Studio Code - Insiders', true],
+      ['Cursor', true], ['Xcode', true], ['Terminal', true], ['iTerm2', true], ['Slack', true],
+      ['Finder', false], ['Google Chrome', false], ['Safari', false], ['Notes', false],
+      ['Mail', false], ['Notion', false], ['Messages', false], ['Music', false], ['Preview', false],
+    ];
+    fs.writeFileSync(path.join(dir, 'main.swift'), `import Foundation
+enum Shortcut {
+  nonisolated(unsafe) static var shared = [${list[1]}]
+  ${body}
+  }
+}
+let apps: [(String, Bool)] = [
+${apps.map(([a, k]) => `  (${JSON.stringify(a)}, ${k}),`).join('\n')}
+]
+for (app, keeps) in apps {
+  let got = Shortcut.sharesK(with: app, option: false)
+  print("\\(got == keeps ? "ok" : "BAD")\\t\\(app)\\t\\(got ? "keeps" : "Grove")")
+}
+print("OPTION\\t\\(Shortcut.sharesK(with: "Code", option: true))")
+// The rule, not the list. Xcode is on the default list, so its ⌘K survives
+// either way and the list cannot tell a word match from a substring one.
+// With only "Code" listed, catching Xcode is the bug and nothing else.
+Shortcut.shared = ["Code"]
+print("INSIDE\\t\\(Shortcut.sharesK(with: "Xcode", option: false))\\t\\(Shortcut.sharesK(with: "Visual Studio Code", option: false))\\t\\(Shortcut.sharesK(with: "Code", option: false))")
+Shortcut.shared = ["iTerm"]
+print("PREFIX\\t\\(Shortcut.sharesK(with: "iTerm2", option: false))")
+`);
+    const built = cp.spawnSync('swiftc', ['-O', 'main.swift', '-o', 'run'], { cwd: dir, encoding: 'utf8' });
+    if (built.status !== 0) {
+      check(false, 'the matcher did not compile on its own', String(built.stderr).slice(0, 400));
+      return;
+    }
+    const lines = String(cp.spawnSync(path.join(dir, 'run'), [], { encoding: 'utf8' }).stdout).trim().split('\n').filter(Boolean);
+    const verdicts = lines.filter((l) => !/^(OPTION|INSIDE|PREFIX)\t/.test(l));
+    check(verdicts.length === apps.length, `all ${apps.length} apps were actually matched`, `got ${verdicts.length}`);
+    const bad = verdicts.filter((l) => l.startsWith('BAD'));
+    check(bad.length === 0, 'each app either keeps ⌘K or hands it to Grove, as intended', bad.join('\n         '));
+    check(
+      lines.includes('INSIDE\tfalse\ttrue\ttrue'),
+      'a listed name matches a word\'s beginning, never inside one',
+      'with only "Code" listed, Xcode must keep nothing: it is a different editor, caught by spelling'
+    );
+    check(
+      lines.includes('PREFIX\ttrue'),
+      'and still catches iTerm2, which is one word and obviously iTerm',
+      'a strict word match would be the opposite mistake'
+    );
+    check(
+      verdicts.some((l) => l.includes('Xcode') && l.endsWith('keeps')),
+      'Xcode keeps its clear-console because somebody put it on the list'
+    );
+    check(
+      lines.includes('OPTION\tfalse'),
+      '⌥⌘K is shared with nothing, even an app on the list'
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 /* ------------------------------------------------------------- verdict */
 
 /*

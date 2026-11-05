@@ -1562,14 +1562,55 @@ working. `mac/make-signing-identity.sh` makes a local certificate once and
 permissions, and `~/Library/Logs/Grove/grove.log` says what happened to every
 ⌘K.
 
-**⌘K is taken only when text is highlighted.** macOS does not use it, but
-Notes, Pages, Docs, Mail, Slack, Notion and Terminal all do, mostly exactly
-when text is selected, so a registered hotkey would break insert-link
-everywhere. An event tap (Accessibility permission) claims the press only when
-the front app reports selected text; an app that does not say (Chrome,
-Electron) gets a held press, a copy, and the original ⌘K sent on if nothing
-came back. ⌥⌘K is in the menu for anyone who would rather Grove never shared.
-Replace writes through Accessibility, or pastes and puts the clipboard back.
+**⌘K is Grove's, except in the few apps that would really miss it.** macOS
+does not use it, but Notes, Pages, Docs, Mail, Slack, Notion and Terminal all
+do, so Grove registers no hotkey: an event tap decides each press. With text
+highlighted it is Grove's, on that text. **With nothing highlighted it is
+Grove's too** — the panel opens with the microphone already on — unless the
+app in front is on `Shortcut.shared`: an editor's chord prefix, a terminal's
+clear, a quick switcher. ⌥⌘K is never shared, which is what choosing it means.
+
+The rule used to be "only when something is highlighted". That is a good rule
+for not taking somebody's shortcut and a bad one for being summoned: the point
+of a key is that it works when you have nothing in particular to say, and with
+nothing selected the only way to reach Grove was to find the notch with a
+mouse. The old reasoning was not wrong, it was incomplete — it measured the
+cost of taking ⌘K and never the cost of having no key at all. That cost is not
+the same in every app, so neither is the answer.
+
+A list, rather than a cleverer test, because there is no way to ask an app
+whether it uses a key: AppKit will not say, and judging by whether the press
+appeared to do anything means doing it first and looking afterwards, which is
+the one thing a shortcut cannot do. It is editable in the notch's settings,
+because it is a judgement about how somebody works. An app that will not say
+whether text is selected (Chrome, anything Electron) gets the same answer as
+one that said "nothing", since silence there would be the press doing nothing
+at all — the worst failure a shortcut has.
+
+**A listed name matches a word's beginning, never inside one.** Plain
+containment was the first version and was wrong both ways at once: "Code" —
+which is what VS Code calls itself, whatever its folder is named — sits inside
+**Xcode**, so a list meant to protect one editor's chords took the key from
+another by accident rather than by anyone's decision; and a strict word match
+would have missed "iTerm2", which is one word and is obviously iTerm.
+
+**Grove listens whenever it is the one waiting.** A question on screen with a
+microphone already open is the difference between talking to something and
+operating it, and not having to touch anything is the whole reason the ring
+and the glasses exist. So the microphone opens with the question — Grove's own
+`ask`, the browser agent's question, and a plain summon — and what is said
+fills the box and sends itself. One function decides it (`listenForAnswer`),
+and the panel only ever *draws* a microphone as on: a card re-renders whenever
+a step, a phone or a remark arrives, and a card that started the microphone
+would start it again each time.
+
+**Never in front of a confirmation.** Every other prompt's worst answer is a
+wrong sentence; a confirmation's worst answer is a purchase. A yes stays two
+deliberate keys (⌘K then Return) or a press on the card. The confirm flag and
+the microphone flag are the same boolean inverted, so they cannot drift, and
+`npm run verify` checks it — this is the easy thing to break, because the
+confirm card is a card like the others and a later tidy-up that treated them
+all alike would read as consistency.
 
 **The window follows the panel.** A transparent window still takes clicks, so
 it is exactly the visible panel while open and full size but mouse-blind while
@@ -1760,6 +1801,19 @@ Through the model it cost a "one second" before the "stopped".
 **Pause reaches whatever is playing** (`Player.swift`): Music, video in Chrome,
 Spotify, then the system play/pause key when something is still making sound.
 It says "nothing's playing" rather than "paused" when nothing was, and logs each.
+
+**With the Mac there, nothing opens on the phone.** `food.order`, `shop.order`
+and `message.compose` check `macReachable()` first and hand the whole job to
+`mac.use` (`onTheMac`), where the cart, the checkout and the send each take a
+yes on the real button. Calendar, mail and reminders open nothing and are
+unchanged; calls, directions and rides stay on the phone because they are
+about where the phone is.
+
+**Music asks once where it plays** (`place.ts`, `musicRoute` in brain.ts). With
+the Mac there and nothing chosen, a play is answered with "Your Mac or your
+phone?"; after that a play aimed at the other device is moved to the chosen
+one. `music.where` changes it, and with move "yes" carries the song across:
+the Mac's `music.now` reads what is playing, it is paused there and found here.
 
 Texts go through Messages, not a website (`agent.message`): the person is
 found in Contacts by name or relation, a pick among several is remembered,

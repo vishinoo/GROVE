@@ -1,13 +1,33 @@
 /*
-  ⌘K, but only when something is highlighted.
+  ⌘K: on highlighted text, and otherwise to open Grove.
 
   macOS itself does not use ⌘K, but a great many apps do — insert link in
   Notes, Pages, Docs and Mail, the quick switcher in Slack and Notion, clear
-  in Terminal — and most of them use it exactly when text is selected. So
-  Grove does not register a hotkey, which would take ⌘K away from every app.
-  It watches key presses with an event tap and claims ⌘K only when it can see
-  highlighted text in the app in front; otherwise the press goes through
-  untouched. ⌥⌘K is offered for anyone who would rather Grove never shared.
+  in Terminal — so Grove does not register a hotkey, which would take ⌘K away
+  from every app. It watches key presses with an event tap and decides each
+  one. ⌥⌘K is offered for anyone who would rather Grove never shared, and it
+  is never shared: no app uses it.
+
+  **With text highlighted it is Grove's, and with nothing highlighted it is
+  Grove's too, except in the few apps that would really miss it.** That
+  second half is new. The rule used to be "only when something is
+  highlighted", which is a good rule for not taking somebody's shortcut and a
+  bad one for being summoned: the whole point of a key is that it works when
+  you have nothing in particular to say, and the way to reach Grove with
+  nothing selected was to go and find the notch with a mouse.
+
+  The old reasoning was not wrong, it was incomplete. It measured the cost of
+  taking ⌘K and never measured the cost of not having a key at all. What it
+  got right is that the cost is not the same in every app, so the answer is
+  not the same in every app either: `shared` is the short list where the
+  app's own ⌘K is worth more than a shortcut to Grove — an editor's chord
+  prefix, a terminal's clear, a quick switcher — and everywhere else the
+  press opens Grove with its microphone already on.
+
+  A list is the honest shape for this, rather than a cleverer test. There is
+  no way to ask an app whether it uses a key: AppKit will not say, and
+  guessing from whether the press appeared to do anything means doing it
+  first and looking afterwards, which is the one thing a shortcut cannot do.
 
   An event tap needs Accessibility permission. Without it Grove still opens
   from the notch and still takes jobs from the phone; only ⌘K waits.
@@ -24,6 +44,8 @@ import ApplicationServices
 final class Shortcut {
   var useOption = false
   var onTrigger: ((Captured) -> Void)?
+  /** ⌘K with nothing highlighted, in an app that is not on the shared list. */
+  var onSummon: (() -> Void)?
   var onReady: (() -> Void)?
   /** Esc while Grove's panel is up: returns true if it closed something. */
   var onEscape: (() -> Bool)?
@@ -42,6 +64,65 @@ final class Shortcut {
 
   /** Marks the ⌘K this tap sends on itself, so it is not caught twice. */
   static let mark: Int64 = 0x6772_6F76
+
+  /**
+    Apps whose own ⌘K is worth more than a shortcut to Grove.
+
+    Four of the five are a keystroke people use many times an hour and would
+    notice losing within a minute: a chord prefix in the two editors (⌘K ⌘S
+    and the rest of them), clear in a terminal, the quick switcher in Slack.
+    They are matched on the app's own name, loosely, so "Visual Studio Code"
+    and "Code" are the same thing and a beta or a fork with a suffix is still
+    caught.
+
+    Editable, because this is a judgement about how somebody works and
+    nobody here can make it for them. The default is the small end on
+    purpose: a shortcut that quietly does nothing in half their apps is
+    worse than one that takes something back, because the second is visible
+    and the first reads as Grove being broken.
+  */
+  static let sharedByDefault = ["Code", "Cursor", "Xcode", "Terminal", "iTerm", "Slack"]
+  static var shared: [String] {
+    get {
+      let saved = UserDefaults.standard.string(forKey: "grove.shortcut.shared")
+      guard let saved else { return sharedByDefault }
+      return saved.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+    set { UserDefaults.standard.set(newValue.joined(separator: ", "), forKey: "grove.shortcut.shared") }
+  }
+
+  /**
+    Whether this press belongs to the app in front rather than to Grove.
+
+    ⌥⌘K is never shared — that is what choosing it means — and a name that
+    contains one of the listed ones counts, so "Visual Studio Code - Insiders"
+    does not quietly lose its chords.
+  */
+  static func sharesK(with app: String?, option: Bool) -> Bool {
+    guard !option, let app, !app.isEmpty else { return false }
+    let name = app.lowercased()
+    /*
+      A listed name matches where a word of the app's name begins with it,
+      never anywhere inside one.
+
+      Plain containment was the first version and it was wrong in both
+      directions at once. "Code" — which is what VS Code actually calls
+      itself, whatever its folder is named — appears inside **Xcode**, so a
+      list meant to protect an editor's chords silently took the key away
+      from a different editor by accident rather than by anybody's decision.
+      Meanwhile a strict word match would have missed "iTerm2", which is one
+      word and is obviously iTerm.
+
+      Beginning a word is the rule that gets both: iTerm2 and "Visual Studio
+      Code - Insiders" match, Xcode does not, and what the list does can be
+      worked out by reading it.
+    */
+    return shared.contains { entry in
+      let want = entry.lowercased()
+      guard !want.isEmpty else { return false }
+      return name.split { !$0.isLetter && !$0.isNumber }.contains { $0.hasPrefix(want) }
+    }
+  }
 
   func start() {
     // The asking is Permissions.swift's job. This waits for the answer, so
@@ -124,19 +205,28 @@ final class Shortcut {
       return nil
     }
 
+    let front = NSWorkspace.shared.frontmostApplication?.localizedName
     let read = Selection.read()
-    Log.say("⌘K: pressed in \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"), selection \(read.summary)")
+    Log.say("⌘K: pressed in \(front ?? "?"), selection \(read.summary)\(Shortcut.sharesK(with: front, option: useOption) ? " — this app keeps ⌘K" : "")")
     switch read {
     case .text(let captured):
       DispatchQueue.main.async { [weak self] in self?.onTrigger?(captured) }
       return nil
     case .none:
-      return Unmanaged.passUnretained(event)
+      // Nothing highlighted: Grove, unless this app would miss its own ⌘K.
+      if Shortcut.sharesK(with: front, option: useOption) { return Unmanaged.passUnretained(event) }
+      DispatchQueue.main.async { [weak self] in self?.onSummon?() }
+      return nil
     case .unknown(let app):
-      // Held: try a copy, and send the press on if nothing was highlighted.
+      // Held: try a copy, and decide on what came back. An app that does not
+      // say (Chrome, anything Electron) is not a reason to do nothing — it
+      // gets the same answer an app that said "nothing" would get.
       let option = useOption
+      let mine = !Shortcut.sharesK(with: front, option: option)
       Selection.copyFallback(app: app) { [weak self] captured in
-        if let captured { self?.onTrigger?(captured) } else { Shortcut.resend(option: option) }
+        if let captured { self?.onTrigger?(captured) }
+        else if mine { self?.onSummon?() }
+        else { Shortcut.resend(option: option) }
       }
       return nil
     }
