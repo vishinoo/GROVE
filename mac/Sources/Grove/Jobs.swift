@@ -40,10 +40,11 @@ enum Jobs {
   static func run(_ job: Job, done: @escaping (Bool, String) -> Void) {
     switch job.kind {
     case "music.play": Music.play(job.args["what"] ?? "", playlistOnly: job.args["playlist"] == "yes", done: done)
-    case "music.pause": Music.simple("pause", spoken: "Paused.", done: done)
-    case "music.resume": Music.simple("play", spoken: "Playing.", done: done)
-    case "music.next": Music.simple("next track", spoken: "Skipped.", done: done)
-    case "music.previous": Music.simple("previous track", spoken: "Back one.", done: done)
+    case "music.pause": Music.transport("pause", spoken: "Paused.", done: done)
+    case "music.resume": Music.transport("play", spoken: "Playing.", done: done)
+    case "music.next": Music.transport("next track", spoken: "Skipped.", done: done)
+    case "music.previous": Music.transport("previous track", spoken: "Back one.", done: done)
+    case "music.shuffle": Music.simple("set shuffle enabled to true\n  if player state is not playing then play", spoken: "Shuffling.", done: done)
     case "volume.up": Music.volume(by: 12, done: done)
     case "volume.down": Music.volume(by: -12, done: done)
     case "open.url": openURL(job.args["url"] ?? "", done: done)
@@ -52,42 +53,26 @@ enum Jobs {
     }
   }
 
-  private static func openURL(_ raw: String, done: (Bool, String) -> Void) {
+  private static func openURL(_ raw: String, done: @escaping (Bool, String) -> Void) {
     var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     if !s.contains("://") { s = "https://" + s }
     guard let url = URL(string: s), url.host != nil else { done(false, "That doesn't look like a link I can open."); return }
-    NSWorkspace.shared.open(url)
-    done(true, "Opened \(url.host ?? "it") on your Mac.")
+    Task { @MainActor in
+      if !(await Browser.focusOrOpen(s)) { NSWorkspace.shared.open(url) }
+      done(true, "Opened \(url.host ?? "it") on your Mac.")
+    }
   }
 
   private static func openApp(_ name: String, done: @escaping (Bool, String) -> Void) {
     let wanted = name.trimmingCharacters(in: .whitespacesAndNewlines)
-    let dirs = ["/Applications", "/System/Applications", "/System/Applications/Utilities", NSHomeDirectory() + "/Applications"]
-    let fm = FileManager.default
-    var found: URL?
-    for dir in dirs {
-      guard let items = try? fm.contentsOfDirectory(atPath: dir) else { continue }
-      if let hit = items.first(where: { $0.lowercased() == wanted.lowercased() + ".app" })
-        ?? items.first(where: { $0.lowercased().hasSuffix(".app") && $0.lowercased().contains(wanted.lowercased()) }) {
-        found = URL(fileURLWithPath: dir).appendingPathComponent(hit)
-        break
-      }
-    }
-    // Not an app: most things people name are websites ("open instagram"), so
-    // try the site in the browser rather than saying no.
-    guard let url = found else {
+    Task { @MainActor in
+      if let opened = await Native.focus(wanted) { done(true, "Opened \(opened)."); return }
+      // Not an app: most things people name are websites ("open instagram").
       let site = wanted.lowercased().replacingOccurrences(of: " ", with: "")
-      if !site.isEmpty, !wanted.contains(" ") || wanted.contains("."), site.count <= 30, site.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "." }), let web = URL(string: "https://\(site.contains(".") ? site : "www.\(site).com")") {
-        NSWorkspace.shared.open(web)
-        done(true, "Opened \(web.host ?? site) in your browser.")
+      if !site.isEmpty, site.count <= 30, !wanted.contains(" ") || wanted.contains("."), site.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "." }) {
+        openURL(site.contains(".") ? site : "www.\(site).com", done: done)
       } else {
-        done(false, "I couldn't find \(wanted) on your Mac.")
-      }
-      return
-    }
-    NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, error in
-      DispatchQueue.main.async {
-        done(error == nil, error == nil ? "Opened \(url.deletingPathExtension().lastPathComponent)." : "\(url.deletingPathExtension().lastPathComponent) wouldn't open.")
+        done(false, "\(Music.elsewhere)\(wanted)")
       }
     }
   }
@@ -164,7 +149,12 @@ enum Music {
         if found is not missing value then
           reveal found
           play found
-          return "playlist|" & name of found
+          delay 1
+          if player state is not playing then
+            play found
+            delay 1.5
+          end if
+          return "playlist|" & name of found & "|" & (player state as text)
         end if
         \(playlistOnly ? "return \"none\"" : """
         repeat with t in {\(Music.tries(q).map { "{\"\($0.0)\", \"\($0.1)\"}" }.joined(separator: ", "))}
@@ -177,7 +167,12 @@ enum Music {
           repeat with h in hits
             if hint is "" or (artist of h) contains hint then
               play h
-              delay 0.6
+              delay 1
+              if player state is not playing then
+                play h
+                delay 1.5
+              end if
+              if player state is not playing then return "stalled|" & name of h
               try
                 return "song|" & name of current track & "|" & artist of current track
               on error
@@ -191,7 +186,18 @@ enum Music {
       end tell
       """
     }
-    Script.run(script) { ok, out in
+    // Once more if it failed: Music still waking up is the usual reason, and
+    // the second attempt finds it awake.
+    func attempt(_ again: Bool, _ then: @escaping (Bool, String) -> Void) {
+      Script.run(script) { ok, out in
+        if !ok && again {
+          DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { attempt(false, then) }
+        } else {
+          then(ok, out)
+        }
+      }
+    }
+    attempt(true) { ok, out in
       if !ok { done(false, "Music wouldn't respond. Grove may need permission to control it, in the Grove menu's checklist."); return }
       if out == "none" {
         // Not in their library. AppleScript cannot play the catalogue, and
@@ -205,6 +211,11 @@ enum Music {
       }
       let bits = out.split(separator: "|", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
       switch bits.first {
+      // Said to play is not playing, and nothing used to check: a cloud track
+      // that would not start was reported as playing. Then it is on YouTube.
+      case "stalled": done(true, Music.elsewhere + q)
+      case "playlist" where bits.count > 2 && bits[2] != "playing":
+        done(false, "Your \(bits[1]) playlist wouldn't start in Music.")
       case "playlist": done(true, "Playing your \(bits.count > 1 ? bits[1] : q) playlist.")
       case "library": done(true, "Shuffling your music.")
       default:
@@ -221,7 +232,36 @@ enum Music {
     Script.run(source) { ok, level in done(ok, ok ? "Volume \(level)." : "I couldn't change the volume.") }
   }
 
+  /**
+    Pause, play, next: on whatever is playing, not only Music. With a song on
+    YouTube, "pause" paused Music, which was not playing, and said Paused. So
+    the transport goes to a video playing in Chrome when there is one, and
+    "play" resumes one this paused. Music gets it when nothing else has it.
+  */
+  nonisolated(unsafe) private static var pausedInChrome = false
+  static func transport(_ command: String, spoken: String, done: @escaping (Bool, String) -> Void) {
+    Task { @MainActor in
+      let js: String
+      switch command {
+      case "pause": js = "(function(){var v=Array.from(document.querySelectorAll('video,audio')).find(function(e){return !e.paused;});if(v){v.pause();return 'hit';}return '';})()"
+      case "play": js = pausedInChrome ? "(function(){var v=Array.from(document.querySelectorAll('video,audio')).find(function(e){return e.paused&&e.currentTime>0;});if(v){v.play();return 'hit';}return '';})()" : ""
+      default:
+        let button = command == "next track" ? ".ytp-next-button" : ".ytp-prev-button"
+        js = "(function(){var v=Array.from(document.querySelectorAll('video,audio')).find(function(e){return !e.paused;});var b=document.querySelector('\\(button)');if(v&&b){b.click();return 'hit';}return '';})()"
+      }
+      let hit = js.isEmpty ? false : await Browser.everyTab(js)
+      if command == "pause" { pausedInChrome = hit }
+      if command == "play" && hit { pausedInChrome = false }
+      if hit && command != "pause" { done(true, spoken); return }
+      Script.run("tell application \"Music\" to get player state") { ok, state in
+        // A pause that reached a video is done; Music is only stopped too if it is playing.
+        if command == "pause" && hit && !(ok && state == "playing") { done(true, spoken); return }
+        simple(command, spoken: spoken, done: done)
+      }
+    }
+  }
+
   static func simple(_ command: String, spoken: String, done: @escaping (Bool, String) -> Void) {
-    Script.run("tell application \"Music\" to \(command)") { ok, _ in done(ok, ok ? spoken : "Music wouldn't respond.") }
+    Script.run("tell application \"Music\"\n\(command)\nend tell") { ok, _ in done(ok, ok ? spoken : "Music wouldn't respond.") }
   }
 }

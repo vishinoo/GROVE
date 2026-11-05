@@ -24,6 +24,7 @@
  */
 
 import { macJob, macWork, noteMacWork } from './mac';
+import { move as moveReading, stopReading } from './reading';
 import {
   addReminder,
   openReminders,
@@ -39,6 +40,8 @@ import { Linking, Platform } from 'react-native';
 import { capabilities } from './capabilities';
 import { loadFacts, recall,
   remember,
+  correctFacts,
+  saysTheSame,
 } from './memory';
 import { loadPlayed, playedLines, recordPlayed } from './listening';
 import { loadDocs, rememberDoc } from './docs';
@@ -175,6 +178,12 @@ export type AbilityResult = {
    * is the whole point.
    */
   listenAfter?: boolean;
+  /**
+   * Read something aloud as a session (reading.ts) rather than say a line.
+   * With text, a new reading starts; without, the current one carries on from
+   * its place. The turn speaks it part by part, and a press pauses it.
+   */
+  read?: { title?: string; text?: string };
   /**
    * Start the music only once Grove has stopped talking.
    *
@@ -3255,7 +3264,7 @@ const MAC_MUSIC: Ability = {
   wired: true,
   needs: [],
   args: {
-    action: { type: 'string', what: '"play", "pause", "resume", "next", "previous", "louder" or "quieter"', required: true },
+    action: { type: 'string', what: '"play", "pause", "resume", "next", "previous", "shuffle", "louder" or "quieter"', required: true },
     what: { type: 'string', what: 'for play: a playlist, song, album or artist from their library; empty to shuffle' },
   },
   examples: [
@@ -3270,7 +3279,7 @@ const MAC_MUSIC: Ability = {
     // to turn the volume up, the old fallback shuffled their whole library.
     const action = (args.action || '').trim().toLowerCase();
     const KINDS: Record<string, string> = {
-      play: 'music.play', pause: 'music.pause', resume: 'music.resume', next: 'music.next', previous: 'music.previous',
+      play: 'music.play', pause: 'music.pause', resume: 'music.resume', next: 'music.next', previous: 'music.previous', shuffle: 'music.shuffle',
       louder: 'volume.up', up: 'volume.up', 'volume up': 'volume.up', quieter: 'volume.down', down: 'volume.down', 'volume down': 'volume.down',
     };
     const kind = KINDS[action];
@@ -3298,6 +3307,113 @@ const MAC_OPEN: Ability = {
     const looksLikeLink = /^https?:\/\//i.test(what) || /^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(what);
     const result = await macJob(looksLikeLink ? 'open.url' : 'open.app', looksLikeLink ? { url: what } : { app: what });
     if (result.ok) noteMacWork({ what: `opened ${what}`, state: 'done', said: result.spoken });
+    return { ok: result.ok, spoken: result.spoken };
+  },
+};
+
+/**
+ * What is in front of them on the Mac, read aloud.
+ *
+ * "Read me this" from the glasses, about whatever they are looking at on the
+ * laptop: the selection if there is one, otherwise the readable part of the
+ * page or window, from where they are scrolled. The Mac finds the text
+ * (Jobs.swift, screen.read); the phone reads it, because the phone is what
+ * talks to the glasses. Not a read in the turn's sense — the model does not
+ * answer from it, it is handed to the reading session whole.
+ */
+const MAC_READ: Ability = {
+  id: 'mac.read',
+  name: 'Read your screen aloud',
+  what: 'Reads aloud what they are looking at on their Mac — the text they selected, or the article, page, document or message in front of them — so they can listen instead of reading. For "read me this", "read this out", "what does this say".',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {},
+  examples: ['read me this', 'read this out loud', 'can you read what is on my screen', 'read me this article'],
+  run: async () => {
+    const result = await macJob('screen.read', {}, 20_000);
+    const text = (result.detail ?? '').trim();
+    if (!result.ok || !text) return { ok: false, spoken: result.spoken || 'I could not find anything to read on your Mac.' };
+    noteMacWork({ what: `read aloud: ${result.spoken}`, state: 'done', said: '' });
+    return { ok: true, spoken: '', read: { title: result.spoken, text } };
+  },
+};
+
+/**
+ * Steering what is being read: carry on, back, from the top, skip, stop.
+ * Separate from reading something new, so "keep going" never fetches the
+ * screen again and loses the place.
+ */
+const READING: Ability = {
+  id: 'reading.go',
+  name: 'Carry on reading',
+  what: 'Controls what Grove is reading aloud to them: carry on from where it stopped ("keep going"), go back a bit, start again, skip ahead, or stop. Only while the context says something is being read.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {
+    how: { type: 'string', what: 'resume, back, restart, next or stop', required: true },
+  },
+  examples: ['read that part again', 'stop reading'],
+  run: async (args) => {
+    const how = (args.how || 'resume').trim().toLowerCase();
+    if (how === 'stop') {
+      stopReading();
+      return { ok: true, spoken: 'Okay.' };
+    }
+    const part = moveReading((['back', 'restart', 'next'].includes(how) ? how : 'resume') as 'resume' | 'back' | 'restart' | 'next');
+    if (!part) return { ok: false, spoken: 'There is nothing being read right now.' };
+    return { ok: true, spoken: '', read: {} };
+  },
+};
+
+/**
+ * A note, written down where they keep notes on the Mac (Apple Notes, in a
+ * Grove folder). The plain case of "write a note on that": while something is
+ * being read, the model writes the note from the passage in the context. A
+ * note somewhere named — Quizlet, a Google Doc — is the browser tool's or the
+ * document tool's job, not this one's.
+ */
+/**
+ * Their text messages, read on the Mac (Inbox.swift). A read: the model answers
+ * from what comes back. Their words go to the model for this answer and are
+ * kept nowhere, and it is who said what that matters, so the lines are whole.
+ */
+const MAC_INBOX: Ability = {
+  id: 'mac.inbox',
+  name: 'Read your messages',
+  what: 'Reads their recent text messages from Messages on their Mac. For "any new messages", "who texted me", "what did Akash say", "did my dad reply". Answer only from the lines it returns: never guess who someone is or why they wrote.',
+  where: 'device',
+  wired: true,
+  reads: true,
+  needs: [],
+  args: {
+    who: { type: 'string', what: 'the person, if they named one' },
+  },
+  examples: ['read my messages', 'what did akash say', 'check my messages'],
+  run: async (args) => {
+    const result = await macJob('messages.read', { who: (args.who || '').trim() }, 20_000);
+    return { ok: result.ok, spoken: result.spoken, detail: result.detail };
+  },
+};
+
+const MAC_NOTE: Ability = {
+  id: 'mac.note',
+  name: 'Write a note',
+  what: 'Writes a note into Apple Notes on their Mac. For "write a note on that", "note that down", "jot this down" when they did not name an app or site. Write the note itself in full: when it is about something being read to them, put the point of that passage in it, not "that".',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {
+    text: { type: 'string', what: 'the note, written out in full', required: true },
+    title: { type: 'string', what: 'a short title for it' },
+  },
+  examples: ['write a note on that', 'note that down', 'jot this down for me', 'make a note that the meeting moved'],
+  run: async (args) => {
+    const text = (args.text || '').trim();
+    if (!text) return { ok: false, spoken: 'What should the note say?' };
+    const result = await macJob('note.add', { text, title: (args.title || '').trim() });
+    if (result.ok) noteMacWork({ what: `noted: ${text.slice(0, 80)}`, state: 'done', said: result.spoken });
     return { ok: result.ok, spoken: result.spoken };
   },
 };
@@ -3677,6 +3793,37 @@ const SHOP: Ability = {
   },
 };
 
+/**
+ * "No, that's wrong." The fact goes, and what is true goes in its place when
+ * they said it. Reversible only by telling Grove again, but it is only ever
+ * their own memory about themselves, on their own say-so, so it takes no press.
+ */
+const MEMORY_CORRECT: Ability = {
+  id: 'memory.correct',
+  name: 'Correct what you remember',
+  what: 'Removes something Grove believes about them that they have just said is not true, and stores what is true if they said it. For "that is not true", "I never said that", "I do not like them", "you made that up".',
+  where: 'device',
+  wired: true,
+  needs: [],
+  args: {
+    wrong: { type: 'string', what: 'the belief that was wrong, written out in full, using the words of the line in their memory', required: true },
+    right: { type: 'string', what: 'what is actually true, if they said' },
+  },
+  examples: ['forget that about me', 'remove that from what you know about me'],
+  run: async (args) => {
+    const wrong = (args.wrong || '').trim();
+    if (!wrong) return { ok: false, spoken: 'What did I get wrong?' };
+    const gone = await correctFacts(CURRENT_UID, wrong);
+    await updateLife(CURRENT_UID, (life) => ({
+      ...life,
+      entities: life.entities.map((e) => ({ ...e, facts: e.facts.filter((f) => !saysTheSame(f.text, wrong)) })),
+    }));
+    const right = (args.right || '').trim();
+    if (right) await remember(CURRENT_UID, { key: 'note', value: right, source: 'told' });
+    return { ok: true, spoken: gone > 0 ? 'Fixed. I won’t say that again.' : 'Noted. That wasn’t in what I keep, but I won’t say it again.' };
+  },
+};
+
 const MEMORY_ADD: Ability = {
   id: 'memory.add',
   name: 'Remember',
@@ -4021,6 +4168,11 @@ export const ABILITIES: Ability[] = [
   MAC_USE,
   MAC_MUSIC,
   MAC_OPEN,
+  MAC_READ,
+  READING,
+  MAC_NOTE,
+  MAC_INBOX,
+  MEMORY_CORRECT,
   RIDE,
   DELIVERY,
   SHOP,

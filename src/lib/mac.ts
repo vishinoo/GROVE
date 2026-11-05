@@ -119,8 +119,18 @@ function heard(m: Record<string, unknown>) {
       task: m.task ? String(m.task) : undefined,
       speak: m.speak === true,
     };
+    // Acknowledged so it stops being sent, and said only the first time.
+    const nid = m.nid ? String(m.nid) : '';
+    if (nid) send({ t: 'newsack', nid });
+    if (nid && heardNews.includes(nid)) return;
+    if (nid) heardNews = [...heardNews, nid].slice(-50);
     noteMacWork({ what: news.what, state: news.state, said: news.said, task: news.task });
     newsListeners.forEach((listener) => listener(news));
+  } else if (m.t === 'heard' || m.t === 'fact') {
+    const heard: MacHeard = m.t === 'heard'
+      ? { said: String(m.said ?? ''), replied: String(m.replied ?? '') }
+      : { line: String(m.line ?? ''), wrong: String(m.wrong ?? '') };
+    heardListeners.forEach((listener) => listener(heard));
   } else if (m.t === 'think') {
     void answer(String(m.id ?? ''), String(m.instruction ?? ''), String(m.text ?? ''));
   }
@@ -302,6 +312,7 @@ let work: MacWork | null = null;
  */
 export type MacNews = { what: string; state: string; said: string; task?: string; speak: boolean };
 const newsListeners = new Set<(news: MacNews) => void>();
+let heardNews: string[] = [];
 
 /**
  * A turn said on the phone, for the Mac to react to with a GIF when they
@@ -311,6 +322,17 @@ const newsListeners = new Set<(news: MacNews) => void>();
 export function tellMac(heard: string, replied: string): void {
   if (status.state !== 'connected' || !heard.trim() || !replied.trim()) return;
   send({ t: 'said', heard: heard.slice(0, 300), replied: replied.slice(0, 400) });
+}
+
+/** What was said at the Mac (for the long memory) and what it learned there (for the facts). */
+export type MacHeard = { said?: string; replied?: string; line?: string; wrong?: string };
+const heardListeners = new Set<(heard: MacHeard) => void>();
+
+export function onMacHeard(listener: (heard: MacHeard) => void): () => void {
+  heardListeners.add(listener);
+  return () => {
+    heardListeners.delete(listener);
+  };
 }
 
 export function onMacNews(listener: (news: MacNews) => void): () => void {
@@ -334,8 +356,8 @@ const WORK_STATE: Record<string, string> = {
   done: 'It finished',
   failed: 'It did not finish',
   answered: 'Grove answered them there',
-  stopped: 'It was stopped',
   working: 'It is still going on the Mac, unattended (a game, or a long job); "stop" stops it',
+  stopped: 'It was stopped',
 };
 
 /**

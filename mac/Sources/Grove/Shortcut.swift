@@ -27,6 +27,16 @@ final class Shortcut {
   var onReady: (() -> Void)?
   /** Esc while Grove's panel is up: returns true if it closed something. */
   var onEscape: (() -> Bool)?
+  /**
+    A yes from the keyboard: ⌘K then Return. The two keys are the point. ⌘K says
+    "show me what you are waiting on", and only then does Return mean yes, for
+    eight seconds, with what it approves on screen. A Return on its own is
+    somebody typing, and must never send anything.
+  */
+  var waitingForYes: (() -> Bool)?
+  var onArm: ((Bool) -> Void)?
+  var onAnswer: ((Bool) -> Void)?
+  private var armedUntil = Date.distantPast
   private var tap: CFMachPort?
   var ready: Bool { tap != nil }
 
@@ -79,6 +89,21 @@ final class Shortcut {
     guard type == .keyDown else { return Unmanaged.passUnretained(event) }
     if event.getIntegerValueField(.eventSourceUserData) == Shortcut.mark { return Unmanaged.passUnretained(event) }
 
+    if armedUntil != .distantPast {
+      let live = Date() < armedUntil
+      armedUntil = .distantPast
+      let code = event.getIntegerValueField(.keyboardEventKeycode)
+      if live, code == 36 || code == 76 {
+        DispatchQueue.main.async { [weak self] in self?.onAnswer?(true) }
+        return nil
+      }
+      if live, code == 53 {
+        DispatchQueue.main.async { [weak self] in self?.onAnswer?(false) }
+        return nil
+      }
+      DispatchQueue.main.async { [weak self] in self?.onArm?(false) }
+    }
+
     if event.getIntegerValueField(.keyboardEventKeycode) == 53, event.flags.intersection([.maskCommand, .maskAlternate, .maskControl, .maskShift]).isEmpty,
        onEscape?() == true {
       return nil
@@ -91,6 +116,13 @@ final class Shortcut {
     let option = flags.contains(.maskAlternate)
     let others = flags.contains(.maskShift) || flags.contains(.maskControl)
     guard command, !others, option == useOption else { return Unmanaged.passUnretained(event) }
+
+    if waitingForYes?() == true {
+      armedUntil = Date().addingTimeInterval(8)
+      DispatchQueue.main.async { [weak self] in self?.onArm?(true) }
+      Log.say("⌘K: armed for a yes")
+      return nil
+    }
 
     let read = Selection.read()
     Log.say("⌘K: pressed in \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"), selection \(read.summary)")

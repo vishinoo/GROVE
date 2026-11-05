@@ -23,6 +23,7 @@
                   said {heard, replied}              (a phone turn, for the Mac's GIFs only; not kept)
     mac → phone   welcome {mac}                      done {id, ok, spoken, state?, task?, detail?}
                   think {id, instruction, text}      news {what, state, said, task?, speak}
+                  heard {said, replied}              fact {line, wrong}
 
   "Connected" means heard from the phone in the last two and a half minutes;
   it says hello once a minute — about 90,000 messages a month, well inside
@@ -227,7 +228,33 @@ final class Link {
     waiting on: a job it started that outlived its wait.
   */
   func news(what: String, state: String, said: String, task: String = "", speak: Bool = false) {
-    deliver(["t": "news", "what": String(what.prefix(240)), "state": state, "said": String(said.prefix(400)), "task": task, "speak": speak])
+    var message: [String: Any] = ["t": "news", "what": String(what.prefix(240)), "state": state, "said": String(said.prefix(400)), "task": task, "speak": speak]
+    // Something meant to be said must arrive. A broadcast is fire and forget, and
+    // a phone between sockets just misses it, so these are held until the phone
+    // says it has them, and sent again each time it says hello. A progress line
+    // is not worth that: stale, it is wrong.
+    if speak && state != "working" {
+      let id = UUID().uuidString
+      message["nid"] = id
+      DispatchQueue.main.async { self.unheard.append((id, Date(), message)) }
+    }
+    deliver(message)
+  }
+  private var unheard: [(id: String, at: Date, message: [String: Any])] = []
+
+  private func sayAgain() {
+    unheard.removeAll { Date().timeIntervalSince($0.at) > 600 }
+    for item in unheard where Date().timeIntervalSince(item.at) > 8 { deliver(item.message) }
+  }
+
+  /** Something said at the Mac and answered there, for the phone's long memory to read like any other turn. */
+  func heard(_ said: String, replied: String) {
+    deliver(["t": "heard", "said": String(said.prefix(400)), "replied": String(replied.prefix(500))])
+  }
+
+  /** A fact they stated, or a claim they said was wrong, for the phone's memory to act on. */
+  func fact(_ line: String, wrong: String) {
+    deliver(["t": "fact", "line": String(line.prefix(240)), "wrong": String(wrong.prefix(240))])
   }
 
   /**
@@ -259,6 +286,9 @@ final class Link {
     switch m["t"] as? String {
     case "hello":
       broadcast(["t": "welcome", "mac": Host.current().localizedName ?? "Mac"])
+      sayAgain()
+    case "newsack":
+      unheard.removeAll { $0.id == (m["nid"] as? String) }
     case "settings":
       onLook?(LookUpdate(
         colour: m["colour"] as? String, label: m["label"] as? String, stops: m["stops"] as? [String],

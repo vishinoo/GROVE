@@ -2346,31 +2346,75 @@ function shortFailure(text: string): string {
   }, []);
 
   /**
-   * The Mac's news, said into the glasses when it is theirs to hear.
+   * The Mac reporting back, the way somebody doing a job for you would.
    *
-   * Only a job they started from here that outlived the phone's wait — the
-   * game that finished, the order that needs a yes — and only while Grove is
-   * resting, so it never talks over a turn. A question opens the window to
-   * answer it: they asked for this job, and the question is part of it,
-   * which is what separates it from Grove speaking first. Everything else the
-   * Mac reports is recorded by mac.ts for the next sentence and not said.
+   * Everything it says is recorded by mac.ts for the next sentence. What it
+   * marks `speak` goes into their ear: a job finished, a question, or word from
+   * a long one. It waits its turn rather than being dropped because Grove was
+   * mid-sentence, since "the order is ready for your yes" is exactly what must
+   * not vanish; a progress line is not held, because stale it is wrong, and the
+   * result replaces it. A question opens the window to answer it: they asked for
+   * this job, and that is what separates it from Grove speaking first.
+   *
+   * What is not said still shows on the Talk screen with a tap in the pocket, so
+   * a job finished at the keyboard is not a surprise later.
    */
   useEffect(() => {
-    return onMacNews((news) => {
-      if (!news.speak || !news.said || !mounted.current) return;
+    const waiting: { said: string; asks: boolean; done: boolean; at: number }[] = [];
+    const sayNext = () => {
+      if (!mounted.current || waiting.length === 0) return;
       const resting = stateNow.current === 'idle' || stateNow.current === 'asleep';
       if (!resting || running.current || isSpeaking() || awaitingYes.current) return;
-      const asks = news.state === 'ask' || news.state === 'confirm';
-      setCaption(news.said);
-      if (!asks) hushAfter.current = turnSeq.current;
-      utter(news.said, asks);
+      const next = waiting.shift();
+      if (!next || Date.now() - next.at > 10 * 60_000) return;
+      setCaption(next.said);
+      if (next.done) doneChime();
+      if (!next.asks) hushAfter.current = turnSeq.current;
+      utter(next.said, next.asks);
       const account = live.current.uid;
       if (account && account !== 'anon') {
-        void transcript.record(account, { said: '', replied: news.said }).then((entries) => {
+        void transcript.record(account, { said: '', replied: next.said }).then((entries) => {
           if (mounted.current) setActivity(entries);
         });
       }
+    };
+    const off = onMacNews((news) => {
+      if (!mounted.current || !news.said) return;
+      // Answered at the Mac: the press it was waiting for here means nothing now.
+      const held = awaitingYes.current;
+      if (held && news.task && news.state !== 'confirm' && held.args.task === news.task) awaitingYes.current = null;
+      if (news.state === 'working') {
+        if (news.speak && stateNow.current === 'idle' && !isSpeaking() && !running.current && !awaitingYes.current) {
+          setCaption(news.said);
+          hushAfter.current = turnSeq.current;
+          utter(`Still on it. ${news.said.replace(/[.!?\s]+$/, '')}.`);
+        }
+        return;
+      }
+      if (news.speak) {
+        waiting.push({
+          said: news.said,
+          asks: news.state === 'ask' || news.state === 'confirm',
+          done: news.state === 'done',
+          at: Date.now(),
+        });
+        sayNext();
+      } else if (news.task && (news.state === 'done' || news.state === 'failed')) {
+        setCaption(news.said);
+        buzz(news.state === 'done' ? 'done' : 'failed');
+        const account = live.current.uid;
+        if (account && account !== 'anon') {
+          void transcript.record(account, { said: '', replied: news.said }).then((entries) => {
+            if (mounted.current) setActivity(entries);
+          });
+        }
+      }
     });
+    const tick = setInterval(sayNext, 3000);
+    return () => {
+      off();
+      clearInterval(tick);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

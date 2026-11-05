@@ -16,7 +16,7 @@ import AVFoundation
 import Speech
 
 enum Permission: CaseIterable {
-  case accessibility, microphone, speech, music, chrome, screen
+  case accessibility, microphone, speech, music, chrome, screen, contacts, messages, notes, disk
 
   var title: String {
     switch self {
@@ -25,7 +25,11 @@ enum Permission: CaseIterable {
     case .speech: return "Speech recognition"
     case .music: return "Control Music"
     case .chrome: return "Control Chrome (for doing things on the web)"
-    case .screen: return "Screen Recording (to see games and pictures in Chrome)"
+    case .screen: return "Screen Recording (to see games and apps)"
+    case .contacts: return "Contacts (to find who you mean)"
+    case .messages: return "Messages (to send texts)"
+    case .notes: return "Notes (to write notes down)"
+    case .disk: return "Full Disk Access (to read your messages)"
     }
   }
 
@@ -38,6 +42,10 @@ enum Permission: CaseIterable {
     case .music: return UserDefaults.standard.bool(forKey: "grove.permission.music") ? true : nil
     case .chrome: return UserDefaults.standard.bool(forKey: "grove.permission.chrome") ? true : nil
     case .screen: return CGPreflightScreenCaptureAccess()
+    case .contacts: return UserDefaults.standard.bool(forKey: "grove.permission.contacts") ? true : nil
+    case .messages: return UserDefaults.standard.bool(forKey: "grove.permission.messages") ? true : nil
+    case .notes: return UserDefaults.standard.bool(forKey: "grove.permission.notes") ? true : nil
+    case .disk: return Inbox.canRead
     }
   }
 
@@ -67,6 +75,12 @@ enum Permission: CaseIterable {
         if ok { UserDefaults.standard.set(true, forKey: "grove.permission.music") } else { Permission.open("Privacy_Automation") }
         done()
       }
+    case .contacts: Permission.ask("Contacts", remember: "contacts", done: done)
+    case .messages: Permission.ask("Messages", remember: "messages", done: done)
+    case .notes: Permission.ask("Notes", remember: "notes", done: done)
+    case .disk:
+      if !Inbox.canRead { Permission.open("Privacy_AllFiles") }
+      done()
     case .screen:
       if !CGRequestScreenCaptureAccess() { Permission.open("Privacy_ScreenCapture") }
       done()
@@ -82,6 +96,15 @@ enum Permission: CaseIterable {
   // Screen Recording: what the page reader cannot see — a crossword's letters,
   // a game drawn on a canvas — Grove can only check by looking at the window.
   // Without it, "done" on a game is a guess. Only Chrome's window is ever taken.
+  /** A harmless question to the app is what makes macOS ask; a refusal opens the pane where it is switched on. */
+  private static func ask(_ app: String, remember key: String, done: @escaping () -> Void) {
+    Script.run("tell application \"\(app)\" to get name") { ok, _ in
+      Log.say("permission: \(key) \(ok ? "allowed" : "not allowed")")
+      if ok { UserDefaults.standard.set(true, forKey: "grove.permission.\(key)") } else { open("Privacy_Automation") }
+      done()
+    }
+  }
+
   static func open(_ pane: String) {
     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
       NSWorkspace.shared.open(url)

@@ -83,8 +83,14 @@ function SettingsBody() {
   // Memory moved to Sparks, where the standing instructions already live: a
   // spark and a fact are the same idea from different ends, and keeping the
   // list somewhere you pass anyway beats burying it in Settings.
-  const { persona, updatePersona, armed, route, activity, fillDemo } = useAgent();
+  const { persona, updatePersona, armed, route, activity, fillDemo, clearDemo, demoIsIn } = useAgent();
   const [demo, setDemo] = useState<'idle' | 'filling' | 'done'>('idle');
+  // Not behind developer mode: anyone with the sample life in their memory
+  // needs a way out of it, and turning developer mode off does not remove it.
+  const [demoIn, setDemoIn] = useState(false);
+  useEffect(() => {
+    void demoIsIn().then(setDemoIn);
+  }, [demoIsIn, demo]);
   const dev = useDevMode();
   const colour = fieldColour(persona.sky);
   const gradientId = `grove-name-${colour.key}`;
@@ -552,6 +558,18 @@ function SettingsBody() {
           />
         </Card>
       </Section>
+      ) : null}
+
+      {demoIn ? (
+        <Section label="Sample memory">
+          <Card style={{ paddingVertical: 2 }}>
+            <Row
+              label="Clear the demo memory"
+              hint="Sample facts from the demo are mixed in with yours, like the weight loss and the Stoics. This removes only those exact lines."
+              onPress={() => void clearDemo().then(() => setDemoIn(false))}
+            />
+          </Card>
+        </Section>
       ) : null}
 
       <Section label="Does it all work?">

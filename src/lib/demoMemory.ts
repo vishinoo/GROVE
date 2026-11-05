@@ -256,6 +256,39 @@ const LEARNED: Learned = {
 const OLD_FACT_KEYS = ['lego', 'city', 'hours', 'taste', 'hardware', 'resumes', 'm&a'];
 const OLD_ENTITIES = ['Lego', 'Edmonton', 'Orb lab', 'J09', 'Grove Glass', 'M&A interview prep', 'Apple', 'Meta'];
 
+/** Sample lines that happen to be true of the author, and stay when the rest goes. */
+const KEEP_KEYS = new Set(['name', 'study', 'building']);
+const KEEP_ENTITIES = new Set(['Grove']);
+
+function isDemoFact(f: { key: string; value: string; subject: string }): boolean {
+  const same = (l: Line) => l.value === f.value && (l.subject ?? 'me') === f.subject;
+  return FACTS.some(same) || GOALS.some(same);
+}
+
+/**
+ * Whether the sample life is mixed in with a real one. Filled in on a real
+ * account it read back as fact: "you're down 6 kg since September", to someone
+ * who is not. Matched on the exact sample words, so anything edited, or said
+ * for real, is never mistaken for it.
+ */
+export async function hasDemoMemory(uid: string): Promise<boolean> {
+  return (await loadFacts(uid)).some((f) => isDemoFact(f) && !KEEP_KEYS.has(f.key));
+}
+
+export async function clearDemoMemory(uid: string): Promise<void> {
+  for (const fact of await loadFacts(uid)) {
+    if (isDemoFact(fact) && !KEEP_KEYS.has(fact.key)) await forget(uid, fact.id);
+  }
+  const names = new Set((LEARNED.entities ?? []).map((e) => e.name));
+  const titles = new Set((LEARNED.episodes ?? []).map((e) => e.title));
+  await updateLife(uid, (life) => {
+    const cleared = life.entities
+      .filter((entity) => names.has(entity.name) && !KEEP_ENTITIES.has(entity.name))
+      .reduce((next, entity) => forgetEntity(next, entity.id), life);
+    return { ...cleared, episodes: cleared.episodes.filter((ep) => !titles.has(ep.title)) };
+  });
+}
+
 export async function fillDemoMemory(uid: string): Promise<void> {
   for (const old of await loadFacts(uid)) {
     if (old.subject === 'me' && OLD_FACT_KEYS.includes(old.key)) await forget(uid, old.id);

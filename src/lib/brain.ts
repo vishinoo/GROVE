@@ -32,6 +32,7 @@ import { planFrom } from './plan';
 import type { GroveContext, GroveReply, Turn } from './grove';
 import { asToolResults, asUserTurn, lastModelTrouble, lightAfterAction, lightFallback, toolTurn, type ToolHistory } from './lightModel';
 import { macContext, macReachable } from './mac';
+import { readingContext } from './reading';
 import { factFrom, memoryData, MEMORY_RULES } from './memory';
 import { lately, loadLife, whoIsWho } from './life';
 import { rhythmLines, rhythms } from './rhythms';
@@ -150,6 +151,8 @@ const TOOL_RULES = `How to use your tools:
   - The context says whether the Mac is reachable and what it was last doing. A sentence that carries on with that work ("order this instead", "finish the rest", "now the next one", "make it two") stays on the Mac: pass it as answer with that task id, written out in full rather than as "this".
   - If the Mac is not reachable and the job needs it, do not call it. Say so in a sentence of your own about this job and what would let you do it, and if a phone tool gets them there another way, use that.
 - Ordering: food goes to the food tool (Uber Eats, or DoorDash if they say so); things to buy go to the shopping tool (Amazon unless they name Instacart, Walmart or Costco) — unless they are carrying on with ordering already under way on the Mac, which continues there. "My usual" is in what you know about them above; if it is not there, ask_back what their usual is — do not search for it.
+- Reading aloud: "read me this" is the read-your-screen tool. While the context says something is being read, "keep going", "go back", "again" or "stop" is the reading tool, and "that" or "this" means the passage they were just hearing: a note, a flashcard, a search or a question about it works from that passage, written out in full. After doing what they asked mid-reading, do not carry on reading unless they say so.
+- Before a job with real setup, work out what would change how you do it and is theirs to decide, then ask_back all of it in one short line naming the options: a game is who plays and how ("You or me playing, against a bot or someone online, and how long a game?"), a film is the mood and where they watch. Skip anything they said, or told you before. When the answer is a lasting preference, keep it with the remember tool so you do not ask again. If nothing is open, do not ask.
 - When you do not understand what they mean — a word you do not know, a nickname, slang, a placeholder, a sentence that could be several things — ask_back one short question about it. Never reach for the nearest tool to have done something: an action they did not ask for is worse than a question.
 - For sending, booking, ordering, calling or messaging, just call the tool. The app asks the person to confirm before anything happens, so do not ask them yourself.
 - ALWAYS write a reply alongside a tool call. A tool call with no words is the one thing you must never send: the app then has to go and ask a second time what you meant to say, which costs the person a second of silence on every single request.
@@ -293,7 +296,7 @@ function unique(line: string, index: number, all: string[]): boolean {
 const PLUMBING = new Set(['contact.find', 'doc.recent']);
 
 /** The abilities that drive the Mac through the link (mac.ts), as opposed to the older bridge. */
-const MAC_HANDS = new Set(['mac.use', 'mac.music', 'mac.open']);
+const MAC_HANDS = new Set(['mac.use', 'mac.music', 'mac.open', 'mac.read', 'mac.note', 'mac.inbox']);
 
 function fedInto(read: RanTool, args: Record<string, string>): boolean {
   if (PLUMBING.has(read.ability.id)) return true;
@@ -635,7 +638,9 @@ async function runTurn(
   const sum = calculate(userText);
   // Whether the Mac can be reached and what it was just doing: a few lines,
   // no I/O, and the reason "order this instead" needs no "on my Mac".
-  const situation = contextFor(context, [roster, usual, friction, macContext()].filter(Boolean));
+  // What is being read aloud and where it stopped, so "a note on that" or
+  // "put that in Quizlet" has a passage to work from (reading.ts).
+  const situation = contextFor(context, [roster, usual, friction, macContext(), readingContext()].filter(Boolean));
   const contents: unknown[] = [
     ...(historyFor(history) as unknown[]),
     asUserTurn(

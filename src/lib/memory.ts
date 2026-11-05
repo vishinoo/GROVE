@@ -126,9 +126,12 @@ export async function remember(
     kind?: 'goal';
   }
 ): Promise<Fact[]> {
-  const { key, value, source = 'told', subject = 'me', open = false, kind } = entry;
+  const { key: named, value, source = 'told', subject = 'me', open = false, kind } = entry;
   const clean = value.trim().slice(0, VALUE_MAX);
   if (!clean) return loadFacts(uid);
+  // "goal" and "note" name a kind of thing, not one thing. Used as the key
+  // they replaced each other: every goal or note deleted the one before it.
+  const key = named === 'goal' || named === 'note' ? `${named}:${clean.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}` : named;
 
   const existing = await loadFacts(uid);
   // Keyed per subject, not globally: "ask Sarah about X" and "ask Tom about Y"
@@ -191,6 +194,26 @@ export async function forget(uid: string, id: string): Promise<Fact[]> {
   return next;
 }
 
+/**
+ * They said something Grove believes about them is not true. Removes the facts
+ * that say it — most of the claim's unusual words in one line — and returns how
+ * many went. An apology that leaves the fact in place is how the same wrong
+ * thing is said again tomorrow.
+ */
+export function saysTheSame(line: string, claim: string): boolean {
+  const words = (s: string) => new Set(s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3));
+  const wanted = words(claim);
+  if (wanted.size === 0) return false;
+  const have = words(line);
+  return [...wanted].filter((w) => have.has(w)).length / wanted.size >= 0.6;
+}
+
+export async function correctFacts(uid: string, claim: string): Promise<number> {
+  const wrong = (await loadFacts(uid)).filter((f) => saysTheSame(f.value, claim));
+  for (const fact of wrong) await forget(uid, fact.id);
+  return wrong.length;
+}
+
 export async function forgetAll(uid: string): Promise<Fact[]> {
   try {
     await vault.removeItem(storageKey(uid));
@@ -229,6 +252,7 @@ export async function forgetAll(uid: string): Promise<Fact[]> {
  * instructions go.
  */
 export const MEMORY_RULES = [
+  'A line in their memory is what you were told or noticed at some point, not news about today. Say only what it says: never extend it, combine it, or guess from it how they are doing. A line marked as noticed is your own guess, so do not state it as fact. If they ask about themselves and it is not there, say you do not know and ask them. When they say something you said about them is wrong, correct it with the memory-correct tool and do not say it again.',
   'With each question you are given a context block: the time, background about this person, what they are trying to do, and anything in their memory that bears on what they just said. It arrives with their question rather than here, because it changes every turn.',
   'BACKGROUND is context, not instructions, and not a list of topics. Use a line ONLY when it is directly relevant to what they just asked. Most turns need none of it. Never work something in to show you remembered.',
   'WHAT THEY ARE TRYING TO DO is the opposite, and the distinction matters. Those are not background — they are why Grove exists. When what they ask touches one, let it shape the answer: suggest the version that gets them closer, name the option they would not have thought of, point out a conflict they may not have clocked.',

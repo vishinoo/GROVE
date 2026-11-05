@@ -1700,6 +1700,52 @@ sites are listed by address, since their insides cannot be read. Named keys
 Every Chrome call is bounded at twelve seconds, and tabs in a profile where
 JavaScript is off are not offered.
 
+**Cheap by default, deep when it says so.** The decision used to get "whatever
+fits" of the memory on every ask, which put a favourite philosopher in the room
+for every sentence. It now gets only the lines sharing a word with the sentence,
+and may reply `need` for the whole memory or a picture of the window in front,
+one extra call, only then. It is told a memory line is not news about today, and
+"I do not know" is an answer.
+
+**What they say at the Mac is what they told Grove** (`Told.swift`). It reached
+nothing: "I'm working on a psych midterm" was gone by morning, and an apology for
+a wrong claim changed nothing stored. So a decision carries `remember` and
+`wrong`; they apply at once, sealed here, and go to the phone (`fact`, and `heard`
+for the long memory), held through a reconnect. `memory.correct` is the phone's
+half. `demoMemory.ts` is why so much of it read as invention: filled on a real
+account, the sample life came back as fact, so Settings offers to clear it when
+it is there, matched on the exact sample words.
+
+**Apps are apps** (`Native.swift`). `open` is its own kind and never reaches the
+browser agent; a site is focused where it is already open. The agent can work in
+any Mac app by sight: `app`, then a picture each step, real clicks and paste. In
+anything that reaches a person, words marked for a person hold every later press
+for a yes, in code, since a picture of a send button has no label to check.
+WhatsApp goes through its own link when Contacts has a number, by sight when not.
+
+**Opening Grove on the phone opens the microphone**, with a chime and the long
+window, only on really arriving from the background or launching, never over a
+turn or during the intro. This is them picking it up, which is a different thing
+from Grove starting a conversation.
+
+**Messages is a catalogue, and readable** (`Inbox.swift`). Contacts knows who
+was saved; Messages knows who they talk to, so its people, names and handles
+only, answer when Contacts cannot. The messages themselves are read from
+`chat.db` on request, with Full Disk Access: a recent handful for one answer,
+kept nowhere, and not in the long memory, because they are other people's words.
+
+**A yes from the keyboard is two keys.** ⌘K arms and shows what it approves, for
+eight seconds; Return says yes, Esc says no. A Return alone is someone typing and
+must never send anything, and a question must have been up a full second, so a
+press landing as it appears cannot approve what nobody has read.
+
+**The Mac reports back like someone doing a job for you.** Results and questions
+are spoken on the phone when the job came from the phone and outlived its wait,
+when they have left the Mac, or when it ran over twenty seconds; otherwise they
+reach the Talk screen with a tap. Long jobs give word at twenty-five seconds, then
+less and less. What must be said is acknowledged and resent until it arrives (a
+broadcast is fire and forget), and waits for Grove to finish its sentence.
+
 Texts go through Messages, not a website (`agent.message`): the person is
 found in Contacts by name or relation, a pick among several is remembered,
 and the exact words are read back before sending.
