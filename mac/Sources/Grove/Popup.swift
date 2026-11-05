@@ -13,9 +13,39 @@ import AppKit
 enum Popup {
   private static var panel: NSPanel?
   private static var timer: Timer?
+
+  /*
+    How often a face may appear, enforced here because here is the only place
+    every one of them passes through.
+
+    The rule was written down as "one a minute at most, never over a reaction
+    already up" and lived in `reactToPhone` — one of five callers. A remark,
+    a song, a finished task and any answer carrying a `gif` all reached
+    `react()` directly with no spacing at all, which is why saying hello a few
+    times produced a wall of them.
+
+    A window is the thing that knows whether a window is already up, so the
+    spacing belongs to the window rather than to each of the things that
+    might want one.
+  */
+  private static var lastShown = Date.distantPast
+  private static let apart: TimeInterval = 60
+
+  /** Whether a face would be allowed right now. Asked before the search, to save it. */
+  static var welcome: Bool {
+    panel == nil && Date().timeIntervalSince(lastShown) > apart
+  }
   static let seconds: TimeInterval = 12
 
   static func show(_ address: String) async {
+    // The gate, on the way in rather than at each caller. A reaction still up
+    // is never replaced: the second one would be the first one being
+    // interrupted, which is the opposite of what a reaction is for.
+    guard welcome else {
+      Log.say("gif: not shown — \(panel == nil ? "too soon after the last" : "one is already up")")
+      return
+    }
+    lastShown = Date()
     guard let url = URL(string: address),
           let (data, _) = try? await URLSession.shared.data(from: url),
           let image = NSImage(data: data), image.size.width > 0 else { Log.say("gif: could not load \(address.prefix(80))"); return }

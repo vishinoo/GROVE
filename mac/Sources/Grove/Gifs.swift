@@ -46,19 +46,32 @@ enum Gifs {
   static func find(_ words: String) async -> String? {
     let q = words.trimmingCharacters(in: .whitespacesAndNewlines)
     guard on, !q.isEmpty, let query = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return nil }
+    // Asked before the request rather than after it: a face that is not
+    // going to be shown is not worth a round trip to GIPHY.
+    guard await Popup.welcome else { Log.say("gif: skipped the search — too soon, or one is up"); return nil }
     let info = Bundle.main.infoDictionary ?? [:]
     func key(_ name: String) -> String? { (info[name] as? String).flatMap { $0.isEmpty ? nil : $0 } }
 
     if let giphy = key("GroveGiphyKey") {
       for attempt in attempts(q) {
         guard let term = attempt.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { continue }
-        let root = await get("https://api.giphy.com/v1/gifs/search?api_key=\(giphy)&q=\(term)&limit=4&rating=pg-13")
+        // `lang=en` because the search is written in English and the results
+        // were not: without it a weak query comes back with whatever is
+        // popular anywhere, which is most of how a hello became a stranger.
+        let root = await get("https://api.giphy.com/v1/gifs/search?api_key=\(giphy)&q=\(term)&limit=4&rating=pg-13&lang=en")
         let urls = (root?["data"] as? [[String: Any]])?.compactMap {
           (($0["images"] as? [String: Any])?["fixed_height"] as? [String: Any])?["url"] as? String
         } ?? []
-        // The best two rather than any of four: the third and fourth are
-        // where a search for "head bob" starts returning a dog in a hat.
-        if let url = urls.prefix(2).randomElement() { Log.say("gif: \"\(attempt)\" from GIPHY"); return url }
+        /*
+          The first result for the strongest query that found anything.
+
+          It was one of the best two, at random, which is a reasonable way to
+          stop the same face every time and a bad one once the query has
+          degraded: a weak query's second result is a coin toss on something
+          nobody searched for. The ladder already provides the variety, by
+          trying the specific phrase before the general one.
+        */
+        if let url = urls.first { Log.say("gif: \"\(attempt)\" from GIPHY"); return url }
       }
       Log.say("gif: nothing for \"\(q)\"")
       return nil
@@ -69,7 +82,7 @@ enum Gifs {
         let m = r["media_formats"] as? [String: Any]
         return ((m?["gif"] ?? m?["tinygif"]) as? [String: Any])?["url"] as? String
       } ?? []
-      if let url = urls.randomElement() { Log.say("gif: \"\(q)\" from Tenor"); return url }
+      if let url = urls.first { Log.say("gif: \"\(q)\" from Tenor"); return url }
       Log.say("gif: nothing for \"\(q)\"")
     }
     return nil
@@ -86,8 +99,23 @@ enum Gifs {
   static func attempts(_ q: String) -> [String] {
     let filler: Set<String> = ["a", "an", "the", "to", "in", "at", "on", "of", "with", "while", "for", "and", "into", "from", "by", "his", "her", "their", "my", "your"]
     let words = q.lowercased().split(separator: " ").map(String.init).filter { !filler.contains($0) }
-    let tries = [q, words.joined(separator: " "), words.prefix(3).joined(separator: " "), words.prefix(2).joined(separator: " "), words.first ?? ""]
-    return tries.reduce(into: [String]()) { if !$1.isEmpty && !$0.contains($1) { $0.append($1) } }
+    /*
+      Never down to one word.
+
+      The ladder used to end at `words.first`, so a search that found nothing
+      finished by asking GIPHY for "hello" — and a one-word search on a GIF
+      site is not a search, it is the front page. That is where the Korean
+      drama clips, the stickers and the unrelated people came from: not a bad
+      reaction, a query with nothing in it to be wrong about.
+
+      Two words is the floor. A reaction needs an action and a subject, and
+      if two words find nothing then nothing is the right answer — the card
+      is complete without a face, and no face at all beats a stranger.
+    */
+    let tries = [q, words.joined(separator: " "), words.prefix(3).joined(separator: " "), words.prefix(2).joined(separator: " ")]
+    return tries
+      .filter { $0.split(separator: " ").count >= 2 }
+      .reduce(into: [String]()) { if !$1.isEmpty && !$0.contains($1) { $0.append($1) } }
   }
 
   private static func get(_ address: String) async -> [String: Any]? {

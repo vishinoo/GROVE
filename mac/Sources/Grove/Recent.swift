@@ -37,14 +37,32 @@ enum Recent {
     lines[lines.count - 1] = Line(at: Date(), text: lines[lines.count - 1].text + " — \(outcome.prefix(220))")
   }
 
-  /** The last few exchanges, oldest first, with how long ago. Empty when nothing is recent. */
+  /**
+    The last few exchanges, oldest first, with how long ago. Empty when
+    nothing is recent.
+
+    **It says what it is for.** A bare list of what Grove just did reads as a
+    menu, and a model that has not understood the sentence in front of it
+    will take something off that menu rather than admit it: a misheard
+    "goon session" became whatever the last task was, because the last task
+    was the most available thing in the prompt. The list exists so that
+    "this", "that one" and "again" mean something, and for nothing else.
+
+    The same lesson as the phone's long memory, from the other direction.
+    There the framing had taught the model that memory was wallpaper; here
+    the absence of any framing taught it that history was instructions.
+  */
   static var text: String {
     lock.lock(); defer { lock.unlock() }
     trim()
-    return lines.suffix(5).map { line in
+    let recent = lines.suffix(5).map { line in
       let mins = Int(Date().timeIntervalSince(line.at) / 60)
       return "\(mins < 1 ? "just now" : "\(mins) min ago"): \(line.text)"
-    }.joined(separator: "\n")
+    }
+    guard !recent.isEmpty else { return "" }
+    return ([
+      "What has just happened, so that \"this\", \"that one\" and \"again\" mean something. It is not a list of things to do and not a pattern to copy: if what they just said does not make sense on its own, ask them what they mean — never reach for one of these instead.",
+    ] + recent).joined(separator: "\n")
   }
 
   private static func trim() {
@@ -74,6 +92,6 @@ extension Thinking {
     is obvious, cheap to undo, or already said).
   */
   static let askRule = """
-  Ask before doing only when the request leaves open a choice that changes what you would do, that is theirs to make, and that would waste their time or money to get wrong: who does it (a game: do they want to play it themselves, or should you?), which of a few genuinely different options, anything that spends money. Ask once, in one short spoken line that names the options, the way a friend would: "Want to play it yourself, or should I take this one?", "The live version or the studio one?". Never ask what is obvious, cheap to change afterwards, already said, or already answered in what just happened; never ask whether to carry on.
+  Before a job with real setup, work out what would change how you do it and is theirs to decide, the way someone good at the job would before starting: for a game, who plays and how (you or them, against a bot or a person, how long); for a film, what they are in the mood for and where they watch; for an email, who it goes to if that is not clear; anything that spends money. Ask all of it at once, in one short spoken line that names the options, so there is one question and not three: "You or me playing, against a bot or someone online, and how long a game?". Then get on with it. Skip anything already settled by what they said, by what they told you before, or by what just happened. Never ask what is obvious or cheap to change afterwards, never ask whether to carry on, and if nothing is open, do not ask at all.
   """
 }

@@ -1633,6 +1633,84 @@ section('The rest of what they asked for');
  * elsewhere untrue without touching it. The other two were the music and the
  * unprompted microphone.
  */
+/**
+ * A reaction is a reaction, not a slideshow.
+ *
+ * Two faults, both of the shape this file keeps finding: a rule written down
+ * once and enforced in one of the places it had to hold.
+ *
+ *   ONE A MINUTE, IN ONE OF FIVE PLACES. The spacing lived in `reactToPhone`.
+ *   A remark, a song, a finished task and any answer carrying a `gif` all
+ *   reached `react()` directly with no spacing at all, so saying hello a few
+ *   times produced a wall of them. It belongs to the window, which is the
+ *   only thing every reaction passes through and the only thing that knows
+ *   whether one is already up.
+ *
+ *   A ONE-WORD SEARCH IS NOT A SEARCH. The fallback ladder ended at the
+ *   first word, so anything that found nothing finished by asking GIPHY for
+ *   "hello" — which is the front page, not a reaction. That is where the
+ *   strangers came from: not a bad choice of face, a query with nothing in
+ *   it to be wrong about.
+ */
+section('A reaction is a reaction, not a slideshow');
+{
+  const gifs = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Gifs.swift'), 'utf8');
+  const popup = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Popup.swift'), 'utf8');
+
+  check(
+    /static var welcome: Bool/.test(popup) && /panel == nil && Date\(\)\.timeIntervalSince\(lastShown\) > apart/.test(popup),
+    'the window decides when a face may appear',
+    'every caller passes through it; none of them can forget the spacing'
+  );
+  check(
+    /guard welcome else \{/.test(popup) && /lastShown = Date\(\)/.test(popup),
+    'and refuses one that is too soon, or on top of one already up'
+  );
+  check(
+    /guard await Popup\.welcome else/.test(gifs),
+    'and the search is skipped when nothing could be shown',
+    'a face that will not appear is not worth a round trip'
+  );
+
+  /*
+   * The floor on a query. Asserted on the behaviour rather than on the
+   * source, because "never one word" is the whole rule and a reader of the
+   * ladder cannot tell what it bottoms out at.
+   */
+  const ladder = between(gifs, 'static func attempts(', '\n  private static func get(', { min: 300, max: 2600 });
+  check(ladder !== null, 'the search ladder is where it is expected to be');
+  check(
+    ladder !== null && /count >= 2/.test(ladder),
+    'no search is ever made on a single word',
+    'a one-word search on a GIF site is the front page, not a reaction'
+  );
+  check(
+    ladder !== null && !/words\.first \?\? ""/.test(ladder),
+    'and the ladder no longer bottoms out at one'
+  );
+  check(/lang=en/.test(gifs), 'the search asks for the language it was written in');
+  check(
+    !/urls\.randomElement\(\)/.test(gifs) && !/urls\.prefix\(2\)\.randomElement\(\)/.test(gifs),
+    'and takes the best result rather than a lucky dip through a weak query'
+  );
+
+  /*
+   * And what just happened is context, never a menu. A model that has not
+   * understood the sentence in front of it will take something off a bare
+   * list rather than admit it — which is how a misheard phrase became
+   * whatever the last task was.
+   */
+  const recent = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Recent.swift'), 'utf8');
+  check(
+    /not a list of things to do and not a pattern to copy/.test(recent),
+    'what just happened says outright that it is not a list of things to do'
+  );
+  check(
+    /ask them what they mean/.test(recent),
+    'and that a sentence which makes no sense is asked about, not matched to an old task'
+  );
+}
+
 section('A press is never swallowed');
 {
   const agent = fs.readFileSync(path.join(ROOT, 'src/context/agent.tsx'), 'utf8');
