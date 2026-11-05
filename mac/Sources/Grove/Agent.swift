@@ -445,6 +445,7 @@ final class Agent {
       // which the reader already names square by square.
       var picture: Data?
       if !task.desk.isEmpty {
+        await Browser.waitForAGap()
         _ = await Native.focus(task.desk)
         if let shot = await Browser.shot(app: task.desk) {
           picture = shot.jpeg
@@ -454,8 +455,7 @@ final class Agent {
         }
         task.look = false
       } else if !task.tab.isEmpty, page.error == nil, task.look || (page.visual && page.chess.isEmpty) {
-        await Browser.front()
-        if let shot = await Browser.shot() {
+        if let shot = await Browser.borrow({ await Browser.shot() }) {
           picture = shot.jpeg
           task.shotBounds = shot.bounds
         } else if task.look {
@@ -613,7 +613,6 @@ final class Agent {
         let picked = page.tabs[n]
         task.tab = picked.ref
         Browser.tab = picked.ref
-        await Browser.front()
         task.history.append("Took their tab: \(picked.title.prefix(60)) (\(picked.url.prefix(80)))")
       case "move":
         let from = (move["from"] as? String ?? "").lowercased(), to = (move["to"] as? String ?? "").lowercased()
@@ -638,8 +637,7 @@ final class Agent {
         }
         // A point on the picture: games and players have no element to press.
         if n < 0, let x = Agent.number(move["x"]), let y = Agent.number(move["y"]), let b = task.shotBounds {
-          await Browser.front()
-          await Browser.realClick(CGPoint(x: b.minX + x * b.width, y: b.minY + y * b.height))
+          await Browser.borrow { await Browser.realClick(CGPoint(x: b.minX + x * b.width, y: b.minY + y * b.height)) }
           task.history.append("Clicked the picture at \(x), \(y)")
           task.look = true
           try? await _Concurrency.Task.sleep(nanoseconds: 1_000_000_000)
@@ -653,8 +651,7 @@ final class Agent {
         // then is it pressed for real, so a click that worked is never
         // doubled — and never a link, which may have opened a tab instead.
         if r == "ok", !(await Browser.changed()), !(await Browser.isLink(n)), let point = await Browser.screenPoint(of: n) {
-          await Browser.front()
-          await Browser.realClick(point)
+          await Browser.borrow { await Browser.realClick(point) }
           r = "ok (pressed with the mouse; the page ignored a scripted click)"
           try? await _Concurrency.Task.sleep(nanoseconds: 600_000_000)
         }
@@ -680,11 +677,11 @@ final class Agent {
         // empty. When the page did not react and the box is not a plain field
         // holding the text, it is clicked and typed into for real.
         if !(await Browser.changed()), await Browser.ignored(n, text), await Browser.hidden(n) {
-          if let point = await Browser.screenPoint(of: n) {
-            await Browser.front()
-            await Browser.realClick(point)
+          let point = await Browser.screenPoint(of: n)
+          await Browser.borrow {
+            if let point { await Browser.realClick(point) }
+            await Browser.realType(text)
           }
-          await Browser.realType(text)
           r = "typed with the keyboard, because the page ignored text set by a script"
         } else if Browser.squash(await Browser.contents(n)) != Browser.squash(text), let point = await Browser.screenPoint(of: n) {
           // The box does not say what it should. Rich editors (Instagram's,
@@ -692,9 +689,10 @@ final class Agent {
           // script replacing it, which is how revising a message became the old
           // words, the new words and a run of Backspaces. So it is done the way
           // a person does it: click, select all, delete, paste.
-          await Browser.front()
-          await Browser.realClick(point)
-          await Browser.replaceByHand(text)
+          await Browser.borrow {
+            await Browser.realClick(point)
+            await Browser.replaceByHand(text)
+          }
           r = "replaced with the keyboard; it now reads: \(String(await Browser.contents(n).prefix(200)))"
         }
         if (move["enter"] as? Bool) == true { await Browser.pressReturn() }
@@ -862,6 +860,7 @@ final class Agent {
   - When "So far" says they said yes and it was pressed, that step is finished. Look at the page: if the goal is reached, reply done. Never press, type or send it again.
   - Games and puzzles (Wordle and the like): read the board's states carefully before every guess. A letter marked correct stays in that exact position; present means it is in the word but not in that position; absent means it is not in the word at all, so never use it again. Work out every constraint, then guess a real English word that satisfies all of them. One guess per move: keys with the whole word and enter true. Never press an on-screen keyboard key by key. Close any help or welcome dialog first.
   - Chess: "play chess" means start a game and play it to the end, not stop once it has started. The Chess section lists every piece by square and which colour is yours. On your turn, think, then make one strong, sound move with move; the app then waits for their reply. Find whose turn it is from the move list in the text and from which pieces have moved. While waiting for an opponent to join or to move, wait. Never resign or offer a draw unless asked. If a promotion choice appears, pick the queen. When the game is over, done with the result in a sentence.
+  - Options on an item (size, sides, extras, how many): each is listed with its words and whether it is checked. Pick exactly what they chose, then read the list again to see every one says checked before adding it; a choice that did not take is clicked again or by its words. The yes for adding names every option picked.
   - Food and shopping: if they did not name the exact item or restaurant, ask, offering the best two or three by name and price ("Smash Burger Co, $14, or Five Guys, $16?"). Never use quick-add on something they did not choose. Ignore existing carts unless they mention them.
   - Food: Uber Eats is https://www.ubereats.com/ and searches as https://www.ubereats.com/search?q=QUERY; DoorDash is https://www.doordash.com/ and https://www.doordash.com/search/store/QUERY. Their address and card are already on the account, so never type either. The order of it is: find the place, open it, find the item on its menu, add it (that add is a confirm, with the item and price in the summary), open the cart, then confirm the final button. If it asks for a tip or a delivery time, take the default. If the address shown is not one of theirs, stop and ask rather than changing it.
   - Shopping: Amazon searches as https://www.amazon.com/s?k=QUERY. Pick from the results page by what they asked for, not by what is sponsored first, and say which one in the add-to-cart summary.
@@ -908,8 +907,7 @@ final class Agent {
   private static func picture(app: String = "") async -> Data? {
     guard CGPreflightScreenCaptureAccess() else { return nil }
     if !app.isEmpty { return await Browser.shot(app: app)?.jpeg }
-    await Browser.front()
-    return await Browser.shot()?.jpeg
+    return await Browser.borrow { await Browser.shot()?.jpeg }
   }
 
   /** Whether the page really shows the goal reached, judged by a reader that did not do the work. */
@@ -1335,11 +1333,78 @@ enum Browser {
   */
   static var tab = "active tab of front window"
 
+  /**
+    Grove's own Chrome window, made once and kept.
+
+    It used to open a tab in whatever window was in front — which is their
+    window, with their tabs in it, and in Chrome a new tab becomes the active
+    one. So starting a job took over the thing they were reading, and every
+    later step scrolled and clicked inside the window they were trying to
+    use. The work was visible, which was the intention, and in the way, which
+    was not.
+
+    A window of its own fixes the half that matters: their tabs are never
+    touched, their scroll positions survive, and Grove's work sits in a
+    window they can watch, ignore, or move to another desktop. **A tab they
+    chose is still theirs** — the model may take one with `tab` when the job
+    belongs there ("play this in the YouTube I already have open"), and that
+    is a different thing from Grove helping itself to the front window.
+
+    Kept between tasks, because making a new window for every sentence is the
+    tab problem again with bigger rectangles.
+
+    The profile check survives from the tab version and still earns its
+    place: a new window inherits the front window's profile, and a profile
+    with JavaScript from Apple Events switched off is one Grove cannot read,
+    so the window would be useless. If the new one cannot be read, it falls
+    back to a tab in a window that can.
+  */
+  nonisolated(unsafe) static var ownWindow = ""
+
   static func newTab() async {
-    let (ok, out) = await run("""
+    // Made with the screen borrowed: a new Chrome window arrives in front,
+    // and without this it stays there, over whatever they were doing.
+    let (ok, out) = await borrow {
+      await run("""
+      tell application "Google Chrome"
+        set made to missing value
+        try
+          set made to window id \(ownWindow.isEmpty ? "-1" : ownWindow)
+        end try
+        if made is missing value then set made to (make new window)
+        try
+          with timeout of 3 seconds
+            execute active tab of made javascript "1"
+          end timeout
+          if (count of tabs of made) is 1 and (URL of active tab of made) is in {"chrome://newtab/", "about:blank", ""} then
+            return ((id of made) as string) & "," & ((id of active tab of made) as string)
+          end if
+          set t to make new tab at end of tabs of made
+          return ((id of made) as string) & "," & ((id of t) as string)
+        on error msg
+          if msg contains "turned off" then return "noscript"
+          set t to make new tab at end of tabs of made
+          return ((id of made) as string) & "," & ((id of t) as string)
+        end try
+      end tell
+      """)
+    }
+    if ok, out != "noscript" {
+      let ids = out.split(separator: ",")
+      if ids.count == 2 {
+        ownWindow = String(ids[0])
+        tab = "tab id \(ids[1]) of window id \(ids[0])"
+        try? await _Concurrency.Task.sleep(nanoseconds: 300_000_000)
+        return
+      }
+    }
+    // Grove's own window cannot be read — the profile it inherited has
+    // JavaScript from Apple Events off. A tab in one that can be read is
+    // worse for them and better than not working.
+    Log.say("agent: Grove's own window is unreadable, falling back to a tab in theirs")
+    ownWindow = ""
+    let (ok2, out2) = await run("""
     tell application "Google Chrome"
-      -- A window Grove can work in: the front one unless that is a profile
-      -- with JavaScript from Apple Events off, where a new tab is useless.
       set w to front window
       repeat with c in windows
         try
@@ -1359,9 +1424,120 @@ enum Browser {
       return ((id of w) as string) & "," & ((id of t) as string)
     end tell
     """)
-    let ids = out.split(separator: ",")
-    tab = ok && ids.count == 2 ? "tab id \(ids[1]) of window id \(ids[0])" : "active tab of front window"
+    let ids = out2.split(separator: ",")
+    tab = ok2 && ids.count == 2 ? "tab id \(ids[1]) of window id \(ids[0])" : "active tab of front window"
     try? await _Concurrency.Task.sleep(nanoseconds: 300_000_000)
+  }
+
+  /** When Grove itself last posted a click or a key press. See `handsIdle`. */
+  nonisolated(unsafe) static var lastPosted = Date.distantPast
+
+  /**
+    How long since **they** last touched the keyboard or the mouse.
+
+    `kCGAnyInputEventType` is every kind of input at once, and the obvious
+    reading of it — the one written here first — is that it measures their
+    hands. It does not. **A synthetic event counts.** Measured: 72 seconds of
+    genuine stillness, one key posted by Grove, and the answer came back 0.6.
+
+    Left like that it would have been self-defeating in the quietest way: the
+    only thing reliably resetting the gap Grove waits for would be Grove's
+    own last click, so every real click would wait a second and a half for
+    itself, and the feature would read as Grove being slow rather than as
+    Grove being polite.
+
+    So the last event's moment is compared against the last one Grove posted,
+    and if they are the same moment it is Grove's — which says nothing about
+    whether anybody's hands are busy, so it does not count as busy. The
+    window is small on purpose: if they typed inside it the reading is
+    theirs, and waiting when it was not necessary costs a second, while not
+    waiting when it was costs them their sentence.
+  */
+  static func handsIdle() -> Double {
+    let idle = Double(CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: CGEventType(rawValue: ~0) ?? .null))
+    let lastEventAt = Date().addingTimeInterval(-idle)
+    if abs(lastEventAt.timeIntervalSince(lastPosted)) < 0.4 { return .greatestFiniteMagnitude }
+    return idle
+  }
+
+  /**
+    The screen, borrowed for as long as a real click or a picture needs it,
+    and given straight back.
+
+    Most of a run never comes here: a click or a key sent into the tab needs
+    nothing in front and costs nothing. What does need the screen is the
+    fallback — a page that ignores a scripted click, a game drawn on a
+    canvas, a picture of the window — and that is a real mouse and real keys,
+    which go wherever the system is pointing. So they have to point here.
+
+    Two things make that survivable rather than infuriating. **It waits for a
+    gap.** Taking the keyboard out from under somebody mid-sentence puts
+    their words in Grove's window, and the cost of that is not a lost
+    keystroke, it is having to go back and find what it broke. A second and a
+    half of stillness is the signal, and typing has one constantly.
+
+    **And it gives the focus back**, to whatever app was in front, including
+    which Chrome window. Before this, one real click left Chrome in front for
+    the rest of the task, and the next forty scripted steps — which needed
+    nothing — looked exactly like Grove hogging the machine.
+
+    It gives up waiting after ten seconds and goes anyway. Somebody typing
+    without a pause for ten seconds is working, and a task that waits for
+    them for ever has quietly failed instead of being rude.
+  */
+  /**
+    Held until their hands have been still for a moment, or ten seconds have
+    gone by.
+
+    Separate from `borrow` because working in a Mac app by sight genuinely
+    needs that app in front for several steps together, and giving the focus
+    back between each one would fight the job. Waiting for a gap is right in
+    both cases; giving it straight back is only right in one.
+
+    Ten seconds and then it goes anyway. Somebody typing without a pause for
+    ten seconds is working, and a task that waits for them for ever has
+    quietly failed rather than been polite.
+  */
+  static func waitForAGap() async {
+    let waited = Date()
+    while handsIdle() < 1.5, Date().timeIntervalSince(waited) < 10 {
+      try? await _Concurrency.Task.sleep(nanoseconds: 250_000_000)
+    }
+    if Date().timeIntervalSince(waited) > 1 {
+      Log.say("agent: waited \(String(format: "%.1f", Date().timeIntervalSince(waited)))s for a gap before taking the screen")
+    }
+  }
+
+  static func borrow<T>(_ body: () async -> T) async -> T {
+    let was = NSWorkspace.shared.frontmostApplication
+    await waitForAGap()
+    await front()
+    let result = await body()
+    // Everything real Grove does happens in here, so this is the one place
+    // that has to record it. Without it the next gap Grove waits for is the
+    // one after its own last click.
+    lastPosted = Date()
+    /*
+      Back where they were. Not Grove itself, and not an app that has gone.
+
+      Through System Events, by process id, rather than
+      `NSRunningApplication.activate()`. The AppKit call is the obvious one
+      and it quietly does nothing: macOS will not let an app that is not
+      itself in front hand the front to somebody else, so the focus stayed
+      on Chrome and the restore reported success. Measured — Terminal in
+      front, Chrome taken, `activate()` called, Terminal still not back.
+
+      System Events can do it because Grove already holds Accessibility for
+      the ⌘K watcher, and by unix id rather than by name because a name is
+      ambiguous and needs Automation permission for each app separately,
+      which would mean a permission prompt per app the first time Grove ever
+      gave the screen back.
+    */
+    if let was, was.bundleIdentifier != Bundle.main.bundleIdentifier, !was.isTerminated {
+      _ = await run("tell application \"System Events\" to set frontmost of (first application process whose unix id is \(was.processIdentifier)) to true")
+      try? await _Concurrency.Task.sleep(nanoseconds: 120_000_000)
+    }
+    return result
   }
 
   /** Brings the task's own tab to the front, for key presses, which go to whatever is frontmost. */
@@ -1433,10 +1609,11 @@ enum Browser {
     let after = await read()
     if after.board != before.board || after.text != before.text { return }
     _ = await js("(function(){if(document.activeElement&&document.activeElement!==document.body)document.activeElement.blur();return 'ok';})()")
-    await front()
-    _ = await run("tell application \"Google Chrome\" to activate")
-    try? await _Concurrency.Task.sleep(nanoseconds: 300_000_000)
-    await realPresses(list)
+    await borrow {
+      _ = await run("tell application \"Google Chrome\" to activate")
+      try? await _Concurrency.Task.sleep(nanoseconds: 300_000_000)
+      await realPresses(list)
+    }
   }
 
   /** Real presses into whatever has focus, in an app or a page. */
@@ -1461,6 +1638,7 @@ enum Browser {
   @MainActor
   static func realScroll() async {
     CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -400, wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
+    lastPosted = Date()
     try? await _Concurrency.Task.sleep(nanoseconds: 300_000_000)
   }
 
@@ -1509,8 +1687,7 @@ enum Browser {
   static var lastError = ""
 
   static func pressReturn() async {
-    await front()
-    _ = await run("tell application \"System Events\" to key code 36")
+    await borrow { _ = await run("tell application \"System Events\" to key code 36") }
     try? await _Concurrency.Task.sleep(nanoseconds: 1_500_000_000)
   }
 
@@ -1524,6 +1701,20 @@ enum Browser {
     (function(){
       \(chessFn)
       var sel='a[href],button,input,textarea,select,[role=button],[role=link],[role=tab],[role=option],[role=menuitem],[role=checkbox],[role=textbox],[contenteditable=true],[onclick]';
+      function words(x){return (x&&(x.innerText||x.textContent)||'').replace(/\\s+/g,' ').trim();}
+      function opaque(t){return /^[0-9a-f]{8}-[0-9a-f]{4}-|^[0-9a-f]{16,}$|^\\d{6,}$/i.test(t);}
+      function named(e,edit){
+        var a=e.getAttribute('aria-label')||e.getAttribute('aria-placeholder');if(a&&!opaque(a))return a;
+        var by=e.getAttribute('aria-labelledby');if(by){var t=by.split(/\\s+/).map(function(id){return words(document.getElementById(id));}).join(' ').trim();if(t)return t;}
+        if(e.labels&&e.labels.length){var l=words(e.labels[0]);if(l)return l;}
+        var wrap=e.closest&&e.closest('label');if(wrap&&words(wrap))return words(wrap);
+        if(!edit&&words(e))return words(e);
+        if(/^(checkbox|radio)$/.test(e.type||'')||/^(checkbox|radio|switch|option)$/.test(e.getAttribute('role')||'')){
+          for(var p=e.parentElement,k=0;p&&k<4;p=p.parentElement,k++){var t2=words(p);if(t2&&t2.length<=120)return t2;}
+        }
+        var v=e.value&&!opaque(String(e.value))?e.value:'';
+        return v||e.placeholder||e.title||(edit?'text box':'');
+      }
       function field(e){return /^(INPUT|TEXTAREA|SELECT)$/.test(e.tagName)||e.isContentEditable||e.getAttribute('role')==='textbox';}
       function all(q){var out=[];(function walk(root){root.querySelectorAll(q).forEach(function(e){out.push(e);});
         root.querySelectorAll('*').forEach(function(e){if(e.shadowRoot)walk(e.shadowRoot);});
@@ -1542,21 +1733,29 @@ enum Browser {
       if(pop&&found.length>20&&found.filter(function(e){return pop.contains(e);}).length>found.length*0.6)pop=null;
       var list=found.filter(field).concat(found.filter(function(e){return !field(e);}));
       if(pop)list=list.filter(function(e){return pop.contains(e);}).concat(list.filter(function(e){return !pop.contains(e);}));
+      var pressed=new Set();
       list.forEach(function(e){
         if(n>=140)return;
         var r=e.getBoundingClientRect();
+        var box=e;
+        if(/^(checkbox|radio)$/.test(e.type||'')&&(r.width<4||r.height<4||parseFloat(getComputedStyle(e).opacity)<0.1)){
+          var lab=(e.labels&&e.labels[0])||(e.closest&&e.closest('label'));
+          if(lab&&!pressed.has(lab)){box=lab;r=lab.getBoundingClientRect();}
+        }
         if(r.width<2||r.height<2||r.bottom<-h*0.2||r.top>h*1.6)return;
-        var st=getComputedStyle(e); if(st.visibility==='hidden'||st.display==='none')return;
+        var st=getComputedStyle(box); if(st.visibility==='hidden'||st.display==='none')return;
         var edit=e.isContentEditable||e.getAttribute('role')==='textbox';
-        var label=(e.getAttribute('aria-label')||e.getAttribute('aria-placeholder')||(edit?'':e.innerText)||e.value||e.placeholder||e.title||(edit?'text box':'')).replace(/\\s+/g,' ').trim();
+        var label=String(named(e,edit)||'').replace(/\\s+/g,' ').trim();
         if(!label){var img=e.querySelector&&e.querySelector('img[alt]'); if(img)label=img.alt;}
         if(!label&&e.tagName!=='INPUT'&&e.tagName!=='TEXTAREA'&&e.tagName!=='SELECT')return;
-        e.setAttribute('data-grove',n); window.__grove[n]=e;
+        if(pressed.has(box))return;
+        pressed.add(box);
+        box.setAttribute('data-grove',n); window.__grove[n]=box;
         var it={n:n,tag:e.tagName.toLowerCase(),label:label.slice(0,70)};
         if(e.type)it.type=e.type; if(edit){it.type='textbox';it.value=(e.innerText||'').trim().slice(0,60);} if(e.autocomplete)it.auto=e.autocomplete;
         if((e.tagName==='INPUT'||e.tagName==='TEXTAREA')&&e.type!=='password')it.value=(e.value||'').slice(0,60);
         if(field(e)&&(r.width<12||r.height<8||parseFloat(st.opacity)<0.1)){it.type='invisible box: takes key presses for the grid or game around it; what it holds is not what the page shows';delete it.value;}
-        var state=e.getAttribute('data-state')||e.getAttribute('aria-pressed')||e.getAttribute('aria-checked')||e.getAttribute('aria-selected')||'';
+        var state=(/^(checkbox|radio)$/.test(e.type||'')?(e.checked?'checked':'not checked'):'')||e.getAttribute('data-state')||e.getAttribute('aria-pressed')||e.getAttribute('aria-checked')||e.getAttribute('aria-selected')||'';
         if(state&&state!=='false')it.state=state;
         if(pop&&pop.contains(e))it.popup=1;
         out.push(it); n++;
@@ -1697,9 +1896,13 @@ enum Browser {
     try? await _Concurrency.Task.sleep(nanoseconds: 700_000_000)
     var after = await chessPosition()
     if after == before {
-      await front()
-      try? await _Concurrency.Task.sleep(nanoseconds: 400_000_000)
-      await realDrag(from: CGPoint(x: v[4] + v[0], y: v[5] + v[1]), to: CGPoint(x: v[4] + v[2], y: v[5] + v[3]))
+      // A board that ignores events it did not get from a mouse. The real
+      // drag needs the screen, so it waits for a gap and gives it back like
+      // every other real move.
+      await borrow {
+        try? await _Concurrency.Task.sleep(nanoseconds: 400_000_000)
+        await realDrag(from: CGPoint(x: v[4] + v[0], y: v[5] + v[1]), to: CGPoint(x: v[4] + v[2], y: v[5] + v[3]))
+      }
       try? await _Concurrency.Task.sleep(nanoseconds: 800_000_000)
       after = await chessPosition()
     }
@@ -1855,12 +2058,18 @@ enum Browser {
     again with the mouse, which undid it.
   */
   static func watch() async {
-    _ = await js("(function(){window.__groveMuts=0;if(window.__groveObs)window.__groveObs.disconnect();window.__groveObs=new MutationObserver(function(m){window.__groveMuts+=m.length;});window.__groveObs.observe(document.documentElement,{subtree:true,childList:true,attributes:true,characterData:true});return 'ok';})()")
+    _ = await js("(function(){window.__groveMuts=0;window.__groveSnap=groveSnap();if(window.__groveObs)window.__groveObs.disconnect();window.__groveObs=new MutationObserver(function(m){window.__groveMuts+=m.length;});window.__groveObs.observe(document.documentElement,{subtree:true,childList:true,attributes:true,characterData:true});return 'ok';})()".replacingOccurrences(of: "groveSnap()", with: Browser.snapshot))
   }
+
+  /** Every box's ticked state and every field's value, as one string to compare. */
+  static let snapshot = "Array.from(document.querySelectorAll('input,select,textarea')).map(function(e){return e.type==='checkbox'||e.type==='radio'?(e.checked?1:0):String(e.value).length;}).join('')"
 
   /** Whether the page changed since `watch`. A page that went somewhere else has changed. */
   static func changed() async -> Bool {
-    let n = await js("String(typeof window.__groveMuts==='number'?window.__groveMuts:-1)")
+    // Ticking a box or choosing an option changes a property, which no
+    // observer sees: without comparing those too, a tick that worked was taken
+    // for one that did not, and clicked again — which unticked it.
+    let n = await js("String(typeof window.__groveMuts!=='number'?-1:(window.__groveMuts>0||window.__groveSnap!==\(Browser.snapshot)?1:0))")
     return n != "0"
   }
 

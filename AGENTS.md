@@ -1861,6 +1861,16 @@ phone?"; after that a play aimed at the other device is moved to the chosen
 one. `music.where` changes it, and with move "yes" carries the song across:
 the Mac's `music.now` reads what is playing, it is paused there and found here.
 
+**A choice is named by its words, and ticked once.** Uber Eats' options were
+read as `52467a0e-…`: a radio button has no text of its own, so the reader fell
+back to its value, an id, and the agent chose blind. Controls are named by their
+label (`labels`, `aria-labelledby`, the wrapping label, the row around them) and
+never by an id-shaped value, with "checked" or "not checked" from the control
+itself; a control hidden at 1px is listed as the label you would press. And a
+tick changes a property, not the page, so the real-click fallback compares
+checked states and field values as well as mutations: it used to tick a box,
+see nothing change, and click again, unticking it.
+
 Texts go through Messages, not a website (`agent.message`): the person is
 found in Contacts by name or relation, a pick among several is remembered,
 and the exact words are read back before sending.
@@ -1977,6 +1987,59 @@ the obvious move is the bigger model. Measured against the real brief on ten
 sentences: `gemini-flash-latest` is **50% slower** (2.3s against 1.5s) and
 was the one that offered chess for "play a game with me". The chess bias was
 already fixed by the rule in the brief, not by model size. Left alone.
+
+### Working beside them, not on top of them
+
+A run used to open its tab in whatever Chrome window was in front — theirs,
+with their tabs in it — and in Chrome a new tab becomes the active one. So
+starting a job took over what they were reading, and every later step scrolled
+and clicked inside the window they were trying to use. Then the first real
+click left Chrome in front for the rest of the task, so the next forty steps,
+which needed nothing at all, looked exactly like Grove hogging the machine.
+
+Three things, each a different half of getting out of the way:
+
+- **Its own window** (`Browser.ownWindow`), made once and kept. Their tabs are
+  never touched and their scroll positions survive. **A tab they chose is
+  still theirs**: the model may take one with `tab` when the job belongs there
+  ("play this in the YouTube I already have open"), which is a different thing
+  from Grove helping itself to the front window. If Grove's own window
+  inherits a profile with JavaScript from Apple Events off it cannot be read,
+  and only then does it fall back to a tab in one of theirs.
+- **The screen is borrowed and given back** (`Browser.borrow`). Most of a run
+  needs nothing in front: a click or a key sent into the tab is invisible and
+  free. Only the fallbacks need the screen — a page that ignores a scripted
+  click, a game on a canvas, a picture of the window — and those are a real
+  mouse and real keys, which go wherever the system is pointing.
+- **And they wait for a gap.** Taking the keyboard out from under somebody
+  mid-sentence puts their words in Grove's window, and the cost of that is not
+  a lost keystroke, it is having to go back and find what it broke. A second
+  and a half of stillness is the signal; typing has one constantly. It gives
+  up after ten seconds and goes anyway, because somebody typing without a
+  pause for ten seconds is working, and a task that waits for them for ever
+  has quietly failed rather than been polite.
+
+An app driven by sight (`desk`) waits for the same gap and then **keeps** the
+focus, because working in a Mac app by sight genuinely needs it in front for
+several steps together and handing it back between each would fight the job.
+
+Two things here were measured rather than reasoned about, and both read
+perfectly sensibly in the version that did not work:
+
+- **`kCGAnyInputEventType` counts synthetic events.** The obvious reading is
+  that it measures their hands. It does not: seventy-two seconds of genuine
+  stillness, one key posted by Grove, and it came back 0.6. Left like that the
+  only thing reliably resetting the gap would have been Grove's own last
+  click, so every real click waited a second and a half for itself and the
+  feature read as Grove being slow rather than polite. So the last event's
+  moment is compared against the last one Grove posted, and if they are the
+  same moment it is Grove's and does not count.
+- **`NSRunningApplication.activate()` does nothing** when the caller is not
+  itself in front, and reports success. Measured: Terminal in front, Chrome
+  taken, `activate()` called, Terminal still not back. The focus goes back
+  through System Events by unix id — which works, which Grove already holds
+  Accessibility for, and which needs no per-app Automation permission, so
+  giving the screen back never produces a prompt.
 
 ### Phone or Mac, without being told
 

@@ -3695,6 +3695,103 @@ section('"Play" after a pause means carry on, not shuffle');
   );
 }
 
+
+/*
+ * Grove works beside them, not on top of them
+ * -------------------------------------------
+ *
+ * A run used to open its tab in whatever Chrome window was in front — theirs,
+ * with their tabs in it — and in Chrome a new tab becomes the active one. So
+ * starting a job took over what they were reading, and every later step
+ * scrolled and clicked inside the window they were trying to use. Then the
+ * first real click left Chrome in front for the rest of the task, so the next
+ * forty steps, which needed nothing, looked exactly like Grove hogging the
+ * machine.
+ *
+ * Three things, each a different half of "get out of the way":
+ *
+ * - **Its own window.** Their tabs are never touched and their scroll
+ *   positions survive. A tab they chose is still theirs: the model may take
+ *   one with `tab` when the job belongs there, which is a different thing
+ *   from Grove helping itself to the front window.
+ * - **The screen is borrowed and given back.** Most of a run needs nothing in
+ *   front; only the fallbacks do — a page that ignores a scripted click, a
+ *   canvas, a picture. Those take the screen for as long as they need it.
+ * - **And they wait for a gap.** Taking the keyboard out from under somebody
+ *   mid-sentence puts their words in Grove's window, and the cost is not a
+ *   lost keystroke, it is having to find what it broke.
+ */
+section('Grove works beside them, not on top of them');
+{
+  const agent = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Agent.swift'), 'utf8');
+
+  check(
+    /nonisolated\(unsafe\) static var ownWindow = ""/.test(agent) &&
+      /if made is missing value then set made to \(make new window\)/.test(agent),
+    'a run that needs a fresh tab gets one in Grove\'s own window',
+    'a new tab in their window becomes their active tab'
+  );
+  check(
+    /falling back to a tab in theirs/.test(agent),
+    'and falls back to a tab in one of theirs only when its own window cannot be read',
+    'a profile with JavaScript from Apple Events off makes Grove\'s window useless'
+  );
+
+  /*
+   * The one that would be silently undone: every real click, key and picture
+   * must go through `borrow`, because that is the only thing that waits and
+   * the only thing that gives the screen back. A bare `front()` next to a
+   * real click is the old behaviour, and it reads as perfectly normal code.
+   */
+  // borrow's own call is the one legitimate one, so it is cut out before
+  // looking — rather than excused by a line number, which moves.
+  const borrowBody = between(agent, 'static func borrow<T>(_ body: () async -> T) async -> T {', '\n  /** Brings the task', { min: 400, max: 2600 });
+  check(borrowBody !== null, 'borrow is where it is expected to be before the sweep');
+  const elsewhere = borrowBody === null ? agent : agent.replace(borrowBody, '');
+  const bare = elsewhere
+    .split('\n')
+    .map((line, i) => [i + 1, line])
+    .filter(([, l]) => /\bawait (Browser\.)?front\(\)/.test(l));
+  check(
+    bare.length === 0,
+    'nothing takes the screen except through borrow',
+    bare.map(([n, l]) => `${n}: ${l.trim()}`).join('\n         ')
+  );
+  check(
+    /static func waitForAGap\(\) async \{[\s\S]{0,400}?while handsIdle\(\) < 1\.5, Date\(\)\.timeIntervalSince\(waited\) < 10/.test(agent),
+    'the screen is taken only after their hands have been still, and never waits for ever',
+    'somebody typing without a pause for ten seconds is working; a task that waits for ever has failed quietly'
+  );
+  const borrow = between(agent, 'static func borrow<T>(_ body: () async -> T) async -> T {', '  /** Brings the task\'s own tab to the front', { min: 400, max: 2600 });
+  check(borrow !== null, 'borrow is where it is expected to be');
+  check(
+    borrow !== null && /set frontmost of \(first application process whose unix id is/.test(borrow),
+    'and gives the focus back through System Events, which actually works',
+    'NSRunningApplication.activate() from an app that is not in front does nothing and reports success'
+  );
+  check(
+    borrow !== null && !/was\.activate\(\)/.test(borrow),
+    'never through the AppKit call that looks right and is not'
+  );
+
+  /*
+   * The subtle one, and the reason this was measured rather than reasoned
+   * about: kCGAnyInputEventType counts synthetic events. Seventy-two seconds
+   * of genuine stillness, one key posted by Grove, and it read 0.6.
+   */
+  const idle = between(agent, 'static func handsIdle() -> Double {', '\n  }\n', { min: 150, max: 900 });
+  check(idle !== null, 'the idle reading is where it is expected to be');
+  check(
+    idle !== null && /abs\(lastEventAt\.timeIntervalSince\(lastPosted\)\) < 0\.4/.test(idle),
+    'an event Grove posted itself does not count as their hands being busy',
+    'otherwise the only thing resetting the gap is Grove\'s own last click, and it waits for itself'
+  );
+  check(
+    /lastPosted = Date\(\)/.test(borrow || ''),
+    'and borrow records every real thing Grove does, since they all pass through it'
+  );
+}
+
 /* ------------------------------------------------------------- verdict */
 
 /*
