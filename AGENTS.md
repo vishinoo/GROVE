@@ -1746,6 +1746,21 @@ reach the Talk screen with a tap. Long jobs give word at twenty-five seconds, th
 less and less. What must be said is acknowledged and resent until it arrives (a
 broadcast is fire and forget), and waits for Grove to finish its sentence.
 
+**Typing replaces.** What a `type` puts in a box is what the box says afterwards,
+and it is read back to check. Rich editors (Instagram's, Slack's) keep their own
+copy of the text and ignore a script replacing it, which turned revising a
+message into the old words, the new ones and a run of Backspaces; when the box
+does not say what it should, it is clicked, selected, cleared and pasted by hand.
+
+**Stop is done in code** (`cancelling` in closing.ts, and askFree on the Mac).
+"Never mind" always, and a bare "stop" when something is going, stops speech, a
+pending yes, a plan, the Mac's job and the reading, with a word and no model.
+Through the model it cost a "one second" before the "stopped".
+
+**Pause reaches whatever is playing** (`Player.swift`): Music, video in Chrome,
+Spotify, then the system play/pause key when something is still making sound.
+It says "nothing's playing" rather than "paused" when nothing was, and logs each.
+
 Texts go through Messages, not a website (`agent.message`): the person is
 found in Contacts by name or relation, a pick among several is remembered,
 and the exact words are read back before sending.
@@ -1774,6 +1789,94 @@ something changed and never twice in three minutes.
 
 Chrome needs View › Developer › Allow JavaScript from Apple Events ticked once.
 It is a security setting, so Grove says where it is and does not flip it.
+
+### Grove as a conduit: handing a job to another AI
+
+`mac/Sources/Grove/Delegates.swift`. Grove is one lite model with a calendar
+and a pair of hands. It is not the best thing to ask for a thousand lines of
+code, a long piece of research or an image, and pretending otherwise produces
+the worst answer in the app: a confident paragraph from a lite model where
+somebody wanted the real thing. Their Chrome is already signed in to things
+that *are* good at those, and they are already paying for them.
+
+So "ask Claude to write the cover letter" is a browser job like any other —
+open the site, type into the box, press Return — and the agent could already
+do every one of those steps. Three things made it do them badly:
+
+- **It answered instead of asking.** A model handed a question answers it;
+  that is what a model is for. Nothing said that naming another assistant is
+  an instruction about *where the work happens*, so the one reply they had
+  ruled out is the one they got. `Delegates.rule` is in the decision's brief.
+- **It called it done once the prompt was typed.** The same generosity as five
+  moves of 2048 called playing it. A prompt sitting in a composer looks
+  exactly like a finished job if nothing says otherwise, so the answer — the
+  entire point — was never waited for and never read back.
+- **It paid a model call for every two seconds of somebody else's thinking.**
+  `Browser.awaitWritten` watches instead, the same trade as `awaitBoard`:
+  finished is measured as *stopped growing*, not as any site's own "it is
+  writing" marker, because every one of those is a different class name on a
+  different div and text that has stopped getting longer has stopped
+  everywhere. Two quiet polls, because these answers arrive in bursts. It
+  waits for the answer to *begin* too — the length right after Return is the
+  prompt sitting in the box, which is already "not growing".
+
+It is not a second brain: nothing in the file decides anything. A delegate is
+a destination plus a page of notes about that destination, handed to the same
+mover, with the same confirmations in front of anything irreversible. A
+delegation may never set `confirmed`, and `npm run verify` checks it.
+
+**The whole risk is a false positive**, because the note tells the mover to go
+to claude.ai and getting it in the middle of an Uber Eats order is worse than
+never having the feature. So a hand-off needs a verb of handing over
+**immediately in front of the name**: looking for the verb anywhere in the
+sentence turns "use the cursor keys to move" into a hand-off to an editor,
+because it contains "use" and it contains "cursor". A missed delegation just
+runs as an ordinary browser task, which is what happened before the file
+existed; a false one derails a job somebody actually asked for.
+
+Read from the goal **Grove itself wrote**, which is the same licence the
+hand-over phrase has: a phrase may decide something here only because it is
+this app's own output and not somebody's speech. And the seam comes off what
+is handed over — the goal reads "Ask Claude to write a cover letter", and
+pasting that whole sentence into Claude is asking Claude to ask Claude.
+Failing to find the seam sends the whole goal instead, which reads oddly and
+still asks for the right thing: a clumsy fallback that cannot be wrong beats a
+clever rewrite that can.
+
+A delegation gets four minutes rather than the phone's one, because most of it
+is somebody else writing.
+
+### What costs nothing is not what a lite model can skip
+
+`gemini-flash-lite-latest` has no thinking to configure, and it does not
+ignore `thinkingConfig` — it refuses the whole request, 400
+INVALID_ARGUMENT, before reading a word of it. The browser agent sent it
+`{"thinkingBudget": 0}` on its fallback leg, which exists for when the better
+model is slow or down, so it could only ever be reached on the one day it
+mattered and it always failed there. On screen: "I couldn't work out the next
+step on your Mac". In the log: no move from either model, which reads like the
+network rather than like a field we sent ourselves.
+
+**A dead fallback is the worst kind of dead code**: it type-checks, it is
+never reached on a good day, and it is missing on the bad one.
+
+### A panel is as tall as what is in it
+
+Every notch state sets a height, and a height set by hand is a guess about
+content that has since changed. The two states that grew a typing box were
+raised by hand to make room and then kept the raised number when the box
+turned out shorter than the guess — a third of the card was empty glass under
+the box, which reads as the panel having failed to draw rather than as a panel
+with nothing more to say. `fit(max)` was already there for the answer states:
+the hand-set number stops being the height and becomes the ceiling.
+
+### The decision stays on the lite model, measured
+
+Asked to improve the reasoning behind "what is a cool thing I could do",
+the obvious move is the bigger model. Measured against the real brief on ten
+sentences: `gemini-flash-latest` is **50% slower** (2.3s against 1.5s) and
+was the one that offered chess for "play a game with me". The chess bias was
+already fixed by the rule in the brief, not by model size. Left alone.
 
 ### Phone or Mac, without being told
 

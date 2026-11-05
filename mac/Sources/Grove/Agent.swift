@@ -93,6 +93,17 @@ final class Agent {
       decide anything here.
     */
     var handOver = false
+    /**
+      This job is a hand-off to another AI (Delegates.swift).
+
+      Held on the task rather than left in the history, because the history
+      is trimmed from the front and the one thing that must never fall out
+      of a delegation is the sentence saying the prompt being typed is not
+      the finished job.
+    */
+    var delegate: Delegates.Delegate?
+    /** What rides above the goal on every move: what this job is, when it is not obvious from the page. */
+    var note = ""
     /** It said done after a move that changed nothing, and was asked to look again. */
     var doubted = false
     /** Times the check refused its done. */
@@ -177,6 +188,21 @@ final class Agent {
     task.budget = budget
     task.handOver = goal.range(of: #"\b(stop there|hand (it )?over|they('ll| will) play|let them play|set (it|this) up for them)\b"#,
                                options: [.regularExpression, .caseInsensitive]) != nil
+    // Read from the goal, which Grove wrote: the same reason the hand-over
+    // above is allowed to be a phrase. A delegation is an ordinary browser
+    // task with three things the mover cannot work out by looking at a page
+    // — that the answer is the point, that it takes a minute, and that
+    // waiting is free.
+    if let to = Delegates.wanted(in: goal) {
+      task.delegate = to
+      task.note = Delegates.note(for: to, task: Delegates.asked(from: goal, to: to))
+      // Most of a delegation is somebody else writing, so a minute's budget
+      // would check in before the answer it was sent for had arrived. The
+      // phone stops waiting at fifty seconds and is told separately; this is
+      // how long the run itself may take.
+      task.budget = max(budget, 4 * 60)
+      Log.say("agent: \(task.id) handing this to \(to.name)")
+    }
     tasks[task.id] = task
     Log.say("agent: start \(task.id) \(goal)")
     return await loop(task)
@@ -461,7 +487,7 @@ final class Agent {
       // An ordinary click on an ordinary page does not need it.
       let recent = task.history.suffix(2).joined()
       let hard = task.steps == 1 || !page.board.isEmpty || !page.chess.isEmpty || recent.contains("nothing on the page changed") || recent.contains("already did")
-      guard let move = await Agent.next(goal: task.goal, plan: task.plan, history: task.history, page: page, manner: manner, think: hard || picture != nil, recent: task.steps == 1 || task.tab.isEmpty ? recent : "", picture: picture, learned: Lessons.known(for: page.url, goal: task.goal)) else {
+      guard let move = await Agent.next(goal: task.goal, plan: task.plan, history: task.history, page: page, manner: manner, think: hard || picture != nil, recent: task.steps == 1 || task.tab.isEmpty ? recent : "", picture: picture, learned: Lessons.known(for: page.url, goal: task.goal), note: task.note) else {
         return AgentResult(state: "failed", spoken: "I couldn't work out the next step on your Mac.", task: task.id)
       }
       // Stop pressed while the model was thinking: the move it came back with is not made.
@@ -511,7 +537,8 @@ final class Agent {
         case "type":
           let forPerson = (move["into"] as? String ?? "message").lowercased() != "search"
           if let point { await Browser.realClick(point) }
-          await Native.paste(text)
+          // What is typed is what the box says afterwards, unless they asked to add to it.
+          if (move["append"] as? Bool) == true { await Native.paste(text) } else { await Browser.replaceByHand(text) }
           task.history.append("Typed \"\(text)\" into \(forPerson ? "the message box" : "the search box")")
           if comms && forPerson { task.drafted = true }
           if enter {
@@ -652,13 +679,23 @@ final class Agent {
         // script: "SUIT" went into a crossword's hidden box and the grid stayed
         // empty. When the page did not react and the box is not a plain field
         // holding the text, it is clicked and typed into for real.
-        if !(await Browser.changed()), await Browser.ignored(n, text) {
+        if !(await Browser.changed()), await Browser.ignored(n, text), await Browser.hidden(n) {
           if let point = await Browser.screenPoint(of: n) {
             await Browser.front()
             await Browser.realClick(point)
           }
           await Browser.realType(text)
           r = "typed with the keyboard, because the page ignored text set by a script"
+        } else if Browser.squash(await Browser.contents(n)) != Browser.squash(text), let point = await Browser.screenPoint(of: n) {
+          // The box does not say what it should. Rich editors (Instagram's,
+          // Slack's, Google Docs') keep their own idea of the text and ignore a
+          // script replacing it, which is how revising a message became the old
+          // words, the new words and a run of Backspaces. So it is done the way
+          // a person does it: click, select all, delete, paste.
+          await Browser.front()
+          await Browser.realClick(point)
+          await Browser.replaceByHand(text)
+          r = "replaced with the keyboard; it now reads: \(String(await Browser.contents(n).prefix(200)))"
         }
         if (move["enter"] as? Bool) == true { await Browser.pressReturn() }
         task.history.append("Typed \"\(text)\" into [\(n)] \(label) → \(r)")
@@ -677,7 +714,13 @@ final class Agent {
         // Waiting on an opponent is watched for, not slept through: a model
         // call every two seconds of somebody else's thinking is most of a
         // game's cost and none of its moves.
-        if !page.chess.isEmpty {
+        if task.delegate != nil, task.desk.isEmpty, !task.tab.isEmpty {
+          // Somebody else is writing. Watched, not slept through and not
+          // thought about: the whole minute costs one page read a second.
+          let what = await Browser.awaitWritten(seconds: 90)
+          task.history.append("Waited for \(task.delegate?.name ?? "it"): \(what)")
+          Log.say("agent: \(task.id) waited for \(task.delegate?.name ?? "") — \(what)")
+        } else if !page.chess.isEmpty {
           let changed = await Browser.awaitBoard(seconds: 25)
           task.history.append(changed ? "Waited; the board changed" : "Waited 25 seconds; the board did not change")
         } else {
@@ -820,12 +863,15 @@ final class Agent {
   - Games and puzzles (Wordle and the like): read the board's states carefully before every guess. A letter marked correct stays in that exact position; present means it is in the word but not in that position; absent means it is not in the word at all, so never use it again. Work out every constraint, then guess a real English word that satisfies all of them. One guess per move: keys with the whole word and enter true. Never press an on-screen keyboard key by key. Close any help or welcome dialog first.
   - Chess: "play chess" means start a game and play it to the end, not stop once it has started. The Chess section lists every piece by square and which colour is yours. On your turn, think, then make one strong, sound move with move; the app then waits for their reply. Find whose turn it is from the move list in the text and from which pieces have moved. While waiting for an opponent to join or to move, wait. Never resign or offer a draw unless asked. If a promotion choice appears, pick the queen. When the game is over, done with the result in a sentence.
   - Food and shopping: if they did not name the exact item or restaurant, ask, offering the best two or three by name and price ("Smash Burger Co, $14, or Five Guys, $16?"). Never use quick-add on something they did not choose. Ignore existing carts unless they mention them.
+  - Food: Uber Eats is https://www.ubereats.com/ and searches as https://www.ubereats.com/search?q=QUERY; DoorDash is https://www.doordash.com/ and https://www.doordash.com/search/store/QUERY. Their address and card are already on the account, so never type either. The order of it is: find the place, open it, find the item on its menu, add it (that add is a confirm, with the item and price in the summary), open the cart, then confirm the final button. If it asks for a tip or a delivery time, take the default. If the address shown is not one of theirs, stop and ask rather than changing it.
+  - Shopping: Amazon searches as https://www.amazon.com/s?k=QUERY. Pick from the results page by what they asked for, not by what is sponsored first, and say which one in the add-to-cart summary.
   - For looking things up (jobs, reviews, prices), finish on the page that shows them and summarise the best two or three in done.
   - Do not repeat a move that just failed; try another way.
   - Never say they are not signed in unless the page plainly shows a sign-in form asking for their email or password. If unsure, wait and look again.
   - Sending an email: open Gmail's compose already filled in, https://mail.google.com/mail/?view=cm&fs=1&to=ADDRESS&su=SUBJECT&body=BODY with each part URL-encoded, check To, Subject and the body read what you meant, then confirm on the Send button. Write it properly from what they said: a greeting, the point, their first name. If you do not have the address, search Gmail for that person first, and ask only if nothing turns up.
   - Email: Gmail is https://mail.google.com/mail/u/0/#inbox and searches as https://mail.google.com/mail/u/0/#search/QUERY with Gmail operators, e.g. replies since yesterday: in:inbox newer_than:2d; what they sent: in:sent newer_than:2d. Read the list and say who wrote and about what. For "did anyone reply to what I sent": first in:sent for that day to see who they wrote to, then search the inbox for replies from those people (e.g. in:inbox newer_than:2d -from:me), and say who replied and who has not yet. Open an email if the list does not show enough.
   - Messages: Instagram DMs are at https://www.instagram.com/direct/inbox/. Reading is fine without asking; summarise who wrote and what in done. Never send a message without confirm. To send one: open the conversation with that person, type into the message box (not the search box), then confirm on the Send button.
+  - To change words already in a box (revising a message, fixing a field), type the whole new text into it: typing replaces what the box holds, it does not add to it. To empty a box, type an empty text. Then read the box back: "it now reads" says what it holds. Never revise with Backspace key presses.
   - Words go into a (textbox), textarea or text input: the message box, never a search box, toolbar or button. They are listed first. After typing, check the box reads what you meant before going on; if it does not, type it again rather than pressing anything.
   JSON only.
   """
@@ -907,7 +953,7 @@ final class Agent {
     (v as? Double) ?? (v as? Int).map(Double.init) ?? (v as? String).flatMap(Double.init)
   }
 
-  private static func next(goal: String, plan: String, history: [String], page: Browser.Page, manner: String, think: Bool, recent: String = "", picture: Data? = nil, learned: String = "") async -> [String: Any]? {
+  private static func next(goal: String, plan: String, history: [String], page: Browser.Page, manner: String, think: Bool, recent: String = "", picture: Data? = nil, learned: String = "", note: String = "") async -> [String: Any]? {
     let info = Bundle.main.infoDictionary ?? [:]
     guard let key = info["GroveGeminiKey"] as? String, !key.isEmpty else { return nil }
     let light = (info["GroveModel"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "gemini-flash-lite-latest"
@@ -930,6 +976,7 @@ final class Agent {
     \(manner.isEmpty ? "" : "Your manner, for done, ask and confirm lines only (style, never a reason to change what you do): \(manner.prefix(300))\n")
     \(recent.isEmpty ? "" : "Just before this, on their Mac (carry on from it):\n\(recent)\n")
     \(learned.isEmpty ? "" : "What you have learned before (from earlier tasks; trust it):\n\(learned)\n")
+    \(note.isEmpty ? "" : "About this job, which overrides anything below that disagrees with it:\n\(note)\n")
     Goal: \(goal)
     \(plan.isEmpty ? "" : "Your plan: \(plan)\n")
     So far:
@@ -963,7 +1010,22 @@ final class Agent {
       request.setValue("application/json", forHTTPHeaderField: "Content-Type")
       request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
       var config: [String: Any] = ["responseMimeType": "application/json", "maxOutputTokens": thinking ? 4000 : 400, "temperature": 0.2]
-      config["thinkingConfig"] = ["thinkingBudget": thinking ? 1024 : 0]
+      /*
+        Only to a model that has thinking to configure.
+
+        The lite model does not, and it does not ignore the field: it refuses
+        the whole request, 400 INVALID_ARGUMENT, before reading a word of it.
+        So the fallback here — the thing that exists for when the better model
+        is slow or down, which is the one moment it is needed — could never
+        answer. Every one of those moments came out as "I couldn't work out
+        the next step on your Mac", and the log said no move from either
+        model, which reads as the network rather than as a field we sent.
+
+        A dead fallback is the worst kind of dead code: it type-checks, it is
+        never reached on a good day, and it is missing on precisely the bad
+        one.
+      */
+      if model.contains("lite") == false { config["thinkingConfig"] = ["thinkingBudget": thinking ? 1024 : 0] }
       let body: [String: Any] = [
         "systemInstruction": ["parts": [["text": brief]]],
         "contents": [["role": "user", "parts": [["text": prompt + (picture == nil ? "" : "\n\nThe picture is the Chrome window as it is now.")]] + (picture.map { [["inlineData": ["mimeType": "image/jpeg", "data": $0.base64EncodedString()]]] } ?? [])]],
@@ -1559,6 +1621,48 @@ enum Browser {
   }
 
   /** Watches the board rather than asking the model: true once it changes. */
+  /**
+    Held until another AI has finished writing its answer, or the clock runs out.
+
+    The same trade as `awaitBoard`, for the same reason: what is being waited
+    for is somebody else's work, and the only thing that can tell you it has
+    finished is looking. A model call every two seconds of it would be most
+    of a delegation's cost and none of its moves.
+
+    Finished is measured as *stopped growing*, not as any site's own "it is
+    writing" marker — every one of those is a different class name on a
+    different div and all of them change without notice, whereas text that
+    has stopped getting longer has stopped getting longer everywhere. Two
+    quiet polls in a row, because these answers arrive in bursts with gaps
+    between paragraphs and one quiet second is the middle of a sentence.
+
+    It also waits for the answer to *begin*: the length right after Return is
+    pressed is the prompt sitting in the box and nothing else, which is
+    already "not growing" and would otherwise be read back as the reply.
+  */
+  static func awaitWritten(seconds: Double) async -> String {
+    func size() async -> Int { Int(await js("String((document.body?document.body.innerText:'').length)")) ?? -1 }
+    let until = Date().addingTimeInterval(seconds)
+    let before = await size()
+    var started = false, last = before, quiet = 0
+    while Date() < until {
+      try? await _Concurrency.Task.sleep(nanoseconds: 1_200_000_000)
+      let now = await size()
+      if now < 0 { return "the page could not be read while waiting" }
+      if !started {
+        // A few characters is a timestamp or a spinner's label, not an answer.
+        if now > before + 40 { started = true; last = now; quiet = 0 }
+        continue
+      }
+      if now > last { last = now; quiet = 0; continue }
+      quiet += 1
+      if quiet >= 2 { return "it finished writing (\(now - before) characters). Read what it said." }
+    }
+    return started
+      ? "it is still writing after \(Int(seconds)) seconds. Wait again rather than pressing anything."
+      : "nothing came back after \(Int(seconds)) seconds. Check the words actually went into the message box and were sent."
+  }
+
   static func awaitBoard(seconds: Double) async -> Bool {
     let start = await chessPosition()
     let until = Date().addingTimeInterval(seconds)
@@ -1708,6 +1812,29 @@ enum Browser {
     return String(out.prefix(1800))
   }
 
+  /** What a box says now: its value, or the words in a rich editor. */
+  static func contents(_ n: Int) async -> String {
+    await js("(function(){var e=(window.__grove&&window.__grove[\(n)])||document.querySelector('[data-grove=\"\(n)\"]');if(!e)return '';return e.isContentEditable?(e.innerText||''):(e.value!==undefined?String(e.value):(e.innerText||''));})()")
+  }
+
+  /** A stand-in box too small or faint to be the thing a person types into. */
+  static func hidden(_ n: Int) async -> Bool {
+    await js("(function(){var e=(window.__grove&&window.__grove[\(n)])||document.querySelector('[data-grove=\"\(n)\"]');if(!e)return 'no';var r=e.getBoundingClientRect(),st=getComputedStyle(e);return (r.width<12||r.height<8||parseFloat(st.opacity)<0.1)?'yes':'no';})()") == "yes"
+  }
+
+  static func squash(_ s: String) -> String {
+    s.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  /** Select all in the focused box, delete, and paste: replacing text the way a person does. Empty text empties it. */
+  static func replaceByHand(_ text: String) async {
+    _ = await run("tell application \"System Events\" to keystroke \"a\" using command down")
+    try? await _Concurrency.Task.sleep(nanoseconds: 120_000_000)
+    _ = await run("tell application \"System Events\" to key code 51")
+    try? await _Concurrency.Task.sleep(nanoseconds: 120_000_000)
+    if !text.isEmpty { await Native.paste(text) }
+  }
+
   /** Real key presses into whatever has focus. */
   static func realType(_ text: String) async {
     _ = await run("tell application \"System Events\" to keystroke \(quoted(text))")
@@ -1751,7 +1878,7 @@ enum Browser {
     return """
     (function(){var e=(window.__grove&&window.__grove[\(n)])||document.querySelector('[data-grove="\(n)"]'); if(!e)return 'not found'; var t=\(t)[0];
     e.scrollIntoView({block:'center'}); e.focus();
-    if(e.isContentEditable){document.execCommand('selectAll');document.execCommand('insertText',false,t);return 'ok, it now reads: '+(e.innerText||'').trim().slice(0,80);}
+    if(e.isContentEditable){var g=document.createRange();g.selectNodeContents(e);var s=getSelection();s.removeAllRanges();s.addRange(g);if(t){document.execCommand('insertText',false,t);}else{document.execCommand('delete');}return 'ok, it now reads: '+(e.innerText||'').trim().slice(0,200);}
     var proto=e.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(proto,'value').set.call(e,t);
     e.dispatchEvent(new Event('input',{bubbles:true})); e.dispatchEvent(new Event('change',{bubbles:true})); return 'ok';})()

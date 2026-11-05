@@ -245,6 +245,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
       body.innerHTML = `<div class="row space"><span class="prompt">${esc(d.ask)}</span><span class="row small"><span class="bars"><i></i><i></i><i></i><i></i></span>Thinking</span></div>${d.text ? `<div class="quote">${esc(d.text)}</div>` : ''}
         <form class="ask" id="ask"><input id="ask-input" placeholder="Add something, or change it" autocomplete="off"><button class="chip" type="submit">Send</button></form>`;
       wireAsk();
+      fit(164);
     }
     if (m === 'rewrite' || m === 'answer') {
       setH(m === 'rewrite' ? 236 : 220);
@@ -279,6 +280,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
       // they are actually doing is how a helper becomes a nuisance. Typing
       // into it goes to the run itself, not to a new task.
       wireAsk();
+      fit(150 + Math.min(steps.length, 6) * 25);
     }
     if (m === 'done') {
       setH(110);

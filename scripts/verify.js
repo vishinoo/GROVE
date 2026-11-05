@@ -27,6 +27,8 @@ global.__DEV__ = false;
 const Module = require('module');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const cp = require('child_process');
+const os = require('os');
 const fs = require('fs');
 
 const ROOT = path.join(__dirname, '..');
@@ -3149,6 +3151,219 @@ section('The per-sentence path never pays for a search');
     /'gemini-flash-lite-latest'/.test(light),
     'the default model is the cheapest tier, by floating alias'
   );
+}
+
+
+/*
+ * Grove can hand a job to another AI, and cannot do it by accident
+ * ----------------------------------------------------------------
+ *
+ * `Delegates.swift`. Grove is one lite model with a calendar and a pair of
+ * hands; their Chrome is signed in to things that are better at writing, code
+ * and research, and they are already paying for them. So "ask Claude to write
+ * the cover letter" opens Claude, types it, waits and brings back what it
+ * said.
+ *
+ * The whole risk is in the other direction, because a false positive derails
+ * a job somebody actually asked for: a delegation is a note telling the mover
+ * to go to claude.ai, and getting that note in the middle of an Uber Eats
+ * order is worse than never having the feature. So the match wants a verb of
+ * handing over IMMEDIATELY in front of the name — looking for the verb
+ * anywhere in the sentence makes "use the cursor keys to move" a hand-off to
+ * an editor.
+ *
+ * Run rather than read, because the only thing worth asserting here is what
+ * the matcher does to a sentence, and a regex read out of a file tells you
+ * nothing about that. Where there is no Swift compiler the behavioural half
+ * cannot run; it says so rather than passing quietly, which is the failure
+ * this harness exists to not have.
+ */
+laterSection('A job can be handed to another AI, and never by accident', async () => {
+  const delegates = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Delegates.swift'), 'utf8');
+  const agent = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Agent.swift'), 'utf8');
+  const thinking = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Thinking.swift'), 'utf8');
+
+  check(
+    /if let to = Delegates\.wanted\(in: goal\) \{/.test(agent),
+    'a task is a delegation only when a verb of handing over sits in front of the name',
+    'Delegates.named alone matches "what do you think of Claude"'
+  );
+  check(
+    /\\\(Delegates\.rule\)/.test(thinking),
+    'and the decision is told that naming an assistant is an instruction about where the work happens'
+  );
+
+  /*
+   * A delegation must not become a way to spend money with one yes. It is a
+   * note handed to the same mover, so the confirmations in front of a cart
+   * and a checkout still apply — and nothing in the note may say otherwise.
+   */
+  check(
+    !/confirm(ed)?\s*[:=]\s*true/i.test(delegates) && !/\bapprove\b/i.test(delegates),
+    'a delegation confirms nothing: every press it reaches is still asked for',
+    'the note rides into the same loop as every other task and must not carry an exemption'
+  );
+  check(
+    /It is NOT done when your words are in the box/.test(delegates),
+    'and a prompt sitting in a composer is not a finished job',
+    'the mover is generous about its own work; this is the sentence that stops it'
+  );
+  check(
+    /static func awaitWritten/.test(agent) && /task\.delegate != nil, task\.desk\.isEmpty, !task\.tab\.isEmpty/.test(agent),
+    'waiting for another AI is watched for, not thought about',
+    'a model call every two seconds of somebody else writing is most of the cost and none of the moves'
+  );
+
+  // The behaviour itself.
+  const swiftc = cp.spawnSync('which', ['swiftc'], { encoding: 'utf8' }).status === 0;
+  if (!swiftc) {
+    check(false, 'the matcher itself could not be run: no swiftc on this machine',
+      'the source checks above passed; what a sentence actually matches was NOT tested');
+    return;
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-delegates-'));
+  try {
+    fs.copyFileSync(path.join(ROOT, 'mac/Sources/Grove/Delegates.swift'), path.join(dir, 'Delegates.swift'));
+    // Each line: the sentence, then the delegate it must resolve to ("-" for none).
+    const table = [
+      ['ask claude to write a cover letter for the jane street internship', 'claude'],
+      ['get chatgpt to draft the email to my landlord', 'chatgpt'],
+      ['have gemini summarise that paper', 'gemini'],
+      ['run this by perplexity', 'perplexity'],
+      ['ask claude code to fix the failing tests', 'vscode'],
+      ['Ask Claude to write a cover letter for the Jane Street internship', 'claude'],
+      // Named, but nothing is being handed over.
+      ['what do you think of claude', '-'],
+      ['is gemini any good', '-'],
+      ['claude is slow today', '-'],
+      // The one that made adjacency the rule rather than a refinement of it.
+      ['use the cursor keys to move', '-'],
+      ['move the cursor to the end of the line', '-'],
+      // Ordinary jobs, which must stay ordinary jobs.
+      ['play wordle', '-'],
+      ['order me a burrito on uber eats', '-'],
+      ['Start a game of Wordle on the New York Times website and stop there', '-'],
+    ];
+    fs.writeFileSync(path.join(dir, 'main.swift'),
+      'let table: [(String, String)] = [\n' +
+      table.map(([said, want]) => `  (${JSON.stringify(said)}, ${JSON.stringify(want)}),`).join('\n') +
+      '\n]\nfor (said, want) in table {\n' +
+      '  let got = Delegates.wanted(in: said)?.id ?? "-"\n' +
+      '  print("\\(got == want ? "ok" : "BAD")\\t\\(got)\\t\\(want)\\t\\(said)")\n}\n' +
+      'if let d = Delegates.named("ask claude to write a cover letter") {\n' +
+      '  print("ASKED\\t" + Delegates.asked(from: "Ask Claude to write a cover letter", to: d))\n}\n');
+    const built = cp.spawnSync('swiftc', ['-O', 'Delegates.swift', 'main.swift', '-o', 'run'],
+      { cwd: dir, encoding: 'utf8' });
+    if (built.status !== 0) {
+      check(false, 'Delegates.swift did not compile on its own', String(built.stderr).slice(0, 400));
+      return;
+    }
+    const ran = cp.spawnSync(path.join(dir, 'run'), [], { encoding: 'utf8' });
+    const lines = String(ran.stdout).trim().split('\n').filter(Boolean);
+    const verdicts = lines.filter((l) => !l.startsWith('ASKED'));
+    // Assert the size of what came back, not just its contents: a run that
+    // printed nothing would otherwise pass every "nothing was BAD" test.
+    check(
+      verdicts.length === table.length,
+      `all ${table.length} sentences were actually matched`,
+      `got ${verdicts.length} verdicts`
+    );
+    const bad = verdicts.filter((l) => l.startsWith('BAD'));
+    check(
+      bad.length === 0,
+      'every one resolves to the delegate it should, and the rest to none',
+      bad.join('\n         ')
+    );
+    const asked = lines.find((l) => l.startsWith('ASKED')) || '';
+    check(
+      asked === 'ASKED\twrite a cover letter',
+      'and what is handed over is the request, not the instruction to hand it over',
+      `got ${JSON.stringify(asked)} — "Ask Claude to ask Claude" is what the seam exists to prevent`
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/*
+ * The lite model has no thinking to configure, and says so with a 400
+ * ------------------------------------------------------------------
+ *
+ * `gemini-flash-lite-latest` does not ignore `thinkingConfig`; it refuses the
+ * whole request, INVALID_ARGUMENT, before reading a word of it. The browser
+ * agent sent it `{"thinkingBudget": 0}` on the fallback leg — which exists
+ * for when the better model is slow or down, so it could only ever be reached
+ * on the one day it mattered, and it always failed there. On screen that was
+ * "I couldn't work out the next step on your Mac", and in the log it was no
+ * move from either model, which reads like the network rather than like a
+ * field we sent ourselves.
+ *
+ * A dead fallback is the worst kind of dead code: it type-checks, it is never
+ * reached on a good day, and it is missing on the bad one.
+ */
+section('Nothing asks the lite model to think');
+{
+  const agent = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Agent.swift'), 'utf8');
+  check(
+    /if model\.contains\("lite"\) == false \{ config\["thinkingConfig"\]/.test(agent),
+    'the move call sends thinkingConfig only to a model that has it',
+    'the lite leg is the fallback, so it fails exactly when it is needed'
+  );
+  // Every other place that names thinkingConfig must be on a model that takes it.
+  const lines = agent.split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => l.includes('thinkingConfig'));
+  check(lines.length === 2, 'and there are exactly two places that mention it at all', `found ${lines.length}`);
+  const loose = lines.filter(([, l]) => !l.includes('lite') && !l.includes('maxOutputTokens'));
+  check(
+    loose.length === 0,
+    'with none of them unguarded',
+    loose.map(([n, l]) => `${n}: ${l.trim().slice(0, 90)}`).join('\n         ')
+  );
+}
+
+/*
+ * A panel is as tall as what is in it
+ * -----------------------------------
+ *
+ * Every state here sets a height, and a height set by hand is a guess about
+ * content that has since changed. The two states that grew a text box last
+ * were raised by hand to make room for it and then kept the raised number
+ * when the box turned out to be shorter than the guess — a third of the card
+ * was empty glass under the typing box, which reads as the panel having
+ * failed to draw rather than as a panel with nothing more to say.
+ *
+ * `fit(max)` is the fix and it is the one already used by the answer states:
+ * the hand-set number stops being the height and becomes the ceiling.
+ */
+section('A panel is as tall as what is in it');
+{
+  const panel = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Resources/panel.html'), 'utf8');
+  check(
+    /const fit = \(max\) => requestAnimationFrame/.test(panel),
+    'the height is measured from the last thing in the card, up to the mode\'s ceiling'
+  );
+  /*
+   * Every state that carries a typing box must fit.
+   *
+   * Each region runs from its own `if (m === ...)` to the next one, through
+   * `between`, so a landmark that stops matching fails rather than handing
+   * back most of the file — and the ceiling on the size is what catches a
+   * region that has swallowed the state after it, which is the way this
+   * check would otherwise pass while testing somebody else's card.
+   */
+  const states = [
+    ['thinking', "if (m === 'thinking')", "if (m === 'rewrite' || m === 'answer')"],
+    ['answer', "if (m === 'rewrite' || m === 'answer')", "if (m === 'job')"],
+    ['job', "if (m === 'job')", "if (m === 'done')"],
+  ];
+  for (const [mode, from, to] of states) {
+    const region = between(panel, from, to, { min: 200, max: 2200 });
+    check(region !== null, `the ${mode} card is where it is expected to be`);
+    check(
+      region !== null && /\bfit\(/.test(region),
+      `the ${mode} card fits its content rather than standing at a fixed height`,
+      'a hand-set height is a guess about content that has since changed'
+    );
+  }
 }
 
 /* ------------------------------------------------------------- verdict */
