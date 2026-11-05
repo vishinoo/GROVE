@@ -1652,6 +1652,38 @@ section('The rest of what they asked for');
  *   strangers came from: not a bad choice of face, a query with nothing in
  *   it to be wrong about.
  */
+/**
+ * What they asked for, not what Grove is good at.
+ *
+ * Asked for "a number game", Grove opened chess.com and played a game
+ * against the computer by itself while they watched. Two faults in one
+ * sentence: a kind of thing was named and a different one was substituted
+ * because that one has the most machinery behind it, and "I want to play"
+ * was read as "play something".
+ *
+ * The first is the shape to watch for. Chess has a board reader, a drag
+ * mover, a loop guard and forty minutes of patience — so every mention of a
+ * game pulls towards it, and the better Grove gets at one thing the worse
+ * this gets. A rule in the decision is the only place it can be answered,
+ * since by the time a board is on screen the choice has been made.
+ */
+section('What they asked for, not what Grove is good at');
+{
+  const thinking = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Thinking.swift'), 'utf8');
+  check(
+    /NOT WHAT YOU ARE GOOD AT/.test(thinking),
+    'an open request is answered with what suits them'
+  );
+  check(
+    /a number game is not chess/.test(thinking),
+    'and naming a kind of thing is not an invitation to substitute an easier one'
+  );
+  check(
+    /"I WANT TO PLAY" MEANS THEY PLAY/.test(thinking),
+    'and wanting to play means they play, not that Grove does'
+  );
+}
+
 section('A reaction is a reaction, not a slideshow');
 {
   const gifs = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Gifs.swift'), 'utf8');
@@ -1732,6 +1764,30 @@ section('A reaction is a reaction, not a slideshow');
       'a reaction that arrives every time is not a reaction'
     );
   }
+  /*
+   * And a name is not a reaction.
+   *
+   * Asked for a face for a Mac DeMarco record, the model wrote "mac demarco"
+   * — so GIPHY was searched for an artist, which returns whatever anyone has
+   * ever tagged with that name: fan pictures, a couple kissing, strangers.
+   * Not a bad choice of reaction; not a reaction at all, and the reason the
+   * vibe never matched the song.
+   */
+  check(/static func echoes\(/.test(gifs), 'a search that is just the thing\'s own name is caught');
+  check(
+    /echoes\(picked, of: happened\)/.test(gifs),
+    'on the path that picks a face after the event'
+  );
+  check(
+    /Gifs\.echoes\(chosen, of: text/.test(thinking),
+    'and on the path that picks one with the answer',
+    'it was written out once before and the other path kept firing'
+  );
+  check(
+    /NEVER A NAME/.test(gifs) && /MOVEMENT or the MOOD/.test(gifs),
+    'and the rule says so outright, so the guard is the backstop and not the plan'
+  );
+
   const apart = /apart: TimeInterval = (\d+)(?:\s*\*\s*(\d+))?/.exec(popup);
   const seconds = apart ? Number(apart[1]) * (apart[2] ? Number(apart[2]) : 1) : 0;
   check(seconds >= 180, `and no two are closer than ${seconds} seconds`);

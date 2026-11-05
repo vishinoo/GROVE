@@ -48,7 +48,7 @@ enum Gifs {
 
   /** How Grove picks its face. Shared by Thinking.decide and choose, so the two cannot drift apart. */
   static let rule = """
-    A GIF is rare. It is for the two moments worth interrupting someone for — something genuinely funny, and something that actually went well — and for a song, where the picture is the point: someone dancing or nodding along in that song's mood, a real laugh at something actually funny, cheering at good news that is actually good. Most exchanges get nothing, and nothing is the normal answer: a hello, a thank you, a plain fact, a question answered, a job done, bad luck, anything private. Never sarcasm or judgement (no eye rolls, facepalms, side eyes, blank stares or skeletons), never a joke about them, never a pun or a clever concept. Two or three plain words a GIF site understands, the reaction first, in English. Leave it empty unless you would actually send one.
+    A GIF is rare. It is for the two moments worth interrupting someone for — something genuinely funny, and something that actually went well — and for a song, where the picture is the point. Most exchanges get nothing, and nothing is the normal answer: a hello, a thank you, a plain fact, a question answered, a job done, bad luck, anything private. NEVER A NAME. Not the artist, the band, the song, the film, the site or the person: a GIF site searched for a name returns whatever anyone has ever tagged with it, which is fan pictures and strangers, and it is how a quiet record got a dance clip and a couple kissing. Describe the MOVEMENT or the MOOD instead, as if the sound were off and you were telling someone what the picture shows: "slow head nod", "staring out a window", "smoking on a porch" for something hazy and unhurried; "jumping around" only if it really is that. Never sarcasm or judgement (no eye rolls, facepalms, side eyes, blank stares or skeletons), never a joke about them, never a pun or a clever concept. Two or three plain English words a GIF site understands, the movement first. Leave it empty unless you would actually send one.
     """
 
   /** Search words for a moment that has happened: what it was, and what Grove said about it. */
@@ -57,9 +57,33 @@ enum Gifs {
     let user = "\(happened)\nYou said: \(said.isEmpty ? "(nothing)" : said)"
     let obj = Thinking.parsed(await Thinking.call(system: system, user: user))
     // The same gate as an answer's, from the same set, so the two cannot drift.
-    let words = faces.contains(((obj?["moment"] as? String) ?? "").lowercased()) ? ((obj?["gif"] as? String) ?? "") : ""
-    Log.say("gif: chose \"\(words)\" for \(happened.prefix(70).replacingOccurrences(of: "\n", with: " "))")
+    let picked = faces.contains(((obj?["moment"] as? String) ?? "").lowercased()) ? ((obj?["gif"] as? String) ?? "") : ""
+    let words = echoes(picked, of: happened) ? "" : picked
+    Log.say("gif: chose \"\(words)\" for \(happened.prefix(70).replacingOccurrences(of: "\n", with: " "))\(words.isEmpty && !picked.isEmpty ? " (dropped \"\(picked)\": a name, not a reaction)" : "")")
     return words
+  }
+
+  /**
+    Whether the search words are just the thing's own name read back.
+
+    Asked for a face for a Mac DeMarco record, the model wrote "mac demarco"
+    — so GIPHY was searched for an artist, which returns whatever anyone has
+    ever tagged with that name: fan pictures, a couple kissing, strangers.
+    Not a bad choice of reaction; not a reaction at all.
+
+    Told in the rule never to use a name, it will still sometimes do it, and
+    this is cheaper than hoping. Every meaningful word of the search already
+    appearing in what happened means the model described the thing instead of
+    reacting to it, and no face is better than a stranger.
+  */
+  static func echoes(_ words: String, of happened: String) -> Bool {
+    let small: Set<String> = ["a", "an", "the", "to", "in", "at", "on", "of", "with", "and", "for", "by", "song", "music", "playing", "played", "track", "video"]
+    let parts = words.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init).filter { !small.contains($0) && $0.count > 2 }
+    // Nothing but filler left ("the song", "a video") is not a reaction
+    // either, and would be searched as written. Dropped with the names.
+    guard !parts.isEmpty else { return true }
+    let hay = happened.lowercased()
+    return parts.allSatisfy { hay.contains($0) }
   }
 
   /** A small GIF's address for these words, one of the best few. */
