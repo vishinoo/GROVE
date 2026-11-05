@@ -1667,6 +1667,85 @@ section('The rest of what they asked for');
  * this gets. A rule in the decision is the only place it can be answered,
  * since by the time a board is on screen the choice has been made.
  */
+/**
+ * You can say something while it is working.
+ *
+ * Watching it get a job wrong, the only things you could do were let it
+ * finish or stop it — so you stopped it and said the whole thing again. The
+ * notch showed no box at all while thinking or working, which is the moment
+ * you can see exactly what you want and have no way to say it.
+ *
+ * A line typed then is a change to the run, not a new task. It is folded
+ * into the run's own history, which is what the next move reads, and never
+ * handed to `resume`: a run already looping would then have two, both
+ * driving the same tab. Nothing is interrupted and nothing waits — the
+ * current move finishes and the next is made knowing what was said.
+ */
+section('You can say something while it is working');
+{
+  const agent = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Agent.swift'), 'utf8');
+  const main = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/main.swift'), 'utf8');
+  const panel = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Resources/panel.html'), 'utf8');
+
+  check(/func redirect\(_ said: String\) -> String\?/.test(agent), 'a run can be redirected while it is going');
+  check(
+    /tasks\.values\.first\(where: \{ \$0\.live \}\)/.test(agent),
+    'and only one that is actually looping is redirected',
+    'one waiting on a yes belongs to resume, which the loop must not be given twice'
+  );
+  check(
+    /task\.history\.append\(\s*\n?\s*"They just said this while you were working/.test(agent),
+    'the line goes into the history the next move reads'
+  );
+  check(
+    /task\.live = true\s*\n\s*defer \{ task\.live = false \}/.test(agent),
+    'and the live flag is cleared however the run ends',
+    'left set, every later line would be folded into a run that had finished'
+  );
+  check(
+    /if Agent\.shared\.redirect\(text\) != nil \{ break \}/.test(main),
+    'a typed line reaches the run before it reaches a new decision'
+  );
+
+  // And there has to be somewhere to type it.
+  const job = between(panel, "if (m === 'job')", "if (m === 'done')", { min: 200, max: 2000 });
+  check(job !== null, 'the working panel is where it is expected to be');
+  check(
+    job !== null && /id="ask-input"/.test(job) && /wireAsk\(\)/.test(job),
+    'the working panel has a box you can type into',
+    'without one the feature is unreachable, however well it is wired'
+  );
+  const thinking = between(panel, "if (m === 'thinking')", "if (m === 'rewrite' || m === 'answer')", { min: 150, max: 1500 });
+  check(
+    thinking !== null && /id="ask-input"/.test(thinking),
+    'and so does the one shown while it is deciding'
+  );
+}
+
+/**
+ * A board is not a mandate.
+ *
+ * `if !page.chess.isEmpty { task.game = true }` read "a board, therefore a
+ * game" — and a game gets forty minutes and five hundred steps instead of a
+ * check-in after one. So asking for a game to be set up ended with Grove
+ * playing the whole of it while they watched, which is both the most
+ * annoying thing it can do and the hardest to interrupt, since the long
+ * budget is exactly what stops it coming back to ask.
+ */
+section('A board is not a mandate to play');
+{
+  const agent = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Agent.swift'), 'utf8');
+  check(
+    /if !page\.chess\.isEmpty, !task\.handOver \{ task\.game = true \}/.test(agent),
+    'a board only buys the long budget when the job was not to hand it over'
+  );
+  check(
+    /var handOver = false/.test(agent) && /task\.handOver = goal\.range\(of:/.test(agent),
+    'and that is read from the goal Grove itself wrote',
+    'a phrase may decide this only because it is this app\'s own output, not somebody\'s speech'
+  );
+}
+
 section('What they asked for, not what Grove is good at');
 {
   const thinking = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Thinking.swift'), 'utf8');

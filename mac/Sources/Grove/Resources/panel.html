@@ -241,8 +241,10 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
       wireAsk();
     }
     if (m === 'thinking') {
-      setH(118);
-      body.innerHTML = `<div class="row space"><span class="prompt">${esc(d.ask)}</span><span class="row small"><span class="bars"><i></i><i></i><i></i><i></i></span>Thinking</span></div>${d.text ? `<div class="quote">${esc(d.text)}</div>` : ''}`;
+      setH(164);
+      body.innerHTML = `<div class="row space"><span class="prompt">${esc(d.ask)}</span><span class="row small"><span class="bars"><i></i><i></i><i></i><i></i></span>Thinking</span></div>${d.text ? `<div class="quote">${esc(d.text)}</div>` : ''}
+        <form class="ask" id="ask"><input id="ask-input" placeholder="Add something, or change it" autocomplete="off"><button class="chip" type="submit">Send</button></form>`;
+      wireAsk();
     }
     if (m === 'rewrite' || m === 'answer') {
       setH(m === 'rewrite' ? 236 : 220);
@@ -266,12 +268,17 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
       input?.addEventListener('input', () => { send.hidden = !input.value.trim(); });
     }
     if (m === 'job') {
-      setH(104 + Math.min((d.steps || []).length, 3) * 25);
+      setH(150 + Math.min((d.steps || []).length, 3) * 25);
       const steps = d.steps || [];
       body.innerHTML = `
         <div class="row space"><span class="label">${esc(d.from || '')}</span></div>
         <span class="hello" style="font-size:18px">${esc((d.title || '').charAt(0).toUpperCase() + (d.title || '').slice(1))}</span>
-        <ul class="steps">${steps.map((t, i) => `<li class="${i < (d.at || 0) ? 'done' : i === (d.at || 0) ? 'now' : ''}"><i></i><span class="glide">${esc(t)}</span></li>`).join('')}</ul>`;
+        <ul class="steps">${steps.map((t, i) => `<li class="${i < (d.at || 0) ? 'done' : i === (d.at || 0) ? 'now' : ''}"><i></i><span class="glide">${esc(t)}</span></li>`).join('')}</ul>
+        <form class="ask" id="ask"><input id="ask-input" placeholder="Change it \u2014 \u201ci want to play\u201d" autocomplete="off"><button class="chip" type="submit">Send</button></form>`;
+      // Not focused: it is running, and stealing the cursor from whatever
+      // they are actually doing is how a helper becomes a nuisance. Typing
+      // into it goes to the run itself, not to a new task.
+      wireAsk();
     }
     if (m === 'done') {
       setH(110);
@@ -284,7 +291,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
         <div class="row space"><span class="label">${d.confirm ? 'Waiting for your yes' : 'A question'}</span></div>
         <div class="answer">${esc(d.text)}</div>
         ${d.confirm
-          ? '<div class="chips"><button class="chip solid" data-act="approve">Yes, go ahead</button><button class="chip" data-act="decline">No</button></div>'
+          ? '<div class="chips"><button class="chip solid" data-act="approve">Yes, go ahead</button><button class="chip" data-act="decline">No</button></div><div class="small" id="yes-keys" style="margin-top:8px">⌘K then ⏎ to approve</div>'
           : `<form class="ask" id="ask"><input id="ask-input" placeholder="Your answer" autocomplete="off">${'<button class="mic" type="button" id="mic" aria-label="Speak"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>'}<button class="chip" type="submit">Send</button></form>`}`;
       if (!d.confirm) wireAsk(true);
       fit(280);
@@ -351,6 +358,10 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     suggestions(list) { S.suggestions = list; if (S.mode === 'idle') { render(); glide(); } },
     event(e) {
       if (e.event === 'heard') { const el = document.getElementById('heard'); if (el) el.textContent = e.data.words; }
+      if (e.event === 'armed') {
+        const keys = document.getElementById('yes-keys');
+        if (keys) keys.textContent = e.data && e.data.on ? '⏎ to approve · esc to cancel' : '⌘K then ⏎ to approve';
+      }
       if (e.event === 'dictate') {
         const input = document.getElementById('ask-input'), mic = document.getElementById('mic');
         if (input) input.value = e.data.words || '';

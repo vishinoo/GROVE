@@ -56,6 +56,14 @@ final class Agent {
     var approved: String?
     /** A job done natively rather than in Chrome (a text), run on their yes. */
     var send: (() async -> String?)?
+    /** An app it is working in by sight rather than a Chrome tab. */
+    var desk = ""
+    /** Words for a person have gone into that app's box: every press from here is held for a yes. */
+    var drafted = false
+    /** What a yes presses, when it is not an element on a page. */
+    var onYes: (() async -> Void)?
+    /** Which app a message goes through: "messages" or "whatsapp". */
+    var app = "messages"
     /** People a name matched, while they pick one. */
     var choices: [Contact] = []
     var text = ""
@@ -65,6 +73,26 @@ final class Agent {
     var tab = ""
     /** A game is being played: it runs until the game ends, not until the usual check-in. */
     var game = false
+    /**
+      This run is looping right now, as opposed to sitting waiting on a yes.
+
+      The difference matters for one thing only: something said while it is
+      looping must be folded into the next move, never handed to `resume`,
+      which starts the loop again. Two loops on one tab is a bug this file
+      has had before.
+    */
+    var live = false
+    /**
+      The job is to set something up and hand it over, so a board on screen
+      is theirs to play and not Grove's.
+
+      Read from the goal, which Grove wrote itself: the decision is told, in
+      so many words, to say "stop there" when they are the one playing. That
+      makes this a check on this app's own output rather than a guess at
+      somebody's speech, which is the only reason a phrase is allowed to
+      decide anything here.
+    */
+    var handOver = false
     /** It said done after a move that changed nothing, and was asked to look again. */
     var doubted = false
     /** Times the check refused its done. */
@@ -147,6 +175,8 @@ final class Agent {
     tasks = tasks.filter { Date().timeIntervalSince($0.value.touched) < 600 }
     let task = Task(id: String(UUID().uuidString.prefix(8)).lowercased(), goal: goal)
     task.budget = budget
+    task.handOver = goal.range(of: #"\b(stop there|hand (it )?over|they('ll| will) play|let them play|set (it|this) up for them)\b"#,
+                               options: [.regularExpression, .caseInsensitive]) != nil
     tasks[task.id] = task
     Log.say("agent: start \(task.id) \(goal)")
     return await loop(task)
@@ -158,9 +188,11 @@ final class Agent {
     related names on their own card) — and the exact words are read back
     before anything is sent, with the same yes as everything else here.
   */
-  func message(to who: String, text: String) async -> AgentResult {
-    let task = Task(id: String(UUID().uuidString.prefix(8)).lowercased(), goal: "Text \(who)")
+  func message(to who: String, text: String, app: String = "messages") async -> AgentResult {
+    let through = Native.has(app) ? app : "messages"
+    let task = Task(id: String(UUID().uuidString.prefix(8)).lowercased(), goal: "\(Native.name(through)) \(who)")
     task.text = text
+    task.app = through
     task.history = [who]
     tasks[task.id] = task
     Log.say("agent: message \(task.id) to \(who)")
@@ -168,6 +200,13 @@ final class Agent {
       return AgentResult(state: "failed", spoken: "What should the message to \(who) say?", task: task.id)
     }
     let found = await Contacts.find(who)
+    // Contacts has no number for them, but the app may well know them.
+    if through != "messages", found.isEmpty || found[0].address.filter(\.isNumber).count < 7 {
+      let goal = "In the \(Native.name(through)) app on this Mac, find \(who), open the chat with them, and put this in the message box: \(text)"
+      let byHand = Task(id: task.id, goal: goal)
+      tasks[task.id] = byHand
+      return await work(byHand, in: Native.name(through))
+    }
     if Contacts.refused {
       tasks[task.id] = nil
       return AgentResult(state: "failed", spoken: "Your Mac hasn't let me look in Contacts. System Settings, Privacy and Security, Automation: under Grove, turn on Contacts and Messages.", task: task.id)
@@ -184,17 +223,71 @@ final class Agent {
       let names = found.prefix(3).map(\.name).joined(separator: ", or ")
       return AgentResult(state: "ask", spoken: "Which one: \(names)?", task: task.id)
     }
-    return confirmText(task, to: found[0])
+    return await ready(task, to: found[0])
+  }
+
+  /** The chat opened with the words in the box, for WhatsApp; then the read-back. */
+  private func ready(_ task: Task, to person: Contact) async -> AgentResult {
+    if task.app == "whatsapp", let failure = await Native.openWhatsApp(task.text, to: person.address) {
+      tasks[task.id] = nil
+      return AgentResult(state: "failed", spoken: failure, task: task.id)
+    }
+    return confirmText(task, to: person)
+  }
+
+  /** A goal done in an app on this Mac, by sight. */
+  private func work(_ task: Task, in app: String) async -> AgentResult {
+    guard let name = await Native.focus(app) else {
+      tasks[task.id] = nil
+      return AgentResult(state: "failed", spoken: "I couldn't find \(app) on your Mac.", task: task.id)
+    }
+    task.desk = name
+    task.budget = max(task.budget, 240)
+    return await loop(task)
   }
 
   private func confirmText(_ task: Task, to person: Contact) -> AgentResult {
     let text = task.text
-    task.send = { await Messages.send(text, to: person.address) }
+    let app = task.app
+    task.send = { app == "whatsapp" ? await Native.pressSend() : await Messages.send(text, to: person.address) }
     task.confirm = Pending(n: -1, url: "", summary: "")
-    return AgentResult(state: "confirm", spoken: "Text \(person.name): “\(text)”. Send it?", task: task.id)
+    return AgentResult(state: "confirm", spoken: "\(app == "whatsapp" ? "WhatsApp" : "Text") \(person.name): “\(text)”. Send it?", task: task.id)
   }
 
   /** Their answer to a question, or `approve` after a yes to a confirmation. */
+  /**
+    Something said while a run is going: a change to it, not a new task.
+
+    You watch it start a game and play the game itself, and the only things
+    you can do are let it finish or stop it — so you stop it, and say the
+    whole thing again. That is the worst moment this app has, because it is
+    the one where you can see exactly what you want and have no way to say
+    it.
+
+    Folded into the run's own history, which is what the next move reads, so
+    it arrives as part of the conversation the mover is already having. Not
+    through `resume`, which starts the loop again: a run that is already
+    looping would then have two, both driving the same tab.
+
+    Nothing is interrupted and nothing waits. The current move finishes, and
+    the one after it is made knowing what was said.
+  */
+  func redirect(_ said: String) -> String? {
+    let trimmed = said.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, let task = tasks.values.first(where: { $0.live }) else { return nil }
+    task.history.append(
+      "They just said this while you were working: \"\(trimmed)\". It changes what they want. Do that from here — "
+      + "if it means they take over, set it up for them and stop; if it means something different, go and do that instead; "
+      + "if it is only a correction, carry on with it applied. Say in one short line what you changed."
+    )
+    // Shown as well as read, so the line they typed appears in the list of
+    // what is happening rather than vanishing into a prompt.
+    task.shown.append("You: \(trimmed.prefix(60))")
+    task.touched = Date()
+    Log.say("agent: redirected \(task.id) — \(trimmed.prefix(60))")
+    return task.goal
+  }
+
   func resume(task id: String, answer: String, approve: Bool) async -> AgentResult {
     guard let task = tasks[id] else {
       return AgentResult(state: "failed", spoken: "I lost track of that one on your Mac. Ask me again?", task: id)
@@ -209,7 +302,7 @@ final class Agent {
       task.choices = []
       // Asked once: next time "Akash" or "my brother" means this one.
       if let who = task.history.first { Contacts.remember(who, picked) }
-      return confirmText(task, to: picked)
+      return await ready(task, to: picked)
     }
     if let send = task.send {
       tasks[id] = nil
@@ -217,7 +310,15 @@ final class Agent {
       if let failure = await send() { return AgentResult(state: "failed", spoken: failure, task: id) }
       return AgentResult(state: "done", spoken: "Sent.", task: id)
     }
-    if approve, let pending = task.confirm {
+    if approve, let press = task.onYes {
+      task.onYes = nil
+      task.confirm = nil
+      task.drafted = false
+      await press()
+      task.history.append("They said yes and it was pressed. That step is finished; never do it again. If the goal is now reached, reply done.")
+      Log.say("agent: approved \(task.id) a press in \(task.desk)")
+      try? await _Concurrency.Task.sleep(nanoseconds: 1_500_000_000)
+    } else if approve, let pending = task.confirm {
       task.confirm = nil
       let page = await Browser.url()
       guard page == pending.url else {
@@ -251,6 +352,8 @@ final class Agent {
   }
 
   private func steps(_ task: Task) async -> AgentResult {
+    task.live = true
+    defer { task.live = false }
     current += 1
     let mine = current
     for _ in 0..<60 where running { try? await _Concurrency.Task.sleep(nanoseconds: 250_000_000) }
@@ -270,12 +373,16 @@ final class Agent {
       // They closed the tab it was working in. That is not Chrome failing:
       // it was every task for an afternoon reported as "Chrome isn't working",
       // because a script aimed at a tab that no longer existed failed first.
-      if !task.tab.isEmpty, !(await Browser.alive(task.tab)) {
+      if task.desk.isEmpty, !task.tab.isEmpty, !(await Browser.alive(task.tab)) {
         task.tab = ""
         task.history.append("The tab you were working in was closed; take another or go somewhere.")
       }
       var page = Browser.Page()
-      if task.tab.isEmpty {
+      if !task.desk.isEmpty {
+        page.title = "the \(task.desk) app"
+        page.text = Native.words(in: task.desk)
+        page.desk = true
+      } else if task.tab.isEmpty {
         page.tabs = await Browser.tabs(last: lastTab)
         Log.say("agent: \(task.id) \(page.tabs.count) tabs read")
       } else {
@@ -289,13 +396,38 @@ final class Agent {
           page = await Browser.read()
         }
       }
-      if !page.chess.isEmpty { task.game = true }
+      /*
+        A board on screen says the page is a game. It does not say Grove is
+        the player.
+
+        This read "a board, therefore a game", and a game gets forty minutes
+        and five hundred steps instead of a check-in after one. So asking for
+        a game to be set up ended with Grove playing the whole of it while
+        they watched — which is both the most annoying thing it can do and
+        the hardest to interrupt, since the long budget is exactly what stops
+        it coming back to ask.
+
+        The rule in the decision is the fix; this is the backstop for when
+        the rule is not followed. A run told to hand over keeps the ordinary
+        budget, so the worst case is that it checks in and says what it is
+        doing rather than disappearing for forty minutes.
+      */
+      if !page.chess.isEmpty, !task.handOver { task.game = true }
       let here = Lessons.site(page.url)
       if !here.isEmpty, task.sites.last != here { task.sites.append(here) }
       // A picture when text cannot say what is there. Not for a chess board,
       // which the reader already names square by square.
       var picture: Data?
-      if !task.tab.isEmpty, page.error == nil, task.look || (page.visual && page.chess.isEmpty) {
+      if !task.desk.isEmpty {
+        _ = await Native.focus(task.desk)
+        if let shot = await Browser.shot(app: task.desk) {
+          picture = shot.jpeg
+          task.shotBounds = shot.bounds
+        } else {
+          task.history.append("No picture of \(task.desk): its window is not on screen, or Screen Recording is off.")
+        }
+        task.look = false
+      } else if !task.tab.isEmpty, page.error == nil, task.look || (page.visual && page.chess.isEmpty) {
         await Browser.front()
         if let shot = await Browser.shot() {
           picture = shot.jpeg
@@ -360,20 +492,83 @@ final class Agent {
       if task.plan.isEmpty, let plan = move["plan"] as? String { task.plan = plan }
       if ["click", "type", "keys", "select", "move"].contains(action) { task.acted = true }
       if ["click", "type", "keys", "select", "move", "go", "find"].contains(action) { task.acts += 1 }
-      if task.tab.isEmpty && !["go", "tab", "ask", "done", "fail"].contains(action) {
+      if task.tab.isEmpty && task.desk.isEmpty && !["go", "tab", "ask", "done", "fail", "message", "app"].contains(action) {
         task.history.append("There is no tab yet: take one of theirs with tab, or go somewhere first.")
         continue
       }
 
+      // In an app, by sight: real clicks and real keys, and in anything that
+      // reaches a person, nothing after the words go in without a yes. Code
+      // decides this, because a picture of a send button has no label to check.
+      if !task.desk.isEmpty, ["click", "type", "keys", "scroll", "confirm"].contains(action) {
+        let comms = Native.isComms(task.desk)
+        let point: CGPoint? = {
+          guard let x = Agent.number(move["x"]), let y = Agent.number(move["y"]), let b = task.shotBounds else { return nil }
+          return CGPoint(x: b.minX + x * b.width, y: b.minY + y * b.height)
+        }()
+        let enter = (move["enter"] as? Bool) == true
+        switch action {
+        case "type":
+          let forPerson = (move["into"] as? String ?? "message").lowercased() != "search"
+          if let point { await Browser.realClick(point) }
+          await Native.paste(text)
+          task.history.append("Typed \"\(text)\" into \(forPerson ? "the message box" : "the search box")")
+          if comms && forPerson { task.drafted = true }
+          if enter {
+            if task.drafted {
+              task.onYes = { _ = await Browser.run("tell application \"System Events\" to key code 36") }
+              return askToConfirm(task, n: -1, url: "", summary: Agent.held(move, text: text, in: task.desk))
+            }
+            _ = await Browser.run("tell application \"System Events\" to key code 36")
+          }
+        case "click", "keys", "confirm":
+          let press: () async -> Void = action == "keys"
+            ? { await Browser.pressReal(text, enter: enter) }
+            : { if let point { await Browser.realClick(point) } else { _ = await Browser.run("tell application \"System Events\" to key code 36") } }
+          if action == "confirm" || task.drafted {
+            task.onYes = press
+            return askToConfirm(task, n: -1, url: "", summary: Agent.held(move, text: task.text, in: task.desk))
+          }
+          await press()
+          task.history.append(action == "keys" ? "Pressed \(text)" : "Clicked the picture at \(move["x"] ?? ""), \(move["y"] ?? "")")
+        default:
+          await Browser.realScroll()
+          task.history.append("Scrolled")
+        }
+        try? await _Concurrency.Task.sleep(nanoseconds: 900_000_000)
+        continue
+      }
+
       switch action {
+      case "app":
+        // Off to an app on this Mac: the next move sees a picture of it.
+        let wanted = (move["name"] as? String) ?? text
+        if let name = await Native.focus(wanted) {
+          task.desk = name
+          task.history.append("Opened \(name)")
+        } else {
+          task.history.append("There is no app called \(wanted) on this Mac.")
+        }
       case "go":
         let url = move["url"] as? String ?? ""
+        task.desk = ""
         if task.tab.isEmpty {
           await Browser.newTab()
           task.tab = Browser.tab
         }
         await Browser.go(url)
         task.history.append("Went to \(url)")
+      case "message":
+        // Already working in the app by hand: handing off again would come
+        // straight back here, for ever.
+        if !task.desk.isEmpty {
+          task.history.append("You are already in \(task.desk), and Contacts could not help. Do it here by sight: find the person, open the chat, type the words with into message, then confirm.")
+          continue
+        }
+        // A message through an app on this Mac rather than its website: the
+        // same Contacts lookup, read-back and yes as a text from the notch.
+        tasks[task.id] = nil
+        return await message(to: (move["to"] as? String) ?? "", text: (move["text"] as? String) ?? text, app: ((move["app"] as? String) ?? "messages").lowercased())
       case "find":
         // The page searched, not skimmed: every place a word appears, with the
         // lines around it, and the first one scrolled into view. Asked how much
@@ -519,7 +714,7 @@ final class Agent {
         // check sees the goal, what happened and the page as it is now, and
         // only "achieved" is accepted. Twice refused is said as a failure.
         let claim = (move["summary"] as? String) ?? text
-        let verdict = await Agent.check(goal: task.goal, claim: claim, history: task.history, page: page, picture: await Agent.picture())
+        let verdict = await Agent.check(goal: task.goal, claim: claim, history: task.history, page: page, picture: await Agent.picture(app: task.desk))
         Log.say("agent: \(task.id) check \(verdict.ok ? "passed" : "refused"): \(verdict.why.prefix(120))")
         if !verdict.ok {
           task.checks += 1
@@ -600,6 +795,8 @@ final class Agent {
   {"action":"keys","text":"crane","enter":true} — real key presses, for pages that listen to the keyboard rather than a box: games like Wordle, shortcuts. Not for typing into a field. For named keys, give their names separated by spaces, several at once when that is the plan: "ArrowLeft ArrowLeft ArrowUp", "Escape", "Space", "Tab", "Backspace".
   {"action":"select","n":7,"text":"option"}
   {"action":"scroll"} {"action":"back"} {"action":"wait"}
+  {"action":"message","app":"whatsapp","to":"Akash","text":"..."} — a message to a person through an app installed on this Mac (\(Native.apps)) instead of its website. It finds them in Contacts and asks them before sending. Use it for those apps; use the website only for apps not listed.
+  {"action":"app","name":"Notes"} — work in an app on this Mac rather than a website. Your next move gets a picture of its window: click points on it with x and y, type with {"action":"type","text":"...","into":"search" or "message"} (no n), press keys with keys. Use it for anything that lives in an app, and for odd jobs no website does. In an app that reaches people, "into":"message" is for words going to a person, and every press after that asks them first.
   {"action":"find","text":"flour"} — search the whole page for a word and get every place it appears with the lines around it. Use it first whenever you need a particular fact from a long page (an amount, a price, a time, a name) instead of scrolling and skimming.
   {"action":"move","from":"e2","to":"e4"} — a chess move, when the page has a Chess section.
   {"action":"look"} — see a picture of the window next move, when the text does not tell you what is on the page (a game drawn on a canvas, a video player, a frame). When you have a picture, {"action":"click","x":0.42,"y":0.61} clicks that point on it, as fractions of its width and height.
@@ -626,6 +823,7 @@ final class Agent {
   - For looking things up (jobs, reviews, prices), finish on the page that shows them and summarise the best two or three in done.
   - Do not repeat a move that just failed; try another way.
   - Never say they are not signed in unless the page plainly shows a sign-in form asking for their email or password. If unsure, wait and look again.
+  - Sending an email: open Gmail's compose already filled in, https://mail.google.com/mail/?view=cm&fs=1&to=ADDRESS&su=SUBJECT&body=BODY with each part URL-encoded, check To, Subject and the body read what you meant, then confirm on the Send button. Write it properly from what they said: a greeting, the point, their first name. If you do not have the address, search Gmail for that person first, and ask only if nothing turns up.
   - Email: Gmail is https://mail.google.com/mail/u/0/#inbox and searches as https://mail.google.com/mail/u/0/#search/QUERY with Gmail operators, e.g. replies since yesterday: in:inbox newer_than:2d; what they sent: in:sent newer_than:2d. Read the list and say who wrote and about what. For "did anyone reply to what I sent": first in:sent for that day to see who they wrote to, then search the inbox for replies from those people (e.g. in:inbox newer_than:2d -from:me), and say who replied and who has not yet. Open an email if the list does not show enough.
   - Messages: Instagram DMs are at https://www.instagram.com/direct/inbox/. Reading is fine without asking; summarise who wrote and what in done. Never send a message without confirm. To send one: open the conversation with that person, type into the message box (not the search box), then confirm on the Send button.
   - Words go into a (textbox), textarea or text input: the message box, never a search box, toolbar or button. They are listed first. After typing, check the box reads what you meant before going on; if it does not, type it again rather than pressing anything.
@@ -637,6 +835,22 @@ final class Agent {
     so a model holding the connection open stalled a chess game for minutes
     with nothing logged and nothing on screen.
   */
+  /**
+    A request that answers within so many seconds or not at all. The
+    session's own timeouts did not hold: a first move came back after
+    ninety-seven seconds, a minute and a half of nothing on screen. So the
+    request races a clock, and losing the race moves on to the lighter model.
+  */
+  static func within(_ seconds: Double, _ request: URLRequest) async -> (Data, URLResponse)? {
+    await withTaskGroup(of: (Data, URLResponse)?.self) { group in
+      group.addTask { try? await session.data(for: request) }
+      group.addTask { try? await _Concurrency.Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)); return nil }
+      let first = await group.next() ?? nil
+      group.cancelAll()
+      return first
+    }
+  }
+
   private static let session: URLSession = {
     let config = URLSessionConfiguration.default
     config.timeoutIntervalForRequest = 20
@@ -645,8 +859,9 @@ final class Agent {
   }()
 
   /** A picture of the window for the check, when Grove is allowed to take one. */
-  private static func picture() async -> Data? {
+  private static func picture(app: String = "") async -> Data? {
     guard CGPreflightScreenCaptureAccess() else { return nil }
+    if !app.isEmpty { return await Browser.shot(app: app)?.jpeg }
     await Browser.front()
     return await Browser.shot()?.jpeg
   }
@@ -674,12 +889,18 @@ final class Agent {
     ]
     request.httpBody = try? JSONSerialization.data(withJSONObject: body)
     // A check that could not run is not a refusal: the move stands as it did before there was one.
-    guard let (data, response) = try? await session.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200,
+    guard let (data, response) = await within(20, request), (response as? HTTPURLResponse)?.statusCode == 200,
           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let content = (root["candidates"] as? [[String: Any]])?.first?["content"] as? [String: Any],
           let raw = (content["parts"] as? [[String: Any]])?.compactMap({ $0["text"] as? String }).last,
           let obj = Thinking.parsed(raw) else { return (true, "") }
     return ((obj["achieved"] as? Bool) ?? true, (obj["why"] as? String) ?? "")
+  }
+
+  /** The line for a press held in an app: what it will do, in the model's words if it gave any. */
+  private static func held(_ move: [String: Any], text: String, in app: String) -> String {
+    let said = ((move["summary"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    return said.isEmpty ? "Send that in \(app)\(text.isEmpty ? "" : ": “\(text.prefix(120))”")?" : said
   }
 
   private static func number(_ v: Any?) -> Double? {
@@ -749,14 +970,15 @@ final class Agent {
         "generationConfig": config,
       ]
       request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-      guard let (data, response) = try? await Agent.session.data(for: request),
+      let started = Date()
+      guard let (data, response) = await Agent.within(think ? 20 : 12, request),
             (response as? HTTPURLResponse)?.statusCode == 200,
             let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let content = (root["candidates"] as? [[String: Any]])?.first?["content"] as? [String: Any],
             let raw = (content["parts"] as? [[String: Any]])?.compactMap({ $0["text"] as? String }).first,
             let json = raw.data(using: .utf8),
             let move = try? JSONSerialization.jsonObject(with: json) as? [String: Any]
-      else { Log.say("agent: no move from \(model)"); continue }
+      else { Log.say("agent: no move from \(model) after \(Int(Date().timeIntervalSince(started)))s"); continue }
       return move
     }
     return nil
@@ -802,6 +1024,16 @@ enum Contacts {
     if let saved = UserDefaults.standard.stringArray(forKey: key(who)), saved.count == 2 {
       return [Contact(name: saved[0], address: saved[1])]
     }
+    // Asked while it is closed, Contacts answers "Application isn't running"
+    // and the person looks like nobody. It is opened out of sight first.
+    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.AddressBook"),
+       !NSWorkspace.shared.runningApplications.contains(where: { $0.bundleIdentifier == "com.apple.AddressBook" }) {
+      let config = NSWorkspace.OpenConfiguration()
+      config.activates = false
+      config.hides = true
+      _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: config)
+      try? await _Concurrency.Task.sleep(nanoseconds: 1_200_000_000)
+    }
     var name = String(key(who).dropFirst("grove.contact.".count))
     // "my brother": whoever their own card names as their brother.
     if let labels = relations[name] {
@@ -816,8 +1048,8 @@ enum Contacts {
       """)
       let match = out.split(separator: "\n").map { $0.split(separator: "\t", maxSplits: 1).map(String.init) }
         .first { pair in pair.count == 2 && labels.contains { pair[0].lowercased().contains($0) } }
-      guard let match else { return [] }
-      name = match[1].lowercased()
+      // Nobody on their card under that word: someone saved as "Dad" still counts.
+      if let match { name = match[1].lowercased() }
     }
     let quoted = "\"" + name.replacingOccurrences(of: "\"", with: "") + "\""
     let (ok, out) = await Browser.run("""
@@ -835,7 +1067,12 @@ enum Contacts {
       return out
     end tell
     """)
-    if !ok { refused = out.lowercased().contains("not authorized") || out.lowercased().contains("not allowed"); return [] }
+    // Refused, or nobody by that name: the people they actually message may have them.
+    if !ok {
+      let fromChats = await Inbox.match(name)
+      refused = fromChats.isEmpty && (out.lowercased().contains("not authorized") || out.lowercased().contains("not allowed"))
+      return fromChats
+    }
     let all = out.split(separator: "\n").compactMap { line -> Contact? in
       let parts = line.split(separator: "\t", maxSplits: 1).map(String.init)
       // Names said aloud: "Akash ( Baby Groot 🌴 )" is read as "Akash, Baby Groot".
@@ -844,7 +1081,8 @@ enum Contacts {
     }
     // A whole name, or a first name said exactly, beats one that only contains it.
     let exact = all.filter { $0.name.lowercased() == name || $0.name.lowercased().hasPrefix(name + " ") }
-    return exact.isEmpty ? all : exact
+    if !exact.isEmpty { return exact }
+    return all.isEmpty ? await Inbox.match(name) : all
   }
 }
 
@@ -893,6 +1131,8 @@ enum Browser {
     var tabs: [OpenTab] = []
     /** Mostly picture — a canvas, a player, a frame — so text alone cannot say what is on it. */
     var visual = false
+    /** A window of an app on this Mac, not a page: what it says is in the picture. */
+    var desk = false
     /** What a popup over the page says, when one is up: its buttons are listed first, marked. */
     var popup = ""
     /** Frames from other sites, which cannot be read or pressed from the page: name and address. */
@@ -944,6 +1184,28 @@ enum Browser {
       return "I couldn't control Chrome. Allow Grove under Automation in System Settings, from the Grove menu's checklist."
     }
     return "Chrome didn't answer me\(out.isEmpty ? "" : " (\(out.prefix(80)))"). Is it open on your Mac?"
+  }
+
+  /** Runs this in every web tab, stopping at the first that answers "hit". */
+  static func everyTab(_ code: String) async -> Bool {
+    let (ok, out) = await run("""
+    tell application "Google Chrome"
+      if not running then return ""
+      repeat with w in windows
+        repeat with t in tabs of w
+          if (URL of t) starts with "http" then
+            try
+              with timeout of 2 seconds
+                if (execute t javascript \(quoted(code))) is "hit" then return "hit"
+              end timeout
+            end try
+          end if
+        end repeat
+      end repeat
+      return ""
+    end tell
+    """)
+    return ok && out == "hit"
   }
 
   /** Whether a tab is still open. */
@@ -1095,9 +1357,9 @@ enum Browser {
   }
 
   static func keys(_ text: String, enter: Bool) async {
-    let before = await read()
     var list = presses(text)
     if enter { list.append(("Enter", 13, 36, nil)) }
+    let before = await read()
     let events = list.map { ["key": $0.key, "code": $0.key.count == 1 ? ($0.key == " " ? "Space" : "Key" + $0.key.uppercased()) : $0.key, "keyCode": $0.code] as [String: Any] }
     let keys = (try? String(data: JSONSerialization.data(withJSONObject: events), encoding: .utf8)) ?? "[]"
     _ = await js("""
@@ -1112,6 +1374,17 @@ enum Browser {
     await front()
     _ = await run("tell application \"Google Chrome\" to activate")
     try? await _Concurrency.Task.sleep(nanoseconds: 300_000_000)
+    await realPresses(list)
+  }
+
+  /** Real presses into whatever has focus, in an app or a page. */
+  static func pressReal(_ text: String, enter: Bool) async {
+    var list = presses(text)
+    if enter { list.append(("Enter", 13, 36, nil)) }
+    await realPresses(list)
+  }
+
+  private static func realPresses(_ list: [(key: String, code: Int, mac: Int?, char: String?)]) async {
     for press in list {
       if let mac = press.mac {
         _ = await run("tell application \"System Events\" to key code \(mac)")
@@ -1120,6 +1393,45 @@ enum Browser {
       }
       try? await _Concurrency.Task.sleep(nanoseconds: 120_000_000)
     }
+  }
+
+  /** A real scroll in whatever is under the pointer. */
+  @MainActor
+  static func realScroll() async {
+    CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -400, wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
+    try? await _Concurrency.Task.sleep(nanoseconds: 300_000_000)
+  }
+
+  /**
+    A site they asked to open: the tab they already have on it, or a new one.
+    Through Chrome and not the system's default, so the next sentence
+    ("now play this") finds it, and never a second tab of the same page.
+  */
+  static func focusOrOpen(_ address: String) async -> Bool {
+    guard let url = URL(string: address), let host = url.host?.replacingOccurrences(of: "www.", with: "") else { return false }
+    let bare = url.path.isEmpty || url.path == "/"
+    let (ok, _) = await run("""
+    tell application "Google Chrome"
+      activate
+      if (count of windows) is 0 then make new window
+      \(bare ? """
+      repeat with w in windows
+        set i to 0
+        repeat with t in tabs of w
+          set i to i + 1
+          if (URL of t) contains \(quoted(host)) then
+            set active tab index of w to i
+            set index of w to 1
+            return "there"
+          end if
+        end repeat
+      end repeat
+      """ : "")
+      tell front window to make new tab with properties {URL:\(quoted(address))}
+      return "new"
+    end tell
+    """)
+    return ok
   }
 
   static func url() async -> String {
@@ -1325,7 +1637,19 @@ enum Browser {
 
   @MainActor
   static func shot() async -> Shot? {
-    guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome").first?.processIdentifier,
+    await take(pid: NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome").first?.processIdentifier)
+  }
+
+  /** The window in front, of whichever app they are in, or of the app named. */
+  @MainActor
+  static func shot(app: String?) async -> Shot? {
+    let running = app.flatMap { name in NSWorkspace.shared.runningApplications.first { $0.localizedName == name } } ?? NSWorkspace.shared.frontmostApplication
+    return await take(pid: running?.processIdentifier)
+  }
+
+  @MainActor
+  private static func take(pid: pid_t?) async -> Shot? {
+    guard let pid,
           let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
           let window = list.first(where: { ($0[kCGWindowOwnerPID as String] as? pid_t) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }),
           let number = window[kCGWindowNumber as String] as? Int,
@@ -1336,7 +1660,7 @@ enum Browser {
     let ok: Bool = await withCheckedContinuation { done in
       let p = Process()
       p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-      p.arguments = ["-x", "-o", "-l", "\(number)", path]
+      p.arguments = ["-x", "-o", "-l", "\(number)", path]  // that one window
       p.terminationHandler = { done.resume(returning: $0.terminationStatus == 0) }
       do { try p.run() } catch { done.resume(returning: false) }
     }

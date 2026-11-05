@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       UserDefaults.standard.set(true, forKey: "grove.asked.screen")
       _ = CGRequestScreenCaptureAccess()
     }
+    Log.say("launch: messages database \(Inbox.canRead ? "readable" : "not readable")")
     Log.say("launch: accessibility \(AXIsProcessTrusted() ? "granted" : "not granted"), screen recording \(CGPreflightScreenCaptureAccess() ? "granted" : "not granted"), signed in \(account.session != nil)")
 
     notch = Notch(look: look)
@@ -79,6 +80,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     shortcut.useOption = UserDefaults.standard.bool(forKey: "grove.shortcut.option")
     shortcut.onTrigger = { [weak self] captured in self?.begin(captured) }
     shortcut.onReady = { [weak self] in self?.refreshMenu() }
+    // On screen for a second first: ⌘K Return landing as a question appears
+    // would approve something nobody has had the chance to read.
+    shortcut.waitingForYes = { [weak self] in
+      guard let self, self.waitingYes != nil else { return false }
+      return Date().timeIntervalSince(self.yesSince) > 1
+    }
+    shortcut.onArm = { [weak self] on in
+      guard let self else { return }
+      if on, let waiting = self.waitingYes {
+        // Put back up if it had gone: this is what they are about to approve.
+        self.notch.show("waiting", ["text": waiting.text, "task": waiting.task, "confirm": true], pin: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { self.notch.send("armed", ["on": true]) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8.1) { self.notch.send("armed", ["on": false]) }
+      } else {
+        self.notch.send("armed", ["on": false])
+      }
+    }
+    shortcut.onAnswer = { [weak self] yes in
+      guard let self, let waiting = self.waitingYes else { return }
+      Log.say("⌘K: \(yes ? "approved" : "declined") from the keyboard")
+      self.fromPanel(["t": yes ? "approve" : "decline", "task": waiting.task])
+    }
     shortcut.onEscape = { [weak self] in
       guard let self, self.notch.isShowing else { return false }
       self.voice.stop()
@@ -185,6 +208,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func askFree(_ instruction: String, earlier: String = "") {
     // A command is done, not discussed: the model cannot press play, and
     // asked to, it says so politely, which is the worst answer there is.
+    // While the Mac is reading aloud, "stop" or "pause" is about the reading.
+    let reading = MainActor.assumeIsolated { Speaker.shared.isReading }
+    if reading, instruction.lowercased().range(of: #"^(stop|pause|wait|hold on|stop reading|pause there)\W*$"#, options: .regularExpression) != nil {
+      MainActor.assumeIsolated { Speaker.shared.pause() }
+      notch.close()
+      return
+    }
     if let job = Commands.job(for: instruction) {
       Recent.said(instruction, did: "\(Jobs.title(for: job)) (\(job.kind))")
       notch.close()
@@ -206,12 +236,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     Log.say("ask: \(instruction.prefix(80))")
     Task { @MainActor in
       let now = await Context.now()
-      let decision = await Thinking.decide(earlier.isEmpty ? instruction : earlier + "Now they say: " + instruction, manner: self.look.manner, about: self.look.about, now: now.text, recent: Recent.text)
+      let decision = await Thinking.decide(earlier.isEmpty ? instruction : earlier + "Now they say: " + instruction, manner: self.look.manner, about: self.look.about, now: now.text,
+                                           recent: [Recent.text, Speaker.shared.context].filter { !$0.isEmpty }.joined(separator: "\n")) { learned in
+        // Kept here at once, and sent to the phone, where the memory is.
+        guard !learned.remember.isEmpty || !learned.wrong.isEmpty else { return }
+        Told.note(told: learned.remember, wrong: learned.wrong)
+        self.link.fact(learned.remember, wrong: learned.wrong)
+      }
       Log.say("ask: decided \(String(describing: decision).prefix(100))")
       switch decision {
+      case .open(let what, let say):
+        Recent.said(instruction, did: "Opened \(what)")
+        let link = what.contains("://") || what.range(of: #"^[\w-]+(\.[\w-]+)+(/\S*)?$"#, options: .regularExpression) != nil
+        self.run(Job(id: UUID().uuidString, kind: link ? "open.url" : "open.app", args: link ? ["url": what, "say": say] : ["app": what, "say": say], fromPhone: false)) { _, _, _ in }
       case .music(let action, let what, _, let say):
         Recent.said(instruction, did: "Music: \(action) \(what)")
-        let kinds = ["pause": "music.pause", "resume": "music.resume", "next": "music.next", "previous": "music.previous", "louder": "volume.up", "quieter": "volume.down"]
+        let kinds = ["pause": "music.pause", "resume": "music.resume", "next": "music.next", "previous": "music.previous", "louder": "volume.up", "quieter": "volume.down", "shuffle": "music.shuffle"]
         let kind = kinds[action] ?? "music.play"
         self.run(Job(id: UUID().uuidString, kind: kind, args: kind == "music.play" ? ["what": what, "say": say] : ["say": say], fromPhone: false)) { _, _, _ in }
       case .act(let goal, let say):
@@ -222,7 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.runAgent(Job(id: UUID().uuidString, kind: "agent.message", args: ["to": to, "text": text, "goal": "Text \(to)"], fromPhone: false)) { _, _, _ in }
       case .answer(let text, let gif):
         Recent.said(instruction, did: "Answered: \(text)")
-        self.link.news(what: "Asked on the Mac: \(instruction)", state: "answered", said: text)
+        self.link.heard(instruction, replied: text)
         self.notch.show("answer", ["ask": instruction, "text": text, "via": "mac"], pin: true)
         self.react(gif)
       case .ask(let question):
@@ -231,6 +271,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Recent.said(instruction, did: "Asked them first: \(question)")
         self.link.news(what: "Asked on the Mac: \(instruction)", state: "ask", said: question)
         self.notch.show("answer", ["ask": instruction, "text": question, "via": "mac"], pin: true)
+      case .messageVia(let to, let text, let app):
+        Recent.said(instruction, did: "\(app) message to \(to): \(text)")
+        if Native.has(app) {
+          self.runAgent(Job(id: UUID().uuidString, kind: "agent.message", args: ["to": to, "text": text, "app": app, "goal": "\(Native.name(app)) \(to)"], fromPhone: false)) { _, _, _ in }
+        } else {
+          self.runAgent(Job(id: UUID().uuidString, kind: "agent.start", args: ["goal": "Message \(to) on \(app) saying: \(text)"], fromPhone: false)) { _, _, _ in }
+        }
+      case .inbox(let who):
+        Recent.said(instruction, did: "Read their messages\(who.isEmpty ? "" : " from \(who)")")
+        guard let rows = await Inbox.recent(who: who) else {
+          self.notch.show("answer", ["ask": instruction, "text": Inbox.refused, "via": "mac"], pin: true)
+          return
+        }
+        let answer = await Thinking.aboutMessages(instruction, lines: Inbox.lines(rows), manner: self.look.manner) ?? "I couldn't make sense of your messages just then."
+        Recent.ended(answer)
+        self.notch.show("answer", ["ask": instruction, "text": answer, "via": "mac"], pin: true)
+        // For the next sentence, not for the long memory: these are other people's words.
+        self.link.news(what: "Read their messages on the Mac", state: "answered", said: answer)
+      case .read(let action):
+        // Reading pauses for whatever they say next, so a note about the
+        // passage is written while the place is kept.
+        if action == "new" {
+          let got = await Screen.capture()
+          guard !got.text.isEmpty else {
+            self.notch.show("answer", ["ask": instruction, "text": "There's nothing in front of you I can read.", "via": "mac"], pin: true)
+            return
+          }
+          Recent.said(instruction, did: "Reading aloud: \(got.title)")
+          self.notch.close()
+          Speaker.shared.start(title: got.title, text: got.text)
+        } else if !Speaker.shared.steer(action) {
+          self.notch.show("answer", ["ask": instruction, "text": "Nothing's being read right now.", "via": "mac"], pin: true)
+        } else {
+          self.notch.close()
+        }
+      case .note(let text, let title):
+        Speaker.shared.pause()
+        Recent.said(instruction, did: "Note: \(text)")
+        Screen.note(text, title: title) { ok, said in
+          self.notch.show("done", ["title": "Note", "text": ok ? "\(said) \(text.prefix(80))" : said, "ok": ok], pin: false, closeAfter: 3)
+          self.link.news(what: "Note on the Mac: \(text)", state: ok ? "done" : "failed", said: said)
+        }
       case .stop(let line):
         Recent.said(instruction, did: "Stopped what was going on the Mac")
         self.link.news(what: "On the Mac: \(instruction)", state: "stopped", said: line)
@@ -255,6 +337,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     switch message["t"] as? String {
     case "ask":
       guard let text = message["instruction"] as? String else { break }
+      /*
+        Said while something is already running: a change to that, not a new
+        task.
+
+        Without this the only things you could do while watching it get a job
+        wrong were let it finish or stop it — so you stopped it and said the
+        whole thing over. Typing "I want to play" at a game it started and is
+        now playing itself is the case this exists for, and it is the moment
+        where you can see exactly what you want and have no way to say it.
+      */
+      if Agent.shared.redirect(text) != nil { break }
       let follows = (message["follows"] as? String).map { ask in "Earlier they asked: \(ask)\nYou answered: \((message["said"] as? String) ?? "")\n\n" } ?? ""
       if captured != nil { think(text) } else { askFree(text, earlier: follows) }
     case "replace":
@@ -293,6 +386,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     case "answer", "approve", "decline":
       voice.stop()
       let kind = message["t"] as? String ?? ""
+      // Said in the log in so many words: a send that happened should never
+      // leave anyone wondering whether a person pressed for it.
+      Log.say("panel: \(kind) pressed for task \(message["task"] as? String ?? "")")
       let answer = kind == "decline" ? "No, don't press that. Stop and ask me what to change." : (message["text"] as? String ?? "")
       runAgent(Job(id: UUID().uuidString, kind: "agent.resume",
                    args: ["task": message["task"] as? String ?? "", "answer": answer, "approve": kind == "approve" ? "yes" : ""],
@@ -321,22 +417,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   private func run(_ job: Job, reply: @escaping (Bool, String, [String: String]) -> Void) {
     if job.kind == "agent.stop" {
+      waitingYes = nil
       agent.stop()
       notch.show("done", ["title": "Stopped", "text": "Left it where it was.", "ok": true], pin: false, closeAfter: 2.5)
       reply(true, "Stopped.", ["state": "stopped"])
       return
     }
     if job.kind.hasPrefix("agent.") { runAgent(job, reply: reply); return }
+    if job.kind == "messages.read" {
+      Task { @MainActor in
+        guard let rows = await Inbox.recent(who: job.args["who"] ?? "") else { reply(false, Inbox.refused, [:]); return }
+        reply(true, rows.isEmpty ? "Nothing there." : "\(rows.count) recent messages.", ["detail": Inbox.lines(rows)])
+      }
+      return
+    }
+    // What is in front of them, as words for the phone to read aloud.
+    if job.kind == "screen.read" {
+      Task { @MainActor in
+        let got = await Screen.capture()
+        Recent.said("Read me this", did: "Read aloud from the phone: \(got.title)", from: true)
+        reply(!got.text.isEmpty, got.text.isEmpty ? "There's nothing on your Mac's screen I can read." : (got.title.isEmpty ? "what is on your screen" : got.title), ["detail": got.text])
+      }
+      return
+    }
+    if job.kind == "note.add" {
+      let text = job.args["text"] ?? ""
+      Recent.said("Note", did: "Note from the phone: \(text)", from: true)
+      Screen.note(text, title: job.args["title"] ?? "") { ok, said in reply(ok, said, [:]) }
+      return
+    }
     let title = Jobs.title(for: job)
     if job.fromPhone { Recent.said(title, did: job.kind, from: true) }
     if job.fromPhone { notch.show("job", ["title": title, "from": "From your iPhone", "steps": Jobs.steps(for: job), "at": 0], pin: true) }
     Jobs.run(job) { [weak self] ok, spoken in
       guard let self else { return }
+      // Not an app or a site it can guess: "open my study notes" is a job, not a name.
+      if job.kind == "open.app", spoken.hasPrefix(Music.elsewhere) {
+        var args = job.args
+        args["goal"] = "Open \(spoken.dropFirst(Music.elsewhere.count)) for them, wherever it lives: an app on this Mac, or a site"
+        self.runAgent(Job(id: job.id, kind: "agent.start", args: args, fromPhone: job.fromPhone), reply: reply)
+        return
+      }
       // Not in their library: played on YouTube instead, in their YouTube tab
       // if one is open. Opening Music's catalogue search played nothing, and
       // "play Feel Good Inc." is a request to hear it, not to search for it.
       if job.kind == "music.play", spoken.hasPrefix(Music.elsewhere) {
         let what = String(spoken.dropFirst(Music.elsewhere.count))
+        Script.run("tell application \"Music\" to pause") { _, _ in }
         var args = job.args
         args["goal"] = "Play \(what) on YouTube: the song itself, the official video or audio if there is one"
         self.runAgent(Job(id: job.id, kind: "agent.start", args: args, fromPhone: job.fromPhone), reply: reply)
@@ -359,9 +486,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func runAgent(_ job: Job, reply: @escaping (Bool, String, [String: String]) -> Void) {
     let goal = job.args["goal"] ?? ""
     let from = job.fromPhone ? "From your iPhone" : "On this Mac"
+    let began = Date()
+    final class Pace { var next = Date().addingTimeInterval(25); var gap: TimeInterval = 45 }
+    let pace = Pace()
     agent.onStep = { [weak self] goal, steps in
-      self?.notch.show("job", ["title": goal, "from": from, "steps": steps, "at": max(0, steps.count - 1)], pin: true)
+      guard let self else { return }
+      self.notch.show("job", ["title": goal, "from": from, "steps": steps, "at": max(0, steps.count - 1)], pin: true)
+      // Word from a long job, the way someone doing it for you would give it:
+      // soon, then less and less, so a whole game of chess is a few lines.
+      // Only when they are not sitting here watching the notch.
+      if (job.fromPhone || self.away), Date() >= pace.next, let step = steps.last {
+        pace.next = Date().addingTimeInterval(pace.gap)
+        pace.gap *= 2
+        self.link.news(what: goal, state: "working", said: step, speak: true)
+      }
     }
+    waitingYes = nil
     let said = job.args["say"].flatMap { $0.isEmpty ? nil : $0 }
     let first = said ?? ["agent.start": "Opening Chrome", "agent.message": "Finding them in Contacts"][job.kind] ?? "Carrying on"
     notch.show("job", ["title": goal.isEmpty ? "Carrying on" : goal, "from": from, "steps": [first], "at": 0], pin: true)
@@ -389,7 +529,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       let result: AgentResult
       switch job.kind {
       case "agent.start": result = await self.agent.start(goal: goal, budget: 240)
-      case "agent.message": result = await self.agent.message(to: job.args["to"] ?? "", text: job.args["text"] ?? "")
+      case "agent.message": result = await self.agent.message(to: job.args["to"] ?? "", text: job.args["text"] ?? "", app: job.args["app"] ?? "messages")
       default: result = await self.agent.resume(task: job.args["task"] ?? "", answer: job.args["answer"] ?? "", approve: job.args["approve"] == "yes")
       }
       switch result.state {
@@ -410,9 +550,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       // The phone hears how it ended, always: it is what talks to the glasses,
       // and the next thing said to it may be about this. Said aloud only when
       // the phone started it and had stopped waiting ("still going on your Mac").
+      self.waitingYes = result.state == "confirm" ? (result.task, result.spoken) : nil
+      self.yesSince = Date()
+      // Said on the phone when that is where they will hear it: a job from the
+      // phone that outlived its wait (one still waiting says it itself), or one
+      // from here when they have walked away or it took long enough to look away.
       let late = once.done
+      let tellThem = job.fromPhone ? late : (self.away || Date().timeIntervalSince(began) > 20)
       self.link.news(what: job.fromPhone ? goal : "Asked on the Mac: \(goal)", state: result.state, said: result.spoken, task: result.task,
-                     speak: job.fromPhone && late && result.state != "stopped")
+                     speak: tellThem && result.state != "stopped")
+      if !job.fromPhone, result.state == "done" { self.link.heard(goal, replied: result.spoken) }
       answer(result.state != "failed", result.spoken, ["state": result.state, "task": result.task, "detail": result.detail])
     }
   }
@@ -450,6 +597,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
   private var lastGif = Date.distantPast
+
+  /** A yes Grove is waiting on, for ⌘K then Return. */
+  private var waitingYes: (task: String, text: String)?
+  private var yesSince = Date.distantPast
+
+  /** Not at this Mac: locked, or nothing touched for a minute and a half. */
+  private var away: Bool {
+    if Self.screenLocked { return true }
+    let keys = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+    let mouse = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .mouseMoved)
+    return min(keys, mouse) > 90
+  }
 
   /** Nobody is there to see a GIF on a locked or sleeping screen. */
   private static var screenLocked: Bool {
