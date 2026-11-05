@@ -1640,23 +1640,45 @@ which is what VS Code calls itself, whatever its folder is named — sits inside
 another by accident rather than by anyone's decision; and a strict word match
 would have missed "iTerm2", which is one word and is obviously iTerm.
 
-**Grove listens whenever it is the one waiting.** A question on screen with a
-microphone already open is the difference between talking to something and
-operating it, and not having to touch anything is the whole reason the ring
-and the glasses exist. So the microphone opens with the question — Grove's own
-`ask`, the browser agent's question, and a plain summon — and what is said
-fills the box and sends itself. One function decides it (`listenForAnswer`),
-and the panel only ever *draws* a microphone as on: a card re-renders whenever
-a step, a phone or a remark arrives, and a card that started the microphone
-would start it again each time.
+**The microphone is on unless they turn it off.** A panel with a microphone
+already open is the difference between talking to something and operating it,
+and not having to touch anything is the whole reason the ring and the glasses
+exist. So it opens with the card, and what is said fills the box and sends
+itself.
+
+**The three cards that listen are the three with a microphone button on them**,
+which is not a coincidence: a card that listens needs somewhere to show that it
+is, and some way to stop it. Grove thinking and Grove working are neither —
+they have a box for changing the job, but an open microphone for the ninety
+seconds of a task is a room being recorded, not a question being answered.
+
+**An empty panel listens only when it was opened on purpose.** The panel also
+opens when the pointer merely crosses the notch, which happens on the way to
+the clock; a microphone that started every time somebody's cursor passed over
+the top of their screen would not be "on by default", it would be on
+constantly, and the light saying so would be the most alarming thing in the
+app. Pinned is the difference — ⌘K, a question, an answer, a job — and all of
+those are somebody meaning to talk to it.
+
+**The button is the switch**, not a one-off. On by default means the only
+reason to press it is to stop it, and "stop this sentence" and "stop doing
+that" are the same gesture when the next card would open it again a minute
+later. Pressing it off is the same thing as the switch in Settings, so the two
+cannot disagree, and off that comes back is the press that did nothing.
+
+One rule decides all of it (`openMicOn`), asked once per card inside
+`Notch.show` where every card is drawn. Twenty-odd `show` calls each deciding
+for themselves is twenty-odd chances for the one that gets forgotten to be the
+one somebody has to click. It does not start over a microphone already open,
+which would tear the first down mid-sentence, nor over Grove reading aloud,
+which would hear itself.
 
 **Never in front of a confirmation.** Every other prompt's worst answer is a
 wrong sentence; a confirmation's worst answer is a purchase. A yes stays two
-deliberate keys (⌘K then Return) or a press on the card. The confirm flag and
-the microphone flag are the same boolean inverted, so they cannot drift, and
-`npm run verify` checks it — this is the easy thing to break, because the
-confirm card is a card like the others and a later tidy-up that treated them
-all alike would read as consistency.
+deliberate keys (⌘K then Return) or a press on the card. `npm run verify`
+checks it — this is the easy thing to break, because "on by default" is how the
+feature was asked for and the confirm card is a card like the others, so a
+later tidy-up treating them all alike would read as consistency.
 
 **The window follows the panel.** A transparent window still takes clicks, so
 it is exactly the visible panel while open and full size but mouse-blind while

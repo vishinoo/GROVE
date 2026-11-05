@@ -18,6 +18,8 @@ final class Voice {
   private var cap: Timer?
   private var finished: ((String?) -> Void)?
   private var latest = ""
+  /** Already listening: a second start would tear the first one down mid-sentence. */
+  var busy: Bool { task != nil }
 
   func listen(partial: @escaping (String) -> Void, done: @escaping (String?) -> Void) {
     stop()

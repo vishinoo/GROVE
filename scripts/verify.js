@@ -3386,38 +3386,73 @@ section('A panel is as tall as what is in it');
  * was asked for, the confirm card is a card like the others, and a later
  * tidy-up that treated them all the same would read as consistency.
  */
-section('Grove listens when it has asked, and never in front of a yes');
+section('The microphone is on unless they turn it off');
 {
   const main = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/main.swift'), 'utf8');
+  const notch = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Notch.swift'), 'utf8');
   const panel = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Resources/panel.html'), 'utf8');
 
+  // One rule, asked once per card, where every card is drawn. Twenty-odd
+  // show() calls each deciding for themselves is twenty-odd chances for the
+  // one that gets forgotten to be the one somebody has to click.
   check(
-    /private func listenForAnswer\(_ asking: Bool\) -> Bool \{\s*\n\s*guard asking, AppDelegate\.listensItself else \{ return false \}/.test(main),
-    'one function decides whether the microphone opens itself',
-    'scattered, the exception below would have to be remembered in each place'
+    /var wantsMic: \(\(String, \[String: Any\], Bool\) -> Bool\)\?/.test(notch) &&
+      /if payload\["mic"\] == nil, wantsMic\?\(mode, data, pin\) == true \{ payload\["mic"\] = true \}/.test(notch),
+    'one rule decides it, where every card is drawn'
+  );
+  const rule = between(main, 'private func openMicOn(_ mode: String, _ data: [String: Any], _ pinned: Bool) -> Bool {', '\n  }\n', { min: 150, max: 1600 });
+  check(rule !== null, 'the rule is where it is expected to be');
+  check(
+    rule !== null && /\(mode == "idle" && pinned\) \|\| mode == "answer" \|\| \(mode == "waiting" && \(data\["confirm"\] as\? Bool\) != true\)/.test(rule),
+    'the cards that listen are the three with a microphone button on them',
+    'a card with no button has nowhere to show it is listening and no way to stop it'
+  );
+  check(
+    rule !== null && /mode == "idle" && pinned/.test(rule),
+    'and an empty panel listens only when it was opened on purpose',
+    'the panel also opens when the pointer crosses the notch on its way to the clock'
+  );
+  /*
+   * The money line, unchanged by any of this: every other prompt's worst
+   * answer is a wrong sentence, a confirmation's is a purchase. It is the
+   * easy thing to lose here, because "on by default" is how the feature was
+   * asked for and the confirm card is a card like the others.
+   */
+  check(
+    rule !== null && /\(data\["confirm"\] as\? Bool\) != true/.test(rule),
+    'and never a confirmation: a yes is a press or two keys, never a sentence Grove heard'
+  );
+  check(
+    rule !== null && /!voice\.busy/.test(rule) && /!\(MainActor\.assumeIsolated \{ Speaker\.shared\.isReading \}\)/.test(rule),
+    'not over a microphone already open, nor over Grove reading aloud',
+    'the first would be torn down mid-sentence; the second would hear itself'
+  );
+  check(
+    !/mode == "thinking"|mode == "job"/.test(rule || ''),
+    'thinking and working do not listen',
+    'an open microphone for the ninety seconds of a task is a room being recorded'
+  );
+  check(
+    !/listenForAnswer/.test(main),
+    'and the rule it replaced is gone rather than left beside it',
+    'two things deciding the same question is how they come to disagree'
   );
 
-  // The agent's card is the one that is sometimes a question and sometimes a
-  // yes, so it is the one worth reading rather than grepping for.
-  const waiting = between(main, 'let asking = result.state != "confirm"', '_ = self.listenForAnswer(asking)', {
-    min: 60,
-    max: 500,
-  });
-  check(waiting !== null, 'the agent\'s question card is where it is expected to be');
+  // The button is the switch, so pressing it off means off.
   check(
-    waiting !== null && /"confirm": !asking/.test(waiting) && /"mic": asking && AppDelegate\.listensItself/.test(waiting),
-    'a confirmation and a listening microphone are the same boolean, inverted',
-    'they cannot drift apart, because there is only one of them'
+    /const on = !b\.classList\.contains\('on'\);[\s\S]{0,120}?post\(\{ t: 'mic', on \}\)/.test(panel),
+    'the microphone button is a toggle, not an on switch'
   );
+  const press = between(main, 'case "mic":', 'case "stop":', { min: 200, max: 1200 });
+  check(press !== null, 'what the button does is where it is expected to be');
   check(
-    !/listenForAnswer\(true\)[\s\S]{0,200}?"confirm": true/.test(main) &&
-      !/"confirm": true[\s\S]{0,300}?listenForAnswer\(true\)/.test(main),
-    'no confirmation anywhere opens the microphone',
-    'a yes is a press or two keys, never a sentence Grove heard'
+    press !== null && /AppDelegate\.listensItself = wanted/.test(press) && /if wanted \{ dictate\(\) \} else \{ voice\.stop\(\) \}/.test(press),
+    'and pressing it off turns it off, rather than stopping one sentence',
+    'off that comes back on the next card is the press that did nothing'
   );
   check(
     /static var listensItself: Bool/.test(main) && /grove\.listen\.auto/.test(main),
-    'and a microphone that opens itself can be switched off without reading any code'
+    'kept where Settings reads it too, so the panel and the switch cannot disagree'
   );
 
   // The panel shows the microphone; it must never start one.
@@ -3481,9 +3516,12 @@ laterSection('⌘K opens Grove, except where it would be missed', async () => {
     /guard !option/.test(shortcut),
     '⌥⌘K is never shared with anything, which is what choosing it means'
   );
+  // Not by deciding for itself: it opens the panel pinned, and a pinned
+  // panel is what the one microphone rule listens on. Two places deciding
+  // the same thing is how they come to disagree.
   check(
-    /private func summon\(\)[\s\S]{0,400}?if AppDelegate\.listensItself \{ dictate\(\) \}/.test(main),
-    'and summoning Grove opens the microphone with it',
+    /private func summon\(\)[\s\S]{0,500}?notch\.show\("idle", \[:\], pin: true\)/.test(main),
+    'and summoning Grove opens the panel on purpose, which is what opens the microphone',
     'a shortcut that opens a box to type in has saved a mouse and nothing else'
   );
 

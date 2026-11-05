@@ -50,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     shortcut = Shortcut()
 
     notch.onGlance = { [weak self] in self?.remark() }
+    notch.wantsMic = { [weak self] mode, data, pin in self?.openMicOn(mode, data, pin) ?? false }
     notch.onMessage = { [weak self] message in self?.fromPanel(message) }
 
     link.onLook = { [weak self] incoming in
@@ -297,8 +298,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // back with their answer ("follows"), and Recent has it too.
         Recent.said(instruction, did: "Asked them first: \(question)")
         self.link.news(what: "Asked on the Mac: \(instruction)", state: "ask", said: question)
-        self.notch.show("answer", ["ask": instruction, "text": question, "via": "mac", "mic": AppDelegate.listensItself], pin: true)
-        _ = self.listenForAnswer(true)
+        self.notch.show("answer", ["ask": instruction, "text": question, "via": "mac"], pin: true)
       case .messageVia(let to, let text, let app):
         Recent.said(instruction, did: "\(app) message to \(to): \(text)")
         if Native.has(app) {
@@ -363,8 +363,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func summon() {
     Log.say("⌘K: opening Grove\(AppDelegate.listensItself ? ", listening" : "")")
     captured = nil
-    notch.show("idle", ["mic": AppDelegate.listensItself], pin: true)
-    if AppDelegate.listensItself { dictate() }
+    notch.show("idle", [:], pin: true)
+  }
+
+  /**
+    Whether this card is one to have the microphone open on, and opening it.
+
+    **The three with a microphone button on them**, which is not a
+    coincidence: a card that listens is a card with something to say back
+    into, and one without a button has nowhere to show that it is listening
+    or any way to stop it. Grove thinking and Grove working are neither —
+    they have a box for changing the job, but an open microphone for the
+    ninety seconds of a task is a room being recorded, not a question being
+    answered.
+
+    Never on a confirmation. That is the same line as everywhere else: a yes
+    is a press or two keys, and the worst thing a misheard sentence can do
+    here is buy something.
+
+    Not while it is already listening, which would tear the first one down
+    mid-sentence, and not over Grove reading aloud, which would hear itself.
+  */
+  private func openMicOn(_ mode: String, _ data: [String: Any], _ pinned: Bool) -> Bool {
+    guard AppDelegate.listensItself else { return false }
+    /*
+      An empty panel listens only when it was opened on purpose.
+
+      The panel also opens when the pointer merely crosses the notch, which
+      happens on the way to the clock. A microphone that starts every time
+      somebody's cursor passes over the top of their screen is not "on by
+      default", it is on constantly, and the light saying so would be the
+      most alarming thing in the app.
+
+      Pinned is the difference: ⌘K, a question, an answer, a job. Those are
+      all somebody meaning to talk to it. The three cards below are pinned
+      by their own callers already, so in practice this governs the idle one.
+    */
+    let listens = (mode == "idle" && pinned) || mode == "answer" || (mode == "waiting" && (data["confirm"] as? Bool) != true)
+    guard listens, !voice.busy, !(MainActor.assumeIsolated { Speaker.shared.isReading }) else { return false }
+    dictate()
+    return true
   }
 
   /**
@@ -381,21 +419,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   static var listensItself: Bool {
     get { UserDefaults.standard.object(forKey: "grove.listen.auto") as? Bool ?? true }
     set { UserDefaults.standard.set(newValue, forKey: "grove.listen.auto") }
-  }
-
-  /**
-    Grove has asked something and is waiting: open the microphone with it.
-
-    **Never in front of a confirmation.** Everything else here is a question
-    whose worst answer is a wrong sentence, and a confirmation's worst answer
-    is a purchase. A yes stays two deliberate keys (⌘K then Return) or a
-    press on the card, which is the rule the rest of this app is built on and
-    not one a convenience gets to soften. `npm run verify` checks it.
-  */
-  private func listenForAnswer(_ asking: Bool) -> Bool {
-    guard asking, AppDelegate.listensItself else { return false }
-    dictate()
-    return true
   }
 
   /** The mic beside the ask box: what is said fills the box, and is sent when they stop. */
@@ -454,7 +477,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       captured = nil
       notch.show("idle", [:], pin: false)
     case "mic":
-      dictate()
+      /*
+        The button is the setting, not a one-off.
+
+        Default on means the only reason to press it is to stop it, and "stop
+        this sentence" and "stop doing that" are the same gesture when the
+        next card would open it again a minute later. Pressing it off and
+        having it come back is the press that did nothing.
+      */
+      let wanted = (message["on"] as? Bool) ?? true
+      AppDelegate.listensItself = wanted
+      Log.say("mic: \(wanted ? "on" : "off") from the panel")
+      if wanted { dictate() } else { voice.stop() }
     case "stop":
       run(Job(id: UUID().uuidString, kind: "agent.stop", args: [:], fromPhone: false)) { _, _, _ in }
     case "answer", "approve", "decline":
@@ -646,10 +680,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       switch result.state {
       case "ask" where !job.fromPhone, "confirm" where !job.fromPhone:
         // Asked here, answered here: a box for the answer, or the two buttons for a yes.
-        let asking = result.state != "confirm"
-        self.notch.show("waiting", ["text": result.spoken, "task": result.task, "confirm": !asking,
-                                    "mic": asking && AppDelegate.listensItself], pin: true)
-        _ = self.listenForAnswer(asking)
+        self.notch.show("waiting", ["text": result.spoken, "task": result.task, "confirm": result.state == "confirm"], pin: true)
       case "ask", "confirm":
         self.notch.show("done", ["title": result.state == "confirm" ? "Waiting for your yes" : "A question", "text": result.spoken, "ok": true], pin: false, closeAfter: 6)
       case "stopped":
