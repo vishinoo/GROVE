@@ -45,7 +45,7 @@ import { runSelfCheck, type CheckResult } from '@/lib/selfCheck';
 import { checkNow, runningLabel, type Caught } from '@/lib/updates';
 import { MANNER_LIMIT, NAME_LIMIT, PRESETS, type Persona } from '@/lib/persona';
 import { hasOwnKey, setOwnKey } from '@/lib/lightModel';
-import { availableVoices, bestVoiceId, characterVoice, hasEnhancedVoice, speak } from '@/lib/speak';
+import { availableVoices, bestVoiceId, characterVoice, forgetVoices, hasEnhancedVoice, speak } from '@/lib/speak';
 import { setDevMode, useDevMode } from '@/lib/devMode';
 import * as trigger from '@/lib/trigger';
 import { LIMIT } from '@/lib/transcript';
@@ -751,6 +751,15 @@ function VoicePicker({
   useEffect(() => {
     let alive = true;
     void (async () => {
+      /*
+       * Read fresh every time this screen opens.
+       *
+       * This is the screen that tells them to go to iOS Settings and download
+       * a voice, so it is the one place that knows they may have just done
+       * it. Coming back to the same notice and the same synthetic voice reads
+       * as the download having failed.
+       */
+      forgetVoices();
       const [list, hasGood, fallback] = await Promise.all([
         availableVoices(),
         hasEnhancedVoice(),

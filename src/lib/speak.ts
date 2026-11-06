@@ -108,21 +108,54 @@ function scoreVoice(voice: Speech.Voice): number {
 
 let cached: Speech.Voice[] | null = null;
 
-/** Every installed voice, English first, best first. Read once per run. */
+/**
+ * Every installed voice, English first, best first.
+ *
+ * **Remembered only once there is something worth remembering.** Reading the
+ * list is not free, so it was read once and kept for the life of the app —
+ * which quietly broke the one instruction this file gives anybody: go to iOS
+ * Settings, download an Enhanced voice, come back. They come back to the same
+ * synthetic voice, because the list in memory is the one from before the
+ * download, and nothing says so. The obvious conclusion is that it did not
+ * work, or that Grove was lying about the cause.
+ *
+ * So the cache holds only when it found a good voice. While the best thing
+ * available is a compact one there is nothing worth keeping, and re-reading
+ * costs a few milliseconds on a path that is already waiting on speech.
+ */
 export async function availableVoices(): Promise<Speech.Voice[]> {
-  if (cached) return cached;
+  if (cached && cached.some(isGood)) return cached;
   try {
     const all = await Speech.getAvailableVoicesAsync();
-    cached = all
+    const next = all
       .map((voice) => ({ voice, score: scoreVoice(voice) }))
       .filter((v) => v.score >= 0)
       .sort((a, b) => b.score - a.score)
       .map((v) => v.voice);
+    // A newly downloaded voice changes what "best" means, so that goes too.
+    if (next.some(isGood) || !cached) best = undefined;
+    cached = next;
     return cached;
   } catch {
-    cached = [];
+    cached = cached ?? [];
     return cached;
   }
+}
+
+/** Enhanced or Premium: the ones that stop sounding like a satnav. */
+function isGood(voice: Speech.Voice): boolean {
+  return voice.quality === Speech.VoiceQuality.Enhanced || /premium/i.test(voice.identifier || '');
+}
+
+/**
+ * Forget what is installed, so the next read sees a voice downloaded since.
+ *
+ * For the screen that told them to go and download one: it is the only place
+ * that knows they may have just done it.
+ */
+export function forgetVoices(): void {
+  cached = null;
+  best = undefined;
 }
 
 /**
@@ -192,7 +225,10 @@ export async function characterVoice(
  */
 export async function hasEnhancedVoice(): Promise<boolean> {
   const voices = await availableVoices();
-  return voices.some((v) => v.quality === Speech.VoiceQuality.Enhanced);
+  // Through the same test the picker uses, so the notice and the voice cannot
+  // disagree: this asked only about Enhanced, which would have told somebody
+  // with a Premium voice installed that they had none.
+  return voices.some(isGood);
 }
 
 /* -------------------------------------------------------------- talking */

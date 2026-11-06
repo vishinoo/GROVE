@@ -4343,6 +4343,86 @@ section('Two things Grove cannot do, said rather than faked');
   );
 }
 
+
+/*
+ * A voice downloaded is a voice heard
+ * -----------------------------------
+ *
+ * Siri's voice is not available to any third-party app, at any price, with
+ * any entitlement, and a neural TTS API was measured rather than assumed:
+ * Gemini's own, on the key this app already has, took **2.6 seconds before a
+ * single sound** for a short sentence and 3.7 for a longer one — mostly fixed
+ * overhead, because the whole clip is generated before anything plays. For
+ * something you talk to hands-free through glasses, that silence is a worse
+ * problem than the timbre. So the system synthesiser stays, driven properly.
+ *
+ * Which makes the downloaded Enhanced or Premium voice the whole of the
+ * quality difference — and the one instruction this app gives about it was
+ * quietly broken. The voice list was read once and kept for the life of the
+ * app, so somebody who followed the notice, downloaded a voice and came back
+ * got the same synthetic voice and no explanation. The obvious conclusion is
+ * that it did not work, or that Grove was lying about the cause.
+ */
+section('A voice downloaded is a voice heard');
+{
+  const speak = fs.readFileSync(path.join(ROOT, 'src/lib/speak.ts'), 'utf8');
+  const settings = fs.readFileSync(path.join(ROOT, 'src/app/(app)/settings.tsx'), 'utf8');
+
+  check(
+    /if \(cached && cached\.some\(isGood\)\) return cached;/.test(speak),
+    'the voice list is kept only once it holds a voice worth keeping',
+    'cached while the best available is compact, a download never takes effect'
+  );
+  check(
+    /export function forgetVoices\(\): void \{\s*\n\s*cached = null;\s*\n\s*best = undefined;/.test(speak),
+    'and can be forgotten outright'
+  );
+  check(
+    /forgetVoices\(\);/.test(settings),
+    'which the screen that told them to download one does on opening',
+    'it is the only place that knows they may have just done it'
+  );
+  check(
+    /if \(next\.some\(isGood\) \|\| !cached\) best = undefined;/.test(speak),
+    'a newly found voice also clears which one is best',
+    'otherwise the list updates and the voice actually used does not'
+  );
+
+  /*
+   * One test for "good", used by the picker and by the notice. They asked
+   * different questions before: the notice looked only at Enhanced, so
+   * somebody with a Premium voice installed was told they had none — and
+   * Premium is exactly the tier that stops sounding synthetic.
+   */
+  const good = (speak.match(/\bisGood\b/g) || []).length;
+  check(
+    good >= 4 && /function isGood\(voice: Speech\.Voice\): boolean/.test(speak),
+    'the notice and the picker ask the same question about a voice',
+    `found ${good} mentions of isGood; one definition and three callers is the minimum`
+  );
+  check(
+    /\/premium\/i\.test\(voice\.identifier \|\| ''\)/.test(speak),
+    'and that question looks at the identifier, not only the quality field',
+    'expo-speech predates Premium and reports it as Enhanced, so the name is the only way to tell'
+  );
+  check(
+    !/return voices\.some\(\(v\) => v\.quality === Speech\.VoiceQuality\.Enhanced\);/.test(speak),
+    'and neither of them asks about Enhanced alone'
+  );
+
+  // Quality has to dominate, or a nicely-named compact voice wins.
+  const scoreFn = between(speak, 'function scoreVoice(voice: Speech.Voice): number {', '\n}\n', { min: 300, max: 1800 });
+  check(scoreFn !== null, 'the scoring is where it is expected to be');
+  const enhanced = Number((scoreFn || '').match(/Enhanced\) score \+= (\d+)/)?.[1] ?? 0);
+  const named = Number((scoreFn || '').match(/score \+= (\d+) - rank/)?.[1] ?? 99);
+  const accent = Number((scoreFn || '').match(/en-gb'\)\) score \+= (\d+)/)?.[1] ?? 99);
+  check(
+    enhanced > named + accent,
+    'an enhanced voice beats the best-named compact one of any accent',
+    `enhanced ${enhanced} must exceed name ${named} + accent ${accent}, or quality stops deciding`
+  );
+}
+
 /* ------------------------------------------------------------- verdict */
 
 /*
