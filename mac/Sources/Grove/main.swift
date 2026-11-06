@@ -387,20 +387,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func openMicOn(_ mode: String, _ data: [String: Any], _ pinned: Bool) -> Bool {
     guard AppDelegate.listensItself else { return false }
     /*
-      An empty panel listens only when it was opened on purpose.
+      Every card with somewhere to say something into, which is now all of
+      them bar one.
 
-      The panel also opens when the pointer merely crosses the notch, which
-      happens on the way to the clock. A microphone that starts every time
-      somebody's cursor passes over the top of their screen is not "on by
-      default", it is on constantly, and the light saying so would be the
-      most alarming thing in the app.
+      It was the three that already had a microphone button, and an empty
+      panel only when it had been opened on purpose. Both were too careful.
+      Opening the notch and finding the microphone off is the thing being
+      asked about here, and "I opened it normally" is most of how anyone
+      opens it — gating on a deliberate open meant the common case was the
+      one that did not work.
 
-      Pinned is the difference: ⌘K, a question, an answer, a job. Those are
-      all somebody meaning to talk to it. The three cards below are pinned
-      by their own callers already, so in practice this governs the idle one.
+      Thinking and working now listen too, and have a button to show it.
+      That is the card that is up longest and the one worth talking over:
+      "no, chicken parm" while it is halfway through searching is the whole
+      point of the box being there, and having to type it is why the box got
+      used once.
     */
-    let listens = (mode == "idle" && pinned) || mode == "answer" || (mode == "waiting" && (data["confirm"] as? Bool) != true)
-    guard listens, !voice.busy, !(MainActor.assumeIsolated { Speaker.shared.isReading }) else { return false }
+    let listens = mode != "waiting" || (data["confirm"] as? Bool) != true
+    let hasBox = ["idle", "answer", "waiting", "thinking", "job"].contains(mode)
+    guard listens, hasBox, !voice.busy else { return false }
+    /*
+      Not over sound.
+
+      A job that is playing a film or a song would otherwise be transcribed
+      by the microphone Grove just opened over it, and sent back into the
+      same job as a change of plan. Reading aloud is Grove's own voice and
+      the same problem from the other side.
+    */
+    guard !(MainActor.assumeIsolated { Speaker.shared.isReading }), !Player.soundPlaying() else { return false }
     dictate()
     return true
   }
@@ -684,11 +698,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       case "ask", "confirm":
         self.notch.show("done", ["title": result.state == "confirm" ? "Waiting for your yes" : "A question", "text": result.spoken, "ok": true], pin: false, closeAfter: 6)
       case "stopped":
-        break  // the Stop already said so
+        // Stopping is not a reason to throw away what it had. It was halfway
+        // down a recipe when they gave up on it, and saying nothing at that
+        // moment is what made the whole thing feel like it had done nothing.
+        if !result.detail.isEmpty {
+          self.notch.show("done", ["title": "Stopped", "text": "It was on \(result.detail)", "ok": true], pin: false, closeAfter: 4)
+        }
       default:
-        // Long enough to read what it found, then back to the ask box.
+        /*
+          A receipt goes; an answer stays.
+
+          Everything here used to close itself after at most ten seconds,
+          which is right for "Playing Interstellar" and wrong for a recipe —
+          the thing they asked for, scrolling away while they read the
+          ingredients. Length is what separates the two, because a line
+          Grove wrote about what it did is short and a thing it went and
+          found is not.
+        */
+        let answer = result.spoken.count > 280
         let read = min(10, 2.5 + Double(result.spoken.count) * 0.04)
-        self.notch.show("done", ["title": "Done", "text": result.spoken, "ok": result.state == "done"], pin: true, closeAfter: read, thenHome: true)
+        self.notch.show("done", ["title": "Done", "text": result.spoken, "ok": result.state == "done"],
+                        pin: true, closeAfter: answer ? nil : read, thenHome: !answer)
         if result.state == "done" { self.react(to: "They asked for: \(goal)\nIt is done.", said: result.spoken) }
       }
       Recent.ended("\(result.state): \(result.spoken)\(result.detail.isEmpty ? "" : " (on \(result.detail))")")

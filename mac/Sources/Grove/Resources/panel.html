@@ -100,7 +100,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
 .gliding .run { display: inline-block; white-space: nowrap; will-change: transform; }
 .gliding .gap { display: inline-block; width: 48px; }
 /* Long text scrolls down inside the card instead of being cut off by it. */
-.scroll { max-height: 150px; overflow-y: auto; overscroll-behavior: contain; -webkit-user-select: text; user-select: text; white-space: pre-wrap; }
+.scroll { max-height: 250px; overflow-y: auto; overscroll-behavior: contain; -webkit-user-select: text; user-select: text; white-space: pre-wrap; }
 .answer::-webkit-scrollbar, .scroll::-webkit-scrollbar { width: 4px; }
 .answer::-webkit-scrollbar-thumb, .scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.35); border-radius: 2px; }
 
@@ -223,6 +223,21 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
   */
   const micOn = () => { if (S.data && S.data.mic) document.getElementById('mic')?.classList.add('on'); };
 
+  /*
+    Markdown off a card that shows text as it is.
+
+    Told not to use it, the model writes ** for bold and # for headings
+    anyway — reliably, on exactly the long answers this card now keeps on
+    screen, so "**Ingredients:**" was about to be the first line of every
+    recipe. The phone has had plainSpeech for this since it was reading
+    asterisks out loud; this is the same fix on the half that is read.
+  */
+  const plain = (t) => String(t == null ? '' : t)
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^\s*\*\s+/gm, '\u2022 ');
+
   const render = () => {
     const m = S.mode, d = S.data;
     S.flow = m === 'thinking' ? 2.6 : m === 'listening' ? 1.7 : m === 'job' ? 2.2 : 1;
@@ -256,8 +271,9 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     if (m === 'thinking') {
       setH(164);
       body.innerHTML = `<div class="row space"><span class="prompt">${esc(d.ask)}</span><span class="row small"><span class="bars"><i></i><i></i><i></i><i></i></span>Thinking</span></div>${d.text ? `<div class="quote">${esc(d.text)}</div>` : ''}
-        <form class="ask" id="ask"><input id="ask-input" placeholder="Add something, or change it" autocomplete="off"><button class="chip" type="submit">Send</button></form>`;
+        <form class="ask" id="ask"><input id="ask-input" placeholder="Add something, or change it" autocomplete="off"><button class="mic" type="button" id="mic" aria-label="Speak" title="Speak"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button><button class="chip" type="submit">Send</button></form>`;
       wireAsk();
+      micOn();
       fit(164);
     }
     if (m === 'rewrite' || m === 'answer') {
@@ -266,7 +282,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
       // changed text, Replace in its place), then copy and home.
       body.innerHTML = `
         <div class="row space"><span class="prompt">${esc(d.ask)}</span><span class="small">${d.via === 'phone' ? 'From your iPhone' : d.failed ? '' : 'On this Mac'}</span></div>
-        <div class="answer">${esc(d.text)}</div>
+        <div class="answer">${esc(plain(d.text))}</div>
         <div class="reply">
           <form class="ask" id="ask"><input id="ask-input" placeholder="${m === 'rewrite' ? 'Change it again' : 'Reply'}" autocomplete="off">
             ${m === 'rewrite' ? `<button class="icon solid" type="button" data-act="replace" aria-label="Replace" title="Replace (⏎)">${ICON.replace}</button>` : `<button class="mic" type="button" id="mic" aria-label="Speak" title="Speak">${ICON.mic}</button>`}
@@ -289,17 +305,19 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
         <div class="row space"><span class="label">${esc(d.from || '')}</span></div>
         <div class="row"><span class="hello glide" style="font-size:17px">${esc((d.title || '').charAt(0).toUpperCase() + (d.title || '').slice(1))}</span></div>
         <ul class="steps">${steps.map((t, i) => `<li class="${i < (d.at || 0) ? 'done' : i === (d.at || 0) ? 'now' : ''}"><i></i><span class="glide">${esc(t)}</span></li>`).join('')}</ul>
-        <form class="ask" id="ask"><input id="ask-input" placeholder="Change it \u2014 \u201ci want to play\u201d" autocomplete="off"><button class="chip" type="submit">Send</button></form>`;
+        <form class="ask" id="ask"><input id="ask-input" placeholder="Change it \u2014 \u201ci want to play\u201d" autocomplete="off"><button class="mic" type="button" id="mic" aria-label="Speak" title="Speak"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button><button class="chip" type="submit">Send</button></form>`;
       // Not focused: it is running, and stealing the cursor from whatever
       // they are actually doing is how a helper becomes a nuisance. Typing
       // into it goes to the run itself, not to a new task.
       wireAsk();
+      micOn();
       fit(150 + Math.min(steps.length, 6) * 25);
     }
     if (m === 'done') {
       setH(110);
-      body.innerHTML = `<div class="row space"><span class="hello glide" style="font-size:18px;padding-right:12px">${esc(d.title)}</span><span class="small row" style="margin-right:34px;flex:none"><span class="dot ${d.ok ? 'on' : ''}"></span>${d.ok ? 'Done' : 'Didn’t work'}</span></div><div class="small scroll">${esc(d.text)}</div>`;
-      fit(250);
+      body.innerHTML = `<div class="row space"><span class="hello glide" style="font-size:18px;padding-right:12px">${esc(d.title)}</span><span class="small row" style="margin-right:34px;flex:none"><span class="dot ${d.ok ? 'on' : ''}"></span>${d.ok ? 'Done' : 'Didn’t work'}</span></div><div class="small scroll">${esc(plain(d.text))}</div>`;
+      // A recipe needs the room; a receipt does not.
+      fit(String(d.text || '').length > 280 ? 360 : 250);
     }
     if (m === 'waiting') {
       setH(d.confirm ? 168 : 180);

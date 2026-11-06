@@ -3400,42 +3400,55 @@ section('The microphone is on unless they turn it off');
       /if payload\["mic"\] == nil, wantsMic\?\(mode, data, pin\) == true \{ payload\["mic"\] = true \}/.test(notch),
     'one rule decides it, where every card is drawn'
   );
-  const rule = between(main, 'private func openMicOn(_ mode: String, _ data: [String: Any], _ pinned: Bool) -> Bool {', '\n  }\n', { min: 150, max: 1600 });
+  const rule = between(main, 'private func openMicOn(_ mode: String, _ data: [String: Any], _ pinned: Bool) -> Bool {', '\n  }\n', { min: 300, max: 2400 });
   check(rule !== null, 'the rule is where it is expected to be');
   check(
-    rule !== null && /\(mode == "idle" && pinned\) \|\| mode == "answer" \|\| \(mode == "waiting" && \(data\["confirm"\] as\? Bool\) != true\)/.test(rule),
-    'the cards that listen are the three with a microphone button on them',
-    'a card with no button has nowhere to show it is listening and no way to stop it'
+    rule !== null && /\["idle", "answer", "waiting", "thinking", "job"\]\.contains\(mode\)/.test(rule),
+    'every card with somewhere to say something into listens',
+    'opening the notch and finding the microphone off is the thing this exists to stop'
   );
-  check(
-    rule !== null && /mode == "idle" && pinned/.test(rule),
-    'and an empty panel listens only when it was opened on purpose',
-    'the panel also opens when the pointer crosses the notch on its way to the clock'
-  );
+  // Every one of those must actually have a microphone button, or there is
+  // nowhere to show it is listening and no way to stop it.
+  const regions = {
+    idle: between(panel, "if (m === 'idle')", "if (m === 'listening')", { min: 200, max: 2200 }),
+    thinking: between(panel, "if (m === 'thinking')", "if (m === 'rewrite' || m === 'answer')", { min: 200, max: 2200 }),
+    answer: between(panel, "if (m === 'rewrite' || m === 'answer')", "if (m === 'job')", { min: 200, max: 2200 }),
+    job: between(panel, "if (m === 'job')", "if (m === 'done')", { min: 200, max: 2200 }),
+    waiting: between(panel, "if (m === 'waiting')", "if (m === 'pair')", { min: 200, max: 2200 }),
+  };
+  for (const mode of ['idle', 'answer', 'waiting', 'thinking', 'job']) {
+    const region = regions[mode];
+    check(region !== null, `the ${mode} card is where it is expected to be`);
+    check(
+      region !== null && /id="mic"/.test(region) && /micOn\(\)/.test(region),
+      `the ${mode} card has a microphone button and draws it as on`,
+      'a card that listens with no button cannot show it is listening or be stopped'
+    );
+  }
   /*
    * The money line, unchanged by any of this: every other prompt's worst
    * answer is a wrong sentence, a confirmation's is a purchase. It is the
-   * easy thing to lose here, because "on by default" is how the feature was
-   * asked for and the confirm card is a card like the others.
+   * easy thing to lose, because "on everywhere" is how this was asked for
+   * and the confirm card is a card like the others.
    */
   check(
-    rule !== null && /\(data\["confirm"\] as\? Bool\) != true/.test(rule),
+    rule !== null && /let listens = mode != "waiting" \|\| \(data\["confirm"\] as\? Bool\) != true/.test(rule),
     'and never a confirmation: a yes is a press or two keys, never a sentence Grove heard'
   );
   check(
-    rule !== null && /!voice\.busy/.test(rule) && /!\(MainActor\.assumeIsolated \{ Speaker\.shared\.isReading \}\)/.test(rule),
-    'not over a microphone already open, nor over Grove reading aloud',
-    'the first would be torn down mid-sentence; the second would hear itself'
+    rule !== null && /!voice\.busy/.test(rule),
+    'not over a microphone already open, which would be torn down mid-sentence'
   );
+  /*
+   * And never over sound. A job playing a film would otherwise have it
+   * transcribed by the microphone Grove opened over it and sent back into
+   * the same job as a change of plan — the card that is up longest, failing
+   * in the most confusing way available.
+   */
   check(
-    !/mode == "thinking"|mode == "job"/.test(rule || ''),
-    'thinking and working do not listen',
-    'an open microphone for the ninety seconds of a task is a room being recorded'
-  );
-  check(
-    !/listenForAnswer/.test(main),
-    'and the rule it replaced is gone rather than left beside it',
-    'two things deciding the same question is how they come to disagree'
+    rule !== null && /!\(MainActor\.assumeIsolated \{ Speaker\.shared\.isReading \}\), !Player\.soundPlaying\(\)/.test(rule),
+    'nor over a film, a song, or Grove reading aloud',
+    'the microphone would transcribe it and send it back into the job as a change of plan'
   );
 
   // The button is the switch, so pressing it off means off.
@@ -3827,6 +3840,94 @@ section('Grove works beside them, not on top of them');
   check(
     /lastPosted = Date\(\)/.test(borrow || ''),
     'and borrow records every real thing Grove does, since they all pass through it'
+  );
+}
+
+
+/*
+ * A lookup comes back with the answer
+ * -----------------------------------
+ *
+ * "Search up a recipe for chicken pot pie." Grove went to Google, opened a
+ * recipe, pressed Jump to Recipe — all correct — and then scrolled three
+ * times and said nothing, until twenty-five seconds later they pressed Stop.
+ * From the outside that is an assistant that did nothing. It had the
+ * ingredients on screen and no instruction to hand them over.
+ *
+ * The rule that should have covered it named the wrong things: "for looking
+ * things up (jobs, reviews, prices)". A recipe is not a job, a review or a
+ * price, so the model did what the rest of the brief says — act on a page —
+ * and a page is not an answer to somebody who asked for a recipe.
+ *
+ * Two halves. The mover is told the answer itself comes back, written out
+ * far enough to use. And the card that shows it stops behaving like a
+ * receipt: everything here closed itself within ten seconds, which is right
+ * for "Playing Interstellar" and wrong for the ingredients list they are
+ * halfway through reading.
+ */
+section('A lookup comes back with the answer, not a page');
+{
+  const agent = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Agent.swift'), 'utf8');
+  const main = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/main.swift'), 'utf8');
+
+  check(
+    /LOOKING SOMETHING UP ENDS WITH THE ANSWER, NOT WITH A PAGE/.test(agent),
+    'the mover is told that finding something ends with the thing, not with a page'
+  );
+  check(
+    /A recipe means its ingredients and its steps, written out/.test(agent),
+    'and what "in full enough to use" means, by example rather than by adjective'
+  );
+  check(
+    /"I found a recipe", "it's on your screen" and a link are not answers/.test(agent),
+    'with the three non-answers named, since each one reads like a reply'
+  );
+  check(
+    /Do not keep scrolling to admire it/.test(agent),
+    'and scrolling past the answer is called out, which is what it actually did'
+  );
+
+  // The card. A receipt goes; an answer stays.
+  const card = between(main, '          A receipt goes; an answer stays.', 'Recent.ended(', { min: 300, max: 1600 });
+  check(card !== null, 'the done card is where it is expected to be');
+  check(
+    card !== null && /let answer = result\.spoken\.count > 280/.test(card) &&
+      /closeAfter: answer \? nil : read/.test(card),
+    'something long enough to be an answer stays on screen instead of closing itself',
+    'length separates the two: a line Grove wrote about what it did is short, a thing it went and found is not'
+  );
+  check(
+    card !== null && /thenHome: !answer/.test(card),
+    'and does not bounce back to the ask box out from under them'
+  );
+
+  /*
+   * And the card shows it as words. Told not to use markdown the model
+   * writes it anyway, reliably, on exactly the long answers this card now
+   * keeps on screen — so "**Ingredients:**" was about to be the first line
+   * of every recipe. The same fix the phone has had since plainSpeech.
+   */
+  const panel = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Resources/panel.html'), 'utf8');
+  check(
+    /const plain = \(t\) =>/.test(panel) && /replace\(\/\\\*\\\*\(\.\+\?\)\\\*\\\*\/g, '\$1'\)/.test(panel),
+    'the card strips the markdown the model writes whatever it is told'
+  );
+  for (const [card, from, to] of [['done', "if (m === 'done')", "if (m === 'waiting')"], ['answer', "if (m === 'rewrite' || m === 'answer')", "if (m === 'job')"]]) {
+    const region = between(panel, from, to, { min: 200, max: 2200 });
+    check(
+      region !== null && /esc\(plain\(d\.text\)\)/.test(region),
+      `the ${card} card puts its text through it`,
+      'this card shows text as it is, so an asterisk is an asterisk'
+    );
+  }
+
+  // Stopping is not a reason to throw away what it had.
+  const stopped = between(main, 'case "stopped":', 'default:', { min: 150, max: 900 });
+  check(stopped !== null, 'the stopped branch is where it is expected to be');
+  check(
+    stopped !== null && /notch\.show\("done", \["title": "Stopped"/.test(stopped),
+    'and stopping still says where it had got to',
+    'it was halfway down a recipe when they gave up on it, and said nothing'
   );
 }
 

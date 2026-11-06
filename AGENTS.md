@@ -174,6 +174,45 @@ single user.
   actually memory: still to do, keeps tripping, people and projects, what
   happened, about you.
 
+## A lookup ends with the answer, not with a page
+
+*"Search up a recipe for chicken pot pie."* Grove went to Google, opened a
+recipe, pressed Jump to Recipe — all correct — then scrolled three times and
+said nothing, until twenty-five seconds later the person pressed Stop. From
+the outside that is an assistant that did nothing. It had the ingredients on
+screen and no instruction to hand them over.
+
+The rule that should have covered it named the wrong things: *"for looking
+things up (jobs, reviews, prices)"*. A recipe is not a job, a review or a
+price, so the model did what the rest of the brief says — act on a page — and
+a page is not an answer to somebody who asked for a recipe. **A list of
+examples is a list of the cases somebody thought of**, and the ones nobody
+thought of fall through to whatever the default behaviour happens to be.
+
+So the mover is told that finding something ends with the thing: read it and
+put it in `done` far enough to use, a recipe's ingredients **and** its steps,
+written out. The three non-answers are named, because each one reads like a
+reply — *"I found a recipe"*, *"it's on your screen"*, and a link. It opens the
+page as well, so both halves of what was asked for arrive. Measured against
+the live model on a real recipe page: `done`, with the full ingredients and
+five steps, 866 characters.
+
+**A receipt goes; an answer stays.** Every result card closed itself within
+ten seconds, which is right for "Playing Interstellar" and wrong for the
+ingredients list somebody is halfway through reading. Length separates the
+two without anything having to declare which it is: a line Grove wrote about
+what it did is short, a thing it went and found is not.
+
+**And stopping still says where it got to.** It was halfway down a recipe when
+they gave up on it, and saying nothing at that moment is most of what made the
+whole thing feel like it had done nothing.
+
+The card strips markdown on its way in. Told not to use it the model writes
+`**` and `#` anyway, reliably, on exactly the long answers that now stay on
+screen — so *"**Ingredients:**"* was about to be the first line of every
+recipe. The same fix `plainSpeech` has done on the phone since it was reading
+asterisks out loud.
+
 ## Documents, and why a scope change needs a reconnect
 
 `doc.create` writes a new Google Doc and never touches one you already have.
@@ -1646,19 +1685,19 @@ and not having to touch anything is the whole reason the ring and the glasses
 exist. So it opens with the card, and what is said fills the box and sends
 itself.
 
-**The three cards that listen are the three with a microphone button on them**,
-which is not a coincidence: a card that listens needs somewhere to show that it
-is, and some way to stop it. Grove thinking and Grove working are neither —
-they have a box for changing the job, but an open microphone for the ninety
-seconds of a task is a room being recorded, not a question being answered.
+**Every card with somewhere to say something into listens**, and they all have
+a microphone button to show it and stop it. That was three cards, and only an
+idle panel opened on purpose; both were too careful. Opening the notch and
+finding the microphone off is the whole complaint, and "I opened it normally"
+is most of how anyone opens it, so gating on a deliberate open meant the common
+case was the one that did not work. Thinking and working listen too: that is
+the card that is up longest and the one worth talking over — *"no, chicken
+parm"* while it is halfway through searching is the entire point of the box
+being there, and having to type it is why the box got used once.
 
-**An empty panel listens only when it was opened on purpose.** The panel also
-opens when the pointer merely crosses the notch, which happens on the way to
-the clock; a microphone that started every time somebody's cursor passed over
-the top of their screen would not be "on by default", it would be on
-constantly, and the light saying so would be the most alarming thing in the
-app. Pinned is the difference — ⌘K, a question, an answer, a job — and all of
-those are somebody meaning to talk to it.
+**Never over sound.** A job playing a film would otherwise have it transcribed
+by the microphone Grove just opened over it and sent back into the same job as
+a change of plan. Reading aloud is the same problem in Grove's own voice.
 
 **The button is the switch**, not a one-off. On by default means the only
 reason to press it is to stop it, and "stop this sentence" and "stop doing

@@ -351,7 +351,7 @@ final class Agent {
         task.history.append("The page changed before the press; confirm again before pressing anything.")
         return await loop(task)
       }
-      let result = await Browser.js(Browser.clickJS(pending.n))
+      let result = await Browser.press(pending.n).said
       task.approved = pending.summary
       task.history.append("They said yes and it was pressed: \(pending.summary) → \(result). That step is finished; never do it again. If the goal is now reached, reply done.")
       Log.say("agent: approved \(task.id) \(pending.summary)")
@@ -486,7 +486,7 @@ final class Agent {
       // board to reason about, and recovering from a move that did nothing.
       // An ordinary click on an ordinary page does not need it.
       let recent = task.history.suffix(2).joined()
-      let hard = task.steps == 1 || !page.board.isEmpty || !page.chess.isEmpty || recent.contains("nothing on the page changed") || recent.contains("already did")
+      let hard = !page.board.isEmpty || !page.chess.isEmpty || recent.contains("nothing on the page changed") || recent.contains("already did")
       guard let move = await Agent.next(goal: task.goal, plan: task.plan, history: task.history, page: page, manner: manner, think: hard || picture != nil, recent: task.steps == 1 || task.tab.isEmpty ? recent : "", picture: picture, learned: Lessons.known(for: page.url, goal: task.goal), note: task.note) else {
         return AgentResult(state: "failed", spoken: "I couldn't work out the next step on your Mac.", task: task.id)
       }
@@ -579,6 +579,12 @@ final class Agent {
       case "go":
         let url = move["url"] as? String ?? ""
         task.desk = ""
+        // Into one of their tabs in the same move: taking the tab and then
+        // going somewhere were two model calls for one decision.
+        if task.tab.isEmpty, let i = Agent.number(move["tab"]).map(Int.init), i >= 0, i < page.tabs.count {
+          task.tab = page.tabs[i].ref
+          Browser.tab = page.tabs[i].ref
+        }
         if task.tab.isEmpty {
           await Browser.newTab()
           task.tab = Browser.tab
@@ -602,6 +608,10 @@ final class Agent {
         // flour a recipe used, it scrolled past the ingredients four times.
         let r = await Browser.find(text)
         task.history.append("Found \"\(text)\" on the page: \(r)")
+      case "hover":
+        let r = await Browser.hover(n)
+        task.history.append("Hovered over [\(n)] \(label) → \(r)")
+        try? await _Concurrency.Task.sleep(nanoseconds: 500_000_000)
       case "look":
         task.look = true
         task.history.append("Asked to see the page")
@@ -644,26 +654,32 @@ final class Agent {
           break
         }
         await Browser.watch()
-        var r = await Browser.js(Browser.clickJS(n))
-        try? await _Concurrency.Task.sleep(nanoseconds: 900_000_000)
+        var (r, spot) = await Browser.press(n)
+        try? await _Concurrency.Task.sleep(nanoseconds: 300_000_000)
         // Pages that only listen to a real mouse (games, players, custom
-        // controls) ignore a click from a script, and nothing changes. Only
-        // then is it pressed for real, so a click that worked is never
-        // doubled — and never a link, which may have opened a tab instead.
-        if r == "ok", !(await Browser.changed()), !(await Browser.isLink(n)), let point = await Browser.screenPoint(of: n) {
-          await Browser.borrow { await Browser.realClick(point) }
-          r = "ok (pressed with the mouse; the page ignored a scripted click)"
-          try? await _Concurrency.Task.sleep(nanoseconds: 600_000_000)
+        // controls) ignore even a full pressed sequence from a script, and
+        // nothing changes. Only then is it pressed for real, at a point that
+        // is really showing, so a press that worked is never doubled — and
+        // never a link, which may have opened a tab instead. Under something
+        // else, it is not pressed through: the agent is told what is on top.
+        if !(await Browser.changed()), !(await Browser.isLink(n)), let spot {
+          if spot.showing, let point = await Browser.onScreen(spot) {
+            await Browser.borrow { await Browser.realClick(point) }
+            r = "pressed with the mouse, because the page ignored a scripted press"
+            try? await _Concurrency.Task.sleep(nanoseconds: 600_000_000)
+          } else if !spot.showing {
+            r = "nothing happened: it is covered by “\(spot.cover)”. Close or move that first (a popup, a banner, a menu), or scroll"
+          }
         }
         task.history.append("Clicked [\(n)] \(label) → \(r)")
-        try? await _Concurrency.Task.sleep(nanoseconds: 600_000_000)
+        await Browser.quiet()
       case "keys":
         // Real key presses, for pages that listen to the keyboard rather than
         // a box — a game board, a shortcut. Typed into a field, Wordle saw
         // nothing; pressed, it fills the row.
         await Browser.keys(text, enter: (move["enter"] as? Bool) ?? false)
         task.history.append("Pressed keys \"\(text)\"\((move["enter"] as? Bool) == true ? " then Return" : "")")
-        try? await _Concurrency.Task.sleep(nanoseconds: 2_500_000_000)
+        await Browser.quiet(within: 3)
       case "type":
         if Agent.isSecret(n, in: page) {
           task.history.append("Refused to type into [\(n)]: password and card fields are theirs to fill.")
@@ -697,7 +713,7 @@ final class Agent {
         }
         if (move["enter"] as? Bool) == true { await Browser.pressReturn() }
         task.history.append("Typed \"\(text)\" into [\(n)] \(label) → \(r)")
-        try? await _Concurrency.Task.sleep(nanoseconds: 1_500_000_000)
+        await Browser.quiet()
       case "select":
         let r = await Browser.js(Browser.selectJS(n, text))
         task.history.append("Chose \"\(text)\" in [\(n)] → \(r)")
@@ -737,7 +753,8 @@ final class Agent {
         if unmoved && !task.doubted {
           task.doubted = true
           task.history.append("You said done, but your last move changed nothing on the page. Look at the page: if what they asked for is not visibly there, it is not done; try another way.")
-          task.look = true
+          // Eyes only where the words cannot show it; a picture waits for a gap in their typing.
+          task.look = !task.desk.isEmpty || page.visual || !page.board.isEmpty
           continue
         }
         // Nothing done in this task at all. Something already on the page is
@@ -746,7 +763,8 @@ final class Agent {
         if task.acts == 0 && !task.doubted {
           task.doubted = true
           task.history.append("You said done without doing anything in this task. What is on the page may be left from before. If they asked you to do something (play, fill in, choose, send), do it now and check it took; if they only wanted it opened or shown and it is in front of them, say done again.")
-          task.look = true
+          // Eyes only where the words cannot show it; a picture waits for a gap in their typing.
+          task.look = !task.desk.isEmpty || page.visual || !page.board.isEmpty
           continue
         }
         // Checked by a second reader before it is believed. The mover judges
@@ -755,7 +773,11 @@ final class Agent {
         // check sees the goal, what happened and the page as it is now, and
         // only "achieved" is accepted. Twice refused is said as a failure.
         let claim = (move["summary"] as? String) ?? text
-        let verdict = await Agent.check(goal: task.goal, claim: claim, history: task.history, page: page, picture: await Agent.picture(app: task.desk))
+        // A picture only where the page's words cannot show it: a game, a board,
+        // a canvas, an app. Taking one waits for a gap in their typing and costs
+        // seconds that a recipe page does not need.
+        let needsEyes = !task.desk.isEmpty || page.visual || !page.board.isEmpty || !page.chess.isEmpty
+        let verdict = await Agent.check(goal: task.goal, claim: claim, history: task.history, page: page, picture: needsEyes ? await Agent.picture(app: task.desk) : nil)
         Log.say("agent: \(task.id) check \(verdict.ok ? "passed" : "refused"): \(verdict.why.prefix(120))")
         if !verdict.ok {
           task.checks += 1
@@ -828,13 +850,15 @@ final class Agent {
   You are Grove, using the person's own Mac and their Chrome browser to do what they asked. They are signed in to their usual sites.
   Each turn you see the goal, what has happened so far, and the current page: its address, numbered things you can press or type into (with their state when they have one), the state of any board or grid on it, and some of its text.
   Before your first move there is no tab, and their open Chrome tabs are listed. If one is already on the site this job belongs on — above all the one in front of them, or the one your last task used — take it with {"action":"tab","n":2} and carry on from where it is: "play this song" with YouTube open means searching in that YouTube, not opening another. Otherwise go opens a new tab. Use only the site they named, or the obvious one for the job; never do it somewhere else because that happened to be open.
+  Be quick, like someone who uses a browser all day: most jobs are two to four moves. Never check your own work by searching or scrolling the page once it is there: someone else checks it after you say done. Before every move, first ask whether what they asked for is already in front of them; if it is, reply done now, without scrolling, waiting or checking any further. Go straight to a search address instead of typing into a home page, and pick the first good result instead of reading them all.
   Before choosing, look at what the last move actually did ("Result" lines in So far, and the page itself) and at your plan. On your first move only, also include "plan": the three to six steps you will take, in one line.
   Reply with ONE next move as JSON. Every move also carries "step": what you are doing, as a person would say it in four to seven words, e.g. "Searching Amazon for watermelon", "Adding it to your cart", "Opening checkout". Never numbers, brackets or button names in step.
-  {"action":"go","url":"https://..."} — open an address. Go straight to search addresses when you can: https://www.youtube.com/results?search_query=..., https://www.google.com/search?q=..., https://www.amazon.com/s?k=..., https://www.linkedin.com/jobs/search/?keywords=..., https://www.indeed.com/jobs?q=...
+  {"action":"go","url":"https://...","tab":2} — open an address; with "tab", in that one of their open tabs, in the same move. Go straight to search addresses when you can: https://www.youtube.com/results?search_query=..., https://www.google.com/search?q=..., https://www.amazon.com/s?k=..., https://www.linkedin.com/jobs/search/?keywords=..., https://www.indeed.com/jobs?q=...
   {"action":"click","n":12,"summary":"..."} — when the click puts something in a cart or an order, summary is the question they will answer: the item, how many and the price, e.g. "One OG Cheeseburger from Burger's Priest, $11.99. Add it to your order?" Check the quantity is what they asked for (one, unless they said more) before adding.
   {"action":"type","n":4,"text":"...","enter":true}
   {"action":"keys","text":"crane","enter":true} — real key presses, for pages that listen to the keyboard rather than a box: games like Wordle, shortcuts. Not for typing into a field. For named keys, give their names separated by spaces, several at once when that is the plan: "ArrowLeft ArrowLeft ArrowUp", "Escape", "Space", "Tab", "Backspace".
   {"action":"select","n":7,"text":"option"}
+  {"action":"hover","n":12} — rest the pointer on something, for menus that only open on hover (an account menu, a category list). Read the page again after.
   {"action":"scroll"} {"action":"back"} {"action":"wait"}
   {"action":"message","app":"whatsapp","to":"Akash","text":"..."} — a message to a person through an app installed on this Mac (\(Native.apps)) instead of its website. It finds them in Contacts and asks them before sending. Use it for those apps; use the website only for apps not listed.
   {"action":"app","name":"Notes"} — work in an app on this Mac rather than a website. Your next move gets a picture of its window: click points on it with x and y, type with {"action":"type","text":"...","into":"search" or "message"} (no n), press keys with keys. Use it for anything that lives in an app, and for odd jobs no website does. In an app that reaches people, "into":"message" is for words going to a person, and every press after that asks them first.
@@ -864,7 +888,8 @@ final class Agent {
   - Food and shopping: if they did not name the exact item or restaurant, ask, offering the best two or three by name and price ("Smash Burger Co, $14, or Five Guys, $16?"). Never use quick-add on something they did not choose. Ignore existing carts unless they mention them.
   - Food: Uber Eats is https://www.ubereats.com/ and searches as https://www.ubereats.com/search?q=QUERY; DoorDash is https://www.doordash.com/ and https://www.doordash.com/search/store/QUERY. Their address and card are already on the account, so never type either. The order of it is: find the place, open it, find the item on its menu, add it (that add is a confirm, with the item and price in the summary), open the cart, then confirm the final button. If it asks for a tip or a delivery time, take the default. If the address shown is not one of theirs, stop and ask rather than changing it.
   - Shopping: Amazon searches as https://www.amazon.com/s?k=QUERY. Pick from the results page by what they asked for, not by what is sponsored first, and say which one in the add-to-cart summary.
-  - For looking things up (jobs, reviews, prices), finish on the page that shows them and summarise the best two or three in done.
+  - LOOKING SOMETHING UP ENDS WITH THE ANSWER, NOT WITH A PAGE. A recipe, a price, opening times, directions, reviews, jobs, how to do something: get to where the answer actually is, read it, and put it in done in full enough to use. A recipe means its ingredients and its steps, written out. A comparison means the best two or three by name with their numbers. "I found a recipe", "it's on your screen" and a link are not answers — they asked for the thing, not for it to exist somewhere. Open the page as well, so it is in front of them, but the words come back either way, and a long answer is fine here: this one is read, not spoken.
+  - Having opened the page the answer is on, read it and reply done. Do not keep scrolling to admire it: once you can see what they asked for, you are finished, and the next scroll is a second of them watching a progress line.
   - Do not repeat a move that just failed; try another way.
   - Never say they are not signed in unless the page plainly shows a sign-in form asking for their email or password. If unsure, wait and look again.
   - Sending an email: open Gmail's compose already filled in, https://mail.google.com/mail/?view=cm&fs=1&to=ADDRESS&su=SUBJECT&body=BODY with each part URL-encoded, check To, Subject and the body read what you meant, then confirm on the Send button. Write it properly from what they said: a greeting, the point, their first name. If you do not have the address, search Gmail for that person first, and ask only if nothing turns up.
@@ -929,7 +954,7 @@ final class Agent {
     let body: [String: Any] = [
       "systemInstruction": ["parts": [["text": system]]],
       "contents": [["role": "user", "parts": parts]],
-      "generationConfig": ["responseMimeType": "application/json", "maxOutputTokens": 3000, "temperature": 0, "thinkingConfig": ["thinkingBudget": 1024]],
+      "generationConfig": ["responseMimeType": "application/json", "maxOutputTokens": 1200, "temperature": 0, "thinkingConfig": ["thinkingBudget": picture == nil ? 0 : 512]],
     ]
     request.httpBody = try? JSONSerialization.data(withJSONObject: body)
     // A check that could not run is not a refusal: the move stands as it did before there was one.
@@ -981,7 +1006,7 @@ final class Agent {
     \(history.isEmpty ? "(nothing yet)" : history.suffix(14).joined(separator: "\n"))
 
     \(page.tabs.isEmpty ? "" : "No tab yet. Their open Chrome tabs:\n" + page.tabs.enumerated().map { "[\($0.offset)] \($0.element.title.prefix(70)) — \($0.element.url.prefix(90))\($0.element.front ? " (in front of them)" : "")\($0.element.last ? " (your last task's tab)" : "")" }.joined(separator: "\n") + "\n")
-    Page: \(page.title)
+    Page: \(page.title)\(page.loading ? " (still loading; wait only if what you need is not here yet)" : "")
     Address: \(page.url)
     Things on it:
     \(items.isEmpty ? "(none)" : items)
@@ -1193,6 +1218,8 @@ enum Browser {
     var visual = false
     /** A window of an app on this Mac, not a page: what it says is in the picture. */
     var desk = false
+    /** The document is still being parsed. */
+    var loading = false
     /** What a popup over the page says, when one is up: its buttons are listed first, marked. */
     var popup = ""
     /** Frames from other sites, which cannot be read or pressed from the page: name and address. */
@@ -1317,12 +1344,44 @@ enum Browser {
     var s = url.trimmingCharacters(in: .whitespaces)
     if !s.contains("://") { s = "https://" + s }
     _ = await run("tell application \"Google Chrome\" to set URL of \(tab) to \(quoted(s))")
-    for _ in 0..<20 {
-      try? await _Concurrency.Task.sleep(nanoseconds: 400_000_000)
-      let (_, loading) = await run("tell application \"Google Chrome\" to get loading of \(tab)")
-      if loading == "false" { break }
+    await readable()
+  }
+
+  /**
+    Ready when it can be read, not when it has finished loading. Chrome's own
+    "loading" stays true while ads and trackers trickle in — fifteen seconds on
+    a page of Google results that were readable in one — so a page counts once
+    its document is parsed and it has something in it.
+  */
+  static func readable(within seconds: Double = 5) async {
+    let until = Date().addingTimeInterval(seconds)
+    try? await _Concurrency.Task.sleep(nanoseconds: 250_000_000)
+    while Date() < until {
+      let state = await js("document.readyState+'|'+(document.body?document.body.innerText.length:0)")
+      let bits = state.split(separator: "|")
+      if bits.count == 2, bits[0] != "loading", (Int(bits[1]) ?? 0) > 150 { break }
+      try? await _Concurrency.Task.sleep(nanoseconds: 250_000_000)
     }
-    try? await _Concurrency.Task.sleep(nanoseconds: 800_000_000)
+    try? await _Concurrency.Task.sleep(nanoseconds: 150_000_000)
+  }
+
+  /**
+    After a press: as soon as the page has gone still, or has gone somewhere and
+    can be read. Fixed sleeps either wasted a second and a half on a page that
+    reacted in a tenth, or moved on while it was still changing.
+  */
+  static func quiet(within seconds: Double = 2.5) async {
+    let start = await js("location.href")
+    _ = await js("(function(){window.__groveQuiet=0;if(window.__groveQ)window.__groveQ.disconnect();window.__groveQ=new MutationObserver(function(m){window.__groveQuiet+=m.length;});window.__groveQ.observe(document.documentElement,{subtree:true,childList:true,attributes:true,characterData:true});return 'ok';})()")
+    let until = Date().addingTimeInterval(seconds)
+    var last = -1, still = 0
+    while Date() < until {
+      try? await _Concurrency.Task.sleep(nanoseconds: 150_000_000)
+      let here = await js("location.href")
+      if here != start && here != "error" { await readable(within: max(1, until.timeIntervalSinceNow + 1.5)); return }
+      let count = Int(await js("String(window.__groveQuiet===undefined?-1:window.__groveQuiet)")) ?? -1
+      if count == last { still += 1; if still >= 2 { return } } else { still = 0; last = count }
+    }
   }
 
   /**
@@ -1716,9 +1775,9 @@ enum Browser {
         return v||e.placeholder||e.title||(edit?'text box':'');
       }
       function field(e){return /^(INPUT|TEXTAREA|SELECT)$/.test(e.tagName)||e.isContentEditable||e.getAttribute('role')==='textbox';}
-      function all(q){var out=[];(function walk(root){root.querySelectorAll(q).forEach(function(e){out.push(e);});
-        root.querySelectorAll('*').forEach(function(e){if(e.shadowRoot)walk(e.shadowRoot);});
-        root.querySelectorAll('iframe').forEach(function(f){try{var d=f.contentDocument;if(d&&d.body)walk(d);}catch(x){}});})(document);return out;}
+      var roots=[];(function walk(root){roots.push(root);var kids=root.querySelectorAll('*');for(var i=0;i<kids.length;i++){if(kids[i].shadowRoot)walk(kids[i].shadowRoot);}
+        root.querySelectorAll('iframe').forEach(function(f){try{var d=f.contentDocument;if(d&&d.body)walk(d);}catch(x){}});})(document);
+      function all(q){var out=[];roots.forEach(function(r){r.querySelectorAll(q).forEach(function(e){out.push(e);});});return out;}
       function deepText(root){var t='';root.childNodes.forEach(function(c){
         if(c.nodeType===3)t+=c.textContent; else if(c.nodeType===1){var st=getComputedStyle(c); if(st.display==='none'||st.visibility==='hidden')return;
         if(c.shadowRoot)t+=' '+deepText(c.shadowRoot)+' '; if(/^(SCRIPT|STYLE|NOSCRIPT)$/.test(c.tagName))return; t+=deepText(c); if(/^(DIV|P|LI|TR|H[1-6]|SECTION|ARTICLE|BR)$/.test(c.tagName))t+='\\n';}});return t;}
@@ -1755,7 +1814,7 @@ enum Browser {
         if(e.type)it.type=e.type; if(edit){it.type='textbox';it.value=(e.innerText||'').trim().slice(0,60);} if(e.autocomplete)it.auto=e.autocomplete;
         if((e.tagName==='INPUT'||e.tagName==='TEXTAREA')&&e.type!=='password')it.value=(e.value||'').slice(0,60);
         if(field(e)&&(r.width<12||r.height<8||parseFloat(st.opacity)<0.1)){it.type='invisible box: takes key presses for the grid or game around it; what it holds is not what the page shows';delete it.value;}
-        var state=(/^(checkbox|radio)$/.test(e.type||'')?(e.checked?'checked':'not checked'):'')||e.getAttribute('data-state')||e.getAttribute('aria-pressed')||e.getAttribute('aria-checked')||e.getAttribute('aria-selected')||'';
+        var state=(/^(checkbox|radio)$/.test(e.type||'')?(e.checked?'checked':'not checked'):'')||(e.getAttribute('aria-expanded')==='true'?'open':(e.getAttribute('aria-expanded')==='false'?'closed':''))||(e.disabled||e.getAttribute('aria-disabled')==='true'?'disabled':'')||e.getAttribute('data-state')||e.getAttribute('aria-pressed')||e.getAttribute('aria-checked')||e.getAttribute('aria-selected')||'';
         if(state&&state!=='false')it.state=state;
         if(pop&&pop.contains(e))it.popup=1;
         out.push(it); n++;
@@ -1778,10 +1837,13 @@ enum Browser {
       var big=0;all('canvas,iframe').forEach(function(e){var r=e.getBoundingClientRect();big=Math.max(big,(Math.min(r.right,innerWidth)-Math.max(r.left,0))*(Math.min(r.bottom,innerHeight)-Math.max(r.top,0))/(innerWidth*innerHeight));});
       var frames=[];all('iframe').forEach(function(f){var r=f.getBoundingClientRect();if(r.width*r.height<innerWidth*innerHeight*0.08||!f.src||/^(about|javascript|data):/.test(f.src))return;var same=false;try{same=!!(f.contentDocument&&f.contentDocument.body);}catch(x){}if(!same)frames.push((f.title||f.name||'frame').slice(0,60)+' at '+f.src.slice(0,180)+' ('+Math.round(r.width)+'x'+Math.round(r.height)+')');});
       var popText=pop?(pop.innerText||'').replace(/\\s+/g,' ').trim().slice(0,240):'';
-      return JSON.stringify({url:location.href,title:document.title,items:out,board:board.join('\\n'),text:text,chess:groveChessText(),visual:big>0.25,popup:popText,frames:frames.join('\\n')});
+      return JSON.stringify({loading:document.readyState==='loading',url:location.href,title:document.title,items:out,board:board.join('\\n'),text:text,chess:groveChessText(),visual:big>0.25,popup:popText,frames:frames.join('\\n')});
     })()
     """
+    let began = Date()
     let raw = await js(code)
+    let took = Date().timeIntervalSince(began)
+    if took > 1.5 { Log.say("agent: reading the page took \(String(format: "%.1f", took))s") }
     guard let data = raw.data(using: .utf8),
           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
       var page = Page(url: await url())
@@ -1791,7 +1853,7 @@ enum Browser {
     return Page(url: obj["url"] as? String ?? "", title: obj["title"] as? String ?? "",
                 items: obj["items"] as? [[String: Any]] ?? [], text: obj["text"] as? String ?? "",
                 board: obj["board"] as? String ?? "", chess: obj["chess"] as? String ?? "", visual: obj["visual"] as? Bool ?? false,
-                popup: obj["popup"] as? String ?? "", frames: obj["frames"] as? String ?? "")
+                loading: obj["loading"] as? Bool ?? false, popup: obj["popup"] as? String ?? "", frames: obj["frames"] as? String ?? "")
   }
 
   /*
@@ -1991,11 +2053,18 @@ enum Browser {
     func post(_ type: CGEventType) {
       CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
     }
+    // Grove's own windows let it through: the notch card showing the job, or a
+    // GIF in the corner, sat exactly where a click was meant to land, and the
+    // press went to Grove instead of the page.
+    let own = NSApp.windows.filter { $0.isVisible && !$0.ignoresMouseEvents }
+    own.forEach { $0.ignoresMouseEvents = true }
+    defer { own.forEach { $0.ignoresMouseEvents = false } }
     post(.mouseMoved)
     try? await _Concurrency.Task.sleep(nanoseconds: 60_000_000)
     post(.leftMouseDown)
     try? await _Concurrency.Task.sleep(nanoseconds: 70_000_000)
     post(.leftMouseUp)
+    try? await _Concurrency.Task.sleep(nanoseconds: 80_000_000)
   }
 
   /** Text set by a script that did not take: the page put it back, or the box is a hidden stand-in for a grid or a game. */
@@ -2076,6 +2145,138 @@ enum Browser {
   /** A link or a field: a press that does its work without changing this page, so never pressed twice. */
   static func isLink(_ n: Int) async -> Bool {
     await js("(function(){var e=(window.__grove&&window.__grove[\(n)])||document.querySelector('[data-grove=\"\(n)\"]');return e&&e.closest('a[href],input,textarea,select')?'yes':'no';})()") == "yes"
+  }
+
+  /*
+    Pressing something the way a hand does.
+
+    A scripted `click()` is only the last of the events a real press makes, and
+    plenty of controls never see it: Amazon's dropdowns, menus, anything built
+    to react to the pointer going down. It also lands wherever the element is,
+    whether or not something else is on top of it, and on a page still
+    scrolling towards it. So a press is: scroll it into view and let it settle,
+    find a point on it that is really showing (not under a sticky header or a
+    cookie bar), and send that point the whole sequence — over, down, focus,
+    up, click — with its coordinates. When nothing on it is showing, it says
+    what is on top, so the agent can close that rather than click through it.
+  */
+  static let pressFn = """
+  function groveEl(n){return (window.__grove&&window.__grove[n])||document.querySelector('[data-grove="'+n+'"]');}
+  function groveFrame(e){var x=0,y=0,w=e.ownerDocument.defaultView;while(w&&w.frameElement){var f=w.frameElement.getBoundingClientRect();x+=f.left;y+=f.top;w=w.parent;}return [x,y];}
+  function groveSpot(e){var d=e.ownerDocument,v=d.defaultView,r=e.getBoundingClientRect(),o=groveFrame(e);
+    var at=[[.5,.5],[.3,.5],[.7,.5],[.5,.3],[.5,.7],[.15,.5],[.85,.5],[.2,.2],[.8,.8]];
+    for(var i=0;i<at.length;i++){var x=r.left+r.width*at[i][0],y=r.top+r.height*at[i][1];if(x<1||y<1||x>v.innerWidth-1||y>v.innerHeight-1)continue;
+      var t=d.elementFromPoint(x,y);if(t&&(t===e||e.contains(t)||(t.contains(e)&&!/^(BODY|HTML)$/.test(t.tagName))))return {x:x,y:y,ox:o[0],oy:o[1],ok:1};}
+    var c=d.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+    return {x:r.left+r.width/2,y:r.top+r.height/2,ox:o[0],oy:o[1],ok:0,cover:c?String(c.getAttribute('aria-label')||c.innerText||c.tagName).replace(/\\s+/g,' ').slice(0,60):''};}
+  function grovePress(e,s){var d=e.ownerDocument,t=s.ok?(d.elementFromPoint(s.x,s.y)||e):e;if(!(t===e||e.contains(t)||t.contains(e)))t=e;
+    function o(b){return {bubbles:true,cancelable:true,composed:true,clientX:s.x,clientY:s.y,button:0,buttons:b,pointerId:1,pointerType:'mouse',isPrimary:true,view:d.defaultView,detail:1};}
+    t.dispatchEvent(new PointerEvent('pointerover',o(0)));t.dispatchEvent(new MouseEvent('mouseover',o(0)));t.dispatchEvent(new MouseEvent('mousemove',o(0)));
+    t.dispatchEvent(new PointerEvent('pointerdown',o(1)));t.dispatchEvent(new MouseEvent('mousedown',o(1)));
+    try{if(e.focus)e.focus({preventScroll:true});}catch(x){}
+    t.dispatchEvent(new PointerEvent('pointerup',o(0)));t.dispatchEvent(new MouseEvent('mouseup',o(0)));t.dispatchEvent(new MouseEvent('click',o(0)));}
+  function groveLook(){var dl=document.querySelector('[role=dialog],[role=alertdialog],[aria-modal=true],dialog[open]');return location.href+'\\u0001'+document.title+'\\u0001'+(dl?String(dl.innerText||'').replace(/\\s+/g,' ').slice(0,80):'');}
+  """
+
+  struct Spot { let x: Double; let y: Double; let ox: Double; let oy: Double; let showing: Bool; let cover: String }
+
+  /** Into view and still: a page scrolling towards it moves the point after it has been measured. */
+  private static func settle(_ n: Int) async -> Spot? {
+    var last = ""
+    for _ in 0..<4 {
+      let raw = await js("(function(){\(pressFn) var e=groveEl(\(n));if(!e)return '';e.scrollIntoView({block:'center',inline:'center',behavior:'instant'});var r=e.getBoundingClientRect();return Math.round(r.left)+','+Math.round(r.top);})()")
+      if raw.isEmpty || raw == "error" { return nil }
+      if raw == last { break }
+      last = raw
+      try? await _Concurrency.Task.sleep(nanoseconds: 160_000_000)
+    }
+    let raw = await js("(function(){\(pressFn) var e=groveEl(\(n));return e?JSON.stringify(groveSpot(e)):'';})()")
+    guard let o = (try? JSONSerialization.jsonObject(with: Data(raw.utf8))) as? [String: Any] else { return nil }
+    func d(_ k: String) -> Double { (o[k] as? Double) ?? Double((o[k] as? Int) ?? 0) }
+    return Spot(x: d("x"), y: d("y"), ox: d("ox"), oy: d("oy"), showing: ((o["ok"] as? Int) ?? 0) == 1, cover: (o["cover"] as? String) ?? "")
+  }
+
+  /**
+    A press on element n, in the page. What came back, in words for the
+    history: where it went, what opened, or that nothing did. `spot` is where
+    it pressed, for pressing again with the real mouse.
+  */
+  static func press(_ n: Int) async -> (said: String, spot: Spot?) {
+    guard let spot = await settle(n) else { return ("it is not on the page any more", nil) }
+    let before = await js("(function(){\(pressFn) return groveLook();})()")
+    _ = await js("(function(){\(pressFn) var e=groveEl(\(n));if(!e)return '';grovePress(e,{x:\(spot.x),y:\(spot.y),ok:\(spot.showing ? 1 : 0)});return 'ok';})()")
+    try? await _Concurrency.Task.sleep(nanoseconds: 700_000_000)
+    let after = await js("(function(){\(pressFn) return groveLook();})()")
+    let b = before.components(separatedBy: "\u{1}"), a = after.components(separatedBy: "\u{1}")
+    var said = "pressed"
+    if a.count == 3, b.count == 3 {
+      if a[0] != b[0] { said = "pressed; the page went to \(a[1].prefix(70))" }
+      else if !a[2].isEmpty && a[2] != b[2] { said = "pressed; a dialog opened: \(a[2])" }
+    } else if after == "error" { said = "pressed; the page is loading something new" }
+    if !spot.showing && !spot.cover.isEmpty { said += " (it was partly hidden under “\(spot.cover)”)" }
+    return (said, spot)
+  }
+
+  /**
+    Where a point on the page is on the screen. Measured from the page area
+    Chrome itself reports through Accessibility — the obvious arithmetic, the
+    window's corner plus its toolbar, put the mouse in the wrong place as soon
+    as the Gemini side panel was open or the page was zoomed — and scaled by
+    the zoom, since a page's pixels are not the screen's at 110%.
+  */
+  static func onScreen(_ spot: Spot) async -> CGPoint? {
+    let info = await js("[innerWidth,window.screenX+(outerWidth-innerWidth),window.screenY+(outerHeight-innerHeight),location.href].join('\\u0001')").components(separatedBy: "\u{1}")
+    guard info.count == 4, let inner = Double(info[0]) else { return nil }
+    let x = spot.x + spot.ox, y = spot.y + spot.oy
+    if let area = await MainActor.run(body: { webArea(url: info[3]) }), area.width > 50 {
+      let zoom = area.width / CGFloat(inner)
+      return CGPoint(x: area.minX + CGFloat(x) * zoom, y: area.minY + CGFloat(y) * zoom)
+    }
+    guard let left = Double(info[1]), let top = Double(info[2]) else { return nil }
+    return CGPoint(x: left + x, y: top + y)
+  }
+
+  /** The frame of the page area showing this address, in screen points. */
+  @MainActor
+  private static func webArea(url: String) -> CGRect? {
+    guard let chrome = NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome").first else { return nil }
+    let app = AXUIElementCreateApplication(chrome.processIdentifier)
+    var windows: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windows) == .success, let list = windows as? [AXUIElement] else { return nil }
+    var best: CGRect?, bestScore = -1.0
+    func attr(_ e: AXUIElement, _ name: String) -> CFTypeRef? { var v: CFTypeRef?; return AXUIElementCopyAttributeValue(e, name as CFString, &v) == .success ? v : nil }
+    func frame(_ e: AXUIElement) -> CGRect? {
+      var p = CGPoint.zero, s = CGSize.zero
+      guard let pv = attr(e, kAXPositionAttribute), let sv = attr(e, kAXSizeAttribute) else { return nil }
+      AXValueGetValue(pv as! AXValue, .cgPoint, &p); AXValueGetValue(sv as! AXValue, .cgSize, &s)
+      return CGRect(origin: p, size: s)
+    }
+    func walk(_ e: AXUIElement, _ depth: Int) {
+      guard depth < 14 else { return }
+      if (attr(e, kAXRoleAttribute) as? String) == "AXWebArea", let f = frame(e) {
+        let address = (attr(e, "AXURL") as? URL)?.absoluteString ?? (attr(e, "AXURL") as? String) ?? ""
+        let score = (address == url ? 1_000_000.0 : 0) + Double(f.width * f.height)
+        if score > bestScore { bestScore = score; best = f }
+        return
+      }
+      guard let kids = attr(e, kAXChildrenAttribute) as? [AXUIElement] else { return }
+      for kid in kids.prefix(40) { walk(kid, depth + 1) }
+    }
+    for window in list.prefix(6) { walk(window, 0) }
+    return best
+  }
+
+  /** Over it and resting there, for menus that open on hover. */
+  static func hover(_ n: Int) async -> String {
+    guard let spot = await settle(n) else { return "it is not on the page any more" }
+    _ = await js("(function(){\(pressFn) var e=groveEl(\(n));if(!e)return '';var o={bubbles:true,composed:true,clientX:\(spot.x),clientY:\(spot.y),view:window};['pointerover','pointerenter','mouseover','mouseenter','mousemove'].forEach(function(k){e.dispatchEvent(k.indexOf('pointer')===0?new PointerEvent(k,o):new MouseEvent(k,o));});return 'ok';})()")
+    if let point = await onScreen(spot) {
+      await borrow {
+        CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+        try? await _Concurrency.Task.sleep(nanoseconds: 700_000_000)
+      }
+    }
+    return "hovered"
   }
 
   static func clickJS(_ n: Int) -> String {
