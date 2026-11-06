@@ -76,40 +76,25 @@ enum Delegates {
     looking at.
   */
   static let all: [Delegate] = [
-    Delegate(id: "claude", name: "Claude", url: "https://claude.ai/new", app: "",
-             said: ["claude", "claude ai", "claude.ai", "anthropic"],
-             good: "writing, code, long documents, reading something carefully"),
     Delegate(id: "chatgpt", name: "ChatGPT", url: "https://chatgpt.com/", app: "",
              said: ["chatgpt", "chat gpt", "gpt", "openai", "open ai"],
-             good: "general questions, drafts, images"),
+             good: "the first choice for nearly everything: research that has to be right, writing of any length, a cover letter, a draft, a plan, a script"),
     Delegate(id: "gemini", name: "Gemini", url: "https://gemini.google.com/app", app: "",
              said: ["gemini", "bard", "google ai"],
-             good: "anything touching their Google account, long documents"),
-    Delegate(id: "perplexity", name: "Perplexity", url: "https://www.perplexity.ai/", app: "",
-             said: ["perplexity"],
-             good: "research with sources"),
-    Delegate(id: "grok", name: "Grok", url: "https://grok.com/", app: "",
-             said: ["grok"],
-             good: "what people are saying right now"),
-    Delegate(id: "copilot", name: "GitHub Copilot", url: "https://github.com/copilot", app: "",
-             said: ["copilot", "github copilot"],
-             good: "questions about a repository"),
+             good: "images — making one, or changing one"),
+    Delegate(id: "higgsfield", name: "Higgsfield", url: "https://higgsfield.ai/", app: "",
+             said: ["higgsfield", "higgs field"],
+             good: "video, and bringing a still image to life"),
+    Delegate(id: "claude", name: "Claude", url: "https://claude.ai/new", app: "",
+             said: ["claude", "claude ai", "claude.ai", "anthropic"],
+             good: "LAST RESORT ONLY — a genuinely heavy job with several moving pieces that ChatGPT would not do justice. Never for ordinary writing, research or questions"),
     Delegate(id: "claude-code", name: "Claude Code", url: "", app: "",
-             said: ["claude code", "claudecode", "claude cli", "codex"],
-             good: "real work in a codebase on this Mac — reading it, changing it, running it",
+             said: ["claude code", "claudecode", "claude cli"],
+             good: "LAST RESORT ONLY — real work inside the codebase on this Mac: reading it, changing it, running it",
              command: "claude {task}"),
     Delegate(id: "vscode", name: "VS Code", url: "", app: "Visual Studio Code",
              said: ["vs code", "vscode", "visual studio code", "my editor"],
              good: "looking at a file that is already open"),
-    Delegate(id: "cursor", name: "Cursor", url: "", app: "Cursor",
-             said: ["cursor"],
-             good: "work in a codebase on this Mac"),
-    Delegate(id: "higgsfield", name: "Higgsfield", url: "https://higgsfield.ai/", app: "",
-             said: ["higgsfield", "higgs field"],
-             good: "video, and moving a still image"),
-    Delegate(id: "suno", name: "Suno", url: "https://suno.com/create", app: "",
-             said: ["suno"],
-             good: "music, written and sung"),
   ]
 
   /**
@@ -223,7 +208,8 @@ enum Delegates {
     This job is a hand-off to \(delegate.name), not something for you to answer yourself. \(where_)
     What to give it, word for word, as their request: "\(task)"
     Put exactly that in the message box — a (textbox) or contenteditable, never a search box — and send it with enter true. Do not shorten it, improve it or answer any part of it yourself.
-    Then WAIT. A real answer takes anywhere from five seconds to two minutes, and it arrives a word at a time. Reply {"action":"wait"} and you will be held until it has actually stopped writing; that costs nothing. Clicking, scrolling or typing while it writes is how an answer gets interrupted, and a half-written answer on screen is not a finished one.
+    BEFORE YOU SEND IT, ASK THEM. Once the words are in the box and before anything is submitted, reply {"action":"confirm","n":<the send button>,"summary":"..."} with the summary naming who it is going to and what it says, in full if it is short: "Sending this to \(delegate.name): 'write a cover letter for the Jane Street internship'. Go ahead?" A prompt is the whole of what the other one will do, and it is cheaper to fix a word now than to read a thousand of the wrong thing.
+    Then, once they have said yes and it has gone, WAIT. A real answer takes anywhere from five seconds to two minutes, and it arrives a word at a time. Reply {"action":"wait"} and you will be held until it has actually stopped writing; that costs nothing. Clicking, scrolling or typing while it writes is how an answer gets interrupted, and a half-written answer on screen is not a finished one.
     It is NOT done when your words are in the box, and not done when text has started appearing. It is done when \(delegate.name) has finished and you have read what it said.
     Then reply done, with summary set to what \(delegate.name) actually answered: in full if it is a few sentences, otherwise what it concluded in two or three, said as theirs to use. Never put your own answer there, and never say it agrees with you.
     If it asks something back before it will start, that question is theirs to answer: {"action":"ask","question":"..."} with the question as it was asked.
@@ -253,11 +239,15 @@ enum Delegates {
     thing would do this best, which is the question it is good at.
   */
   static var rule: String {
-    let menu = all.map { "\($0.name) — \($0.good)" }.joined(separator: "; ")
+    let menu = all.map { "\($0.name) — \($0.good)" }.joined(separator: "\n      ") 
     return """
-    When they ask for another assistant to do it — by name, any of them — that is "do", never "answer": they are telling you WHERE the work happens, and answering it yourself is the one reply they have ruled out.
-    AND REACH FOR ONE YOURSELF when the job is beyond you, without being asked. You are a light model: you cannot make an image or a video at all, and a long piece of writing, a pile of code, or research that has to be right are all things these do far better. Pick the one that fits and send it there — \(menu) — rather than producing a worse version yourself. A picture, a video or a song is always one of these; so is "write me a script/essay/proposal", a plan somebody will act on, and anything that needs reading a codebase.
-    Either way, put the whole request in the goal, naming the assistant and repeating what they want in their own words: "Ask Claude to write a cover letter for the Jane Street internship", "Ask Higgsfield to make a ten second video of a dog surfing". Say which one you picked in your line to them, in passing, the way you would mention who you asked — never as a disclaimer about what you cannot do.
+    When they ask for another assistant by name, that is "do", never "answer": they are telling you WHERE the work happens, and answering it yourself is the one reply they have ruled out.
+    AND REACH FOR ONE YOURSELF when the job is beyond you, without being asked. You are a light model: you cannot make an image or a video at all, and a long piece of writing, a pile of code, or research that has to be right are all things these do far better. Who does what:
+      \(menu)
+    ChatGPT IS THE DEFAULT. Research, a cover letter, an essay, a plan, a script, a draft of anything — all ChatGPT. Images are the only thing that go to Gemini and video is the only thing that goes to Higgsfield.
+    CLAUDE IS A LAST RESORT, and so is Claude Code. They are for the one job in twenty that is genuinely heavy — a real project with several moving pieces, or work that has to go inside the codebase on this Mac. Reaching for Claude because a job feels important is the mistake to avoid: important is not the same as heavy, and a cover letter is ChatGPT's.
+    IF YOU ARE NOT SURE WHICH, ASK. "ask" with one short question naming the two you are choosing between — that is cheaper than sending a long job to the wrong one, and what they answer settles it next time.
+    Put the whole request in the goal, naming the assistant and repeating what they want in their own words: "Ask ChatGPT to write a cover letter for the Jane Street internship", "Ask Higgsfield to make a ten second video of a dog surfing". Say which one you picked in your line to them, in passing, the way you would mention who you asked — never as a disclaimer about what you cannot do.
     """
   }
 }

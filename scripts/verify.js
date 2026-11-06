@@ -3229,7 +3229,9 @@ laterSection('A job can be handed to another AI, and never by accident', async (
       ['ask claude to write a cover letter for the jane street internship', 'claude'],
       ['get chatgpt to draft the email to my landlord', 'chatgpt'],
       ['have gemini summarise that paper', 'gemini'],
-      ['run this by perplexity', 'perplexity'],
+      // Perplexity is off the roster — not signed into. A name Grove does
+      // not have must resolve to nothing rather than to the nearest thing.
+      ['run this by perplexity', '-'],
       ['ask claude code to fix the failing tests', 'claude-code'],
       ['Ask Claude to write a cover letter for the Jane Street internship', 'claude'],
       // Named, but nothing is being handed over.
@@ -3294,7 +3296,7 @@ laterSection('A job can be handed to another AI, and never by accident', async (
       'Claude Code is run, not looked at'
     );
     check(
-      /if !to\.command\.isEmpty \{[\s\S]{0,600}?tell application \\"Terminal\\"/.test(agent),
+      /if !to\.command\.isEmpty \{[\s\S]{0,1400}?tell application \\"Terminal\\"/.test(agent),
       'and a delegate with a command never enters the browser loop at all'
     );
     /*
@@ -3357,6 +3359,112 @@ laterSection('A job can be handed to another AI, and never by accident', async (
 });
 
 /*
+ * Grove learns which apps they actually use
+ * -----------------------------------------
+ *
+ * `Services.swift`. Nearly every request on the Mac has a fork in it that
+ * Grove cannot see: "put a song on" is Spotify for one person and Apple Music
+ * for another, "order dinner" is DoorDash or Uber Eats. Grove was guessing,
+ * and a guess here is not a small error — it opens the wrong app, signs into
+ * nothing, and comes back saying it could not find their playlist.
+ *
+ * The fix is not a better guess, it is asking once and never asking again.
+ * One interruption in exchange for every later request going to the right
+ * place, which is the trade the rest of this app makes everywhere else.
+ *
+ * A list of KINDS rather than a list of apps: a kind is a question somebody
+ * can answer, an app is an answer looking for a question, and a file full of
+ * them goes stale the week a new one appears.
+ */
+laterSection('Grove learns which apps they actually use', async () => {
+  const services = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Services.swift'), 'utf8');
+  const thinking = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Thinking.swift'), 'utf8');
+
+  check(
+    /do not guess and do not pick the one you know best/.test(services),
+    'an unsettled kind is a question, not a gap to fill in',
+    'a list of known services with no instruction beside it gets read as background'
+  );
+  check(
+    /Services\.block/.test(thinking) && /Services\.note\("\\\(uses\["for"\] \?\? ""\)", "\\\(uses\["is"\] \?\? ""\)"\)/.test(thinking),
+    'the decision is told what is known and records what settles it'
+  );
+  /*
+   * Playing something new happens in the app they use; the "music" kind is
+   * Apple Music and nothing else. The rule says so and the model mostly
+   * follows it, but a vague "put a song on" came back as "music" with the
+   * word Spotify in the search text — Apple Music hunting its library for a
+   * song called "put a song on Spotify". So code decides.
+   */
+  check(
+    /if action == "play", !service\.isEmpty, !service\.lowercased\(\)\.contains\("apple"\) \{/.test(thinking),
+    'and playing something new goes to the app they use, decided in code',
+    'the model got "put on some Mac DeMarco" right and a vague "put a song on" wrong'
+  );
+  check(
+    /Steering is left\s*\n?\s*alone|Steering is left alone/.test(thinking),
+    'while pause, skip and louder are left alone',
+    'those work on whatever is making sound, and Player already handles Spotify'
+  );
+
+  const swiftc = cp.spawnSync('which', ['swiftc'], { encoding: 'utf8' }).status === 0;
+  if (!swiftc) {
+    check(false, 'the kind matching could not be run: no swiftc on this machine',
+      'the source checks above passed; what a kind actually matches was NOT tested');
+    return;
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-services-'));
+  try {
+    // The real `match`, lifted with its table, because the model writes the
+    // kind in its own words and throwing away the answer to a question Grove
+    // itself asked is the worst possible place to be strict.
+    const body = between(services, 'private static func match(_ kind: String) -> String? {', '\n  }\n', { min: 100, max: 700 });
+    const table = between(services, 'private static let also: [String: [String]] = [', '\n  ]\n', { min: 200, max: 1200 });
+    check(body !== null && table !== null, 'the matcher and its table are where they are expected to be');
+    if (body === null || table === null) return;
+    const cases = [
+      ['music', 'music'], ['songs', 'music'], ['playlist', 'music'],
+      ['film', 'film'], ['movies', 'film'], ['streaming', 'film'],
+      ['food', 'food'], ['takeout', 'food'], ['delivery', 'food'],
+      ['shopping', 'shopping'], ['rides', 'rides'], ['messages', 'messages'],
+      ['food delivery', 'food'], ['my music', 'music'],
+      // 'weather' contains 'eat': containment filed it under food.
+      ['weather', '-'], ['', '-'], ['something else entirely', '-'], ['heated', '-'],
+    ];
+    fs.writeFileSync(path.join(dir, 'main.swift'), `import Foundation
+enum Services {
+${table}
+  ]
+${body}
+  }
+}
+let cases: [(String, String)] = [
+${cases.map(([k, w]) => `  (${JSON.stringify(k)}, ${JSON.stringify(w)}),`).join('\n')}
+]
+for (k, want) in cases {
+  let got = Services.match(k) ?? "-"
+  print("\\(got == want ? "ok" : "BAD")\\t\\(k)\\t\\(got)")
+}
+`.replace('private static func match', 'static func match').replace('private static let also', 'static let also'));
+    const built = cp.spawnSync('swiftc', ['-O', 'main.swift', '-o', 'run'], { cwd: dir, encoding: 'utf8' });
+    if (built.status !== 0) {
+      check(false, 'the matcher did not compile on its own', String(built.stderr).slice(0, 400));
+      return;
+    }
+    const lines = String(cp.spawnSync(path.join(dir, 'run'), [], { encoding: 'utf8' }).stdout).trim().split('\n').filter(Boolean);
+    check(lines.length === cases.length, `all ${cases.length} words were actually matched`, `got ${lines.length}`);
+    const bad = lines.filter((l) => l.startsWith('BAD'));
+    check(
+      bad.length === 0,
+      'a kind written in the model\'s own words still finds its slot, and nothing else does',
+      bad.join('\n         ')
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/*
  * Grove hands over what it should not be doing itself
  * ---------------------------------------------------
  *
@@ -3373,6 +3481,7 @@ laterSection('A job can be handed to another AI, and never by accident', async (
 section('Grove hands over what it should not be doing itself');
 {
   const delegates = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Delegates.swift'), 'utf8');
+  const agent = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Agent.swift'), 'utf8');
   check(
     /AND REACH FOR ONE YOURSELF when the job is beyond you, without being asked/.test(delegates),
     'the decision is told to hand over without being asked'
@@ -3387,7 +3496,7 @@ section('Grove hands over what it should not be doing itself');
     'what each one is for comes from the list itself',
     'a hand-written menu is one a new delegate is missing from'
   );
-  for (const [id, what] of [['higgsfield', 'video'], ['claude-code', 'codebase'], ['suno', 'music']]) {
+  for (const [id, what] of [['higgsfield', 'video'], ['gemini', 'images'], ['claude-code', 'a codebase']]) {
     check(
       new RegExp(`Delegate\\(id: "${id}"`).test(delegates),
       `there is somewhere to send ${what}`
@@ -3396,6 +3505,54 @@ section('Grove hands over what it should not be doing itself');
   check(
     /never as a disclaimer about what you cannot do/.test(delegates),
     'and it says who it asked in passing, not as an apology for its own limits'
+  );
+
+  /*
+   * The roster is what they are actually signed into. A delegate they do not
+   * have is worse than no delegate: the job goes somewhere, gets a sign-in
+   * wall, and comes back as a failure that reads like Grove being broken.
+   */
+  const ids = [...delegates.matchAll(/Delegate\(id: "([^"]+)"/g)].map((m) => m[1]);
+  check(
+    ids.length === 6 && ['chatgpt', 'gemini', 'higgsfield', 'claude', 'claude-code', 'vscode'].every((i) => ids.includes(i)),
+    'the roster is the six they are signed into',
+    `found ${ids.join(', ')}`
+  );
+  check(
+    !['perplexity', 'grok', 'copilot', 'cursor', 'suno'].some((i) => ids.includes(i)),
+    'and nothing they do not have',
+    'a job sent to a sign-in wall comes back as a failure that reads like Grove being broken'
+  );
+  check(
+    /ChatGPT IS THE DEFAULT/.test(delegates) && /CLAUDE IS A LAST RESORT/.test(delegates),
+    'ChatGPT is the default and Claude is the last resort'
+  );
+  check(
+    /important is not the same as heavy/.test(delegates),
+    'with the mistake to avoid named, since that is the one a model makes',
+    'reaching for Claude because a job feels important rather than because it is heavy'
+  );
+  check(
+    /IF YOU ARE NOT SURE WHICH, ASK/.test(delegates),
+    'and an unsure pick is a question rather than a guess',
+    'cheaper than sending a long job to the wrong one'
+  );
+
+  /*
+   * A prompt is the whole of what the other one will do, so it is read back
+   * and pressed for before it goes. Both halves: the page ones through the
+   * ordinary confirm, and the CLI one — the heaviest thing Grove can start,
+   * running inside their own files — through `send`.
+   */
+  check(
+    /BEFORE YOU SEND IT, ASK THEM/.test(delegates),
+    'a prompt going to another AI is read back before it is sent'
+  );
+  check(
+    /task\.send = \{[\s\S]{0,400}?tell application \\"Terminal\\"/.test(agent) &&
+      /return AgentResult\(state: "confirm", spoken: "Handing this to/.test(agent),
+    'and so is the one that runs a command on their Mac',
+    'it is cheaper to fix a word now than to read a thousand of the wrong thing'
   );
 }
 

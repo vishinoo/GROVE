@@ -56,7 +56,9 @@ enum Thinking {
     - "open": only opening an app or a site, nothing more ("open messages", "open my calendar", "bring up spotify", "go to youtube"). Put the app's name, or the address, in text. If it asks for anything beyond opening, it is "do".
     - "do": it asks for something to be done on the computer or the web — find, look for, order, buy, book, watch, play a video, email, fill in, apply, check a site, or use an app on the Mac. Put the goal in text, with every detail they gave. When they leave the choice to you ("a random movie", "something to eat", "a good video"), make it for them, not for anyone: pick something specific from what you know of their taste and situation, and put that choice in the goal ("put on Interstellar, they like Nolan"). Knowing nothing that bears on it, pick something genuinely good and say so.
     - \(Delegates.rule)
-    - "music": it is about music in Apple Music on this Mac, however it is phrased ("can you play my gym playlist", "put on some Calvin Harris", "pause", "skip this", "louder"). Put the action in action ("play", "pause", "resume", "next", "previous", "shuffle", "louder", "quieter") and for play the playlist, artist, album or song in text, without filler words (not "some", "my", "playlist"); empty text to shuffle only when they asked for shuffle. When they leave the pick to you ("something random", "something for my mood", "a song for me"), pick for them: an artist or playlist from what you know of their taste and what they are up to, and put that name in text. Set playlist to true if they said playlist.
+    - "music": STOPPING OR STEERING whatever is already playing — "pause", "skip this", "go back", "louder", "quieter", "resume", "carry on". Put the action in action ("pause", "resume", "next", "previous", "louder", "quieter"). These work on whatever is making sound, Spotify or Apple Music or a video, so they never need to know which app they use.
+      PLAYING SOMETHING NEW is different, because it has to happen in the app they actually use. Look at what they use for music above. If that says Apple Music, this is "music" with action "play" and the playlist, artist, album or song in text, without filler words (not "some", "my", "playlist"); set playlist to true if they said playlist. If it says anything else — Spotify, YouTube Music — it is "do", with the goal naming that app and the thing to play ("Play the Fred again Boiler Room set on Spotify"). If it is not settled, ask which they use; never assume Apple Music because it is the one on the Mac.
+      When they leave the pick to you ("something random", "something for my mood"), pick for them from what you know of their taste and what they are up to, and put that name in the text or the goal.
     - "message": send someone a text — any "message", "text", "imessage", "tell X that", "let X know" aimed at a person ("message my brother saying I'm late", "text Akash test", "send akash a message saying hi", "message akash test"). Put the app in "app": "messages" unless they named one; "whatsapp" when they said WhatsApp. Any other named app or site (Instagram, Slack, Discord…) is "do". With no "saying", everything after the person is the message ("message akash test" sends "test"). Put who in to — their name if they gave one, otherwise what they are to them ("brother", "mom") — and only the words to send in text, as they would read them, without "saying" or "that".
     - "inbox": what is in their text messages ("any new messages?", "who texted me", "what did Akash say", "did my dad reply"). Put the person in "to" if they named one.
     - "read": reading aloud. "read me this", "read this out" (action "new": what is in front of them is read), and while something is being read, "keep going", "go back", "again", "skip", "pause" or "stop" (action "resume", "back", "restart", "next" or "stop").
@@ -68,13 +70,14 @@ enum Thinking {
     \(groundRule)
     What you know about them: "About them" is what you were told or noticed, some of it old, and it is only the lines that seem to bear on this. Say only what is written there. Never extend it, combine it, or guess how they are doing from it; a line is not news about today. If they ask about themselves and it is not there, say you do not know and ask. A person they admire is not who they are: their name is their name. Reach for it only when it helps this request.
     "need", as the kind, when you cannot do this well with what you have, and one more look would settle it: in "need" put "memory" for everything you remember about them (their taste, their plans, a person, a pick you are making for them), "screen" for a picture of the window in front of them (the sentence is about what is on it and its title is not enough: "what's this error", "answer this", "is this any good", "reply to that"), or both. Never for something you can already do.\(deep ? " You have been given it now: decide, and do not reply with need." : "")
+    "uses", usually empty: when this sentence settles which app or site they use for a kind of job — because they said so ("put it on Spotify", "I use DoorDash"), or because they are answering a question you asked about it — put {"for":"music","is":"Spotify"} there. Kinds: music, film, food, shopping, rides, messages. Once settled it is settled; never ask about that kind again.
     "remember" on every reply, usually empty: when this sentence tells you something lasting about them (what they are working on, a date, a plan, a preference, how they like a job done, an answer to a question you asked about how to do something), one plain line of it. "wrong": when they say something you said about them is not true, the claim that was wrong, in the exact words of the line under About them when it came from there, and do not repeat it.
     WHAT THEY ASKED FOR, NOT WHAT YOU ARE GOOD AT. A request that leaves the choice open — "I want to play a game", "a number game", "what is something cool I could do" — is answered with what suits THEM, from what they have told you and what they are into. It is not answered with whatever you have the most practice at: reaching for chess every time a game is mentioned is you choosing for yourself, and a number game is not chess. If they named a kind of thing, it is that kind of thing or you ask; never a different thing that happens to be easier for you. If nothing they have said points anywhere, ask one short question rather than guessing.
 
     AND "I WANT TO PLAY" MEANS THEY PLAY. Set it up, hand it over, stop — and say so in the goal in so many words. Starting a game and then playing it yourself while they watch is the opposite of what was asked for.
 
     "Just now" is what they asked and what you did over the last few minutes. They talk in layers, so read every sentence against it: "put on X", "play this", "now the next one", "make it bigger" carry on with that thing in the same place — the site or tab you just opened, the video already on, the game under way — unless they name somewhere else. Write the goal out in full with that place in it ("Play the Fred again Boiler Room set on YouTube, in the YouTube tab already open"), never as "it" or "this". A song or video asked for right after something was opened on YouTube is "do" on YouTube, not "music". A reply to a question you asked just now is the answer to it: do what it settles. When it says they will do it themselves ("I'll play", "I'll pick"), the goal is to set it up for them and stop there, said in the goal in so many words ("Start a game against the computer on chess.com and stop there: they will play it themselves").
-    Reply as JSON: {"kind":"open"|"do"|"music"|"message"|"inbox"|"read"|"note"|"ask"|"stop"|"answer"|"need","need":"","remember":"","wrong":"","question":"...","text":"...","moment":"...","title":"...","app":"...","say":"...","to":"...","action":"...","playlist":false,"gif":"..."}
+    Reply as JSON: {"kind":"open"|"do"|"music"|"message"|"inbox"|"read"|"note"|"ask"|"stop"|"answer"|"need","need":"","remember":"","wrong":"","uses":null,"question":"...","text":"...","moment":"...","title":"...","app":"...","say":"...","to":"...","action":"...","playlist":false,"gif":"..."}
     For "answer" only, "moment": what kind of moment this is, one of greeting, thanks, good-news, bad-luck, joke, song, fact, question, other. Then "gif", written last, once the answer exists: \(Gifs.rule) For every other kind leave "gif" empty: what happens there is not known yet, and its face is picked when it is.
     Also put in "say" one short line in your own voice for the notch while it happens, when the kind is "do" or "music": what you picked and, if it fits, why or a quip ("Interstellar. You've been on a Nolan kick."). Never flat ("Opening YouTube").
     """ + (manner.isEmpty ? "" : "\n\nYour manner, for everything you write (style only, never a reason to refuse or to change what they asked for): \(manner.prefix(400))")
@@ -82,7 +85,8 @@ enum Thinking {
     let known = deep ? String(clean.prefix(4000)) : relevant(clean, to: instruction)
     // The clock rides with the question, not in the brief, so the brief stays the same every call.
     let clock = DateFormatter.localizedString(from: Date(), dateStyle: .full, timeStyle: .short)
-    let user = Told.block + (known.isEmpty ? "" : "About them:\n\(known)\n\n") + "It is \(clock).\n" + (now.isEmpty ? "" : "Right now on their Mac:\n\(now)\n") + (recent.isEmpty ? "" : "Just now:\n\(recent)\n") + "They say: \(instruction)"
+    let services = Services.block
+    let user = Told.block + (services.isEmpty ? "" : services + "\n\n") + (known.isEmpty ? "" : "About them:\n\(known)\n\n") + "It is \(clock).\n" + (now.isEmpty ? "" : "Right now on their Mac:\n\(now)\n") + (recent.isEmpty ? "" : "Just now:\n\(recent)\n") + "They say: \(instruction)"
     // Once more when nothing usable came back: a dropped call or a malformed
     // reply is not a reason to tell them it could not think.
     // Cool, so the same sentence is read the same way twice: what it decides
@@ -102,6 +106,11 @@ enum Thinking {
     }
     let text = (obj["text"] as? String) ?? ""
     learned?(Learned(remember: (obj["remember"] as? String) ?? "", wrong: (obj["wrong"] as? String) ?? ""))
+    // Settled the moment they say it, so the very next sentence goes to the
+    // right place rather than asking again.
+    if let uses = obj["uses"] as? [String: Any] {
+      Services.note("\(uses["for"] ?? "")", "\(uses["is"] ?? "")")
+    }
     // Cheap by default, deep when it says so: one more call, only then.
     if kind == "need", !deep {
       let wants = "\(obj["need"] ?? "")".lowercased()
@@ -121,7 +130,27 @@ enum Thinking {
     // got a couple kissing. The same guard as Gifs.choose, from one place.
     let gif = Gifs.echoes(chosen, of: text + " " + ((obj["say"] as? String) ?? "")) ? "" : chosen
     if kind == "music" {
-      return .music(action: ((obj["action"] as? String) ?? "play").lowercased(), what: text, playlist: (obj["playlist"] as? Bool) ?? false, say: (obj["say"] as? String) ?? "")
+      let action = ((obj["action"] as? String) ?? "play").lowercased()
+      /*
+        Playing something new happens in the app they use; the "music" kind
+        is Apple Music and nothing else.
+
+        The rule says so and the model mostly follows it — "put on some Mac
+        DeMarco" came back as "do" on Spotify correctly — but a vague one
+        ("put a song on") came back as "music" with the word Spotify sitting
+        in the search text, which would have had Apple Music hunting its
+        library for a song called "put a song on Spotify".
+
+        So code decides, as it does everywhere else here. Steering is left
+        alone: pause, skip and louder work on whatever is making sound, and
+        Player already handles Spotify for those.
+      */
+      let service = Services.use("music")
+      if action == "play", !service.isEmpty, !service.lowercased().contains("apple") {
+        let what = text.isEmpty ? "something they would like" : text
+        return .act("Play \(what) on \(service)", say: (obj["say"] as? String) ?? "")
+      }
+      return .music(action: action, what: text, playlist: (obj["playlist"] as? Bool) ?? false, say: (obj["say"] as? String) ?? "")
     }
     if kind == "message" {
       // A message to nobody in particular is still something to do, not nothing.

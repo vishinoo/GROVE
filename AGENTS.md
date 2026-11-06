@@ -174,6 +174,50 @@ single user.
   actually memory: still to do, keeps tripping, people and projects, what
   happened, about you.
 
+## Grove learns which apps they actually use
+
+`mac/Sources/Grove/Services.swift`. Nearly every request on the Mac has a fork
+in it that Grove cannot see. "Put a song on" is Spotify for one person and
+Apple Music for another; "order dinner" is DoorDash or Uber Eats; "put a film
+on" is whichever of five services they pay for. Grove was guessing, and a
+guess here is not a small error — it opens the wrong app, signs into nothing,
+and comes back saying it could not find their playlist.
+
+**The fix is not a better guess. It is asking once and never asking again.**
+One interruption in exchange for every later request going to the right place,
+which is the trade the rest of this app makes everywhere else. The answer is
+sealed in the vault and rides in every decision after it.
+
+Deliberately a short list of **kinds** rather than a list of apps. A kind is a
+question somebody can answer ("what do you use for music?"); an app is an
+answer looking for a question, and a file full of them goes stale the week a
+new one appears. What goes in the value is whatever they said, in their words.
+
+**Steering is not playing.** Pause, skip, louder and resume work on whatever
+is making sound — `Player` already handles Spotify — so they never need to
+know which app. Only *playing something new* has to happen in the right one.
+And that last step is decided in code: the rule is in the brief and the model
+mostly follows it, but a vague "put a song on" came back as the Apple Music
+kind with the word *Spotify* sitting in the search text, which would have had
+Apple Music hunting its library for a song called "put a song on Spotify".
+
+**A whole word, never a substring.** Containment decided that **"weather"** was
+about food, because "weather" contains "eat" — the same shape as the stemmer
+that turned "notes" into "not". A rule that reads as obviously correct, is
+wrong on a word nobody thought to try, and fails by quietly filing something
+under the wrong heading rather than by breaking. Found by running the matcher
+in `npm run verify` rather than by reading it.
+
+Measured live, with nothing settled: "put a song on" asked *"Spotify, Apple
+Music, or YouTube Music?"*, "order me dinner" asked *"DoorDash, Uber Eats, or
+SkipTheDishes?"*, and "pause the music" asked nothing at all. With Spotify and
+DoorDash settled, all of them went straight to the right place.
+
+This is the same bet as `Lessons.swift`, one level up: that one learns how a
+site works, this one learns which site to be on. Both make Grove better at the
+Mac the more it is used, which is the only kind of improvement that does not
+cost a release.
+
 ## A lookup ends with the answer, not with a page
 
 *"Search up a recipe for chicken pot pie."* Grove went to Google, opened a
@@ -2050,18 +2094,35 @@ do every one of those steps. Three things made it do them badly:
 having. Grove runs on a lite model with a calendar and a pair of hands: it
 cannot make a picture, it cannot make a video, and a thousand words of code or
 a real piece of research out of it is the worst answer in the app, because it
-looks exactly like a good one. So the list is not a menu of sites, it is a
-list of jobs this model should not be doing — and what each one is for is
-built from the list itself, so a delegate added later is offered rather than
-missed by a hand-written menu.
+looks exactly like a good one.
 
-Said as what each is FOR rather than as a rule about when to delegate, because
-a rule needs a line and there isn't one: "write me something" could be a
-sentence or a dissertation. What the model can judge is which thing would do
-this best, which is the question it is good at. Measured on the live model
-with nothing named: an image went to ChatGPT, a video to Higgsfield, a cover
-letter to Claude and "proper research on which ebike" to Perplexity, while the
-capital of Australia, a hello and "play wordle" stayed exactly where they were.
+**The roster is what they are actually signed into**, and nothing else. A
+delegate they do not have is worse than no delegate: the job goes somewhere,
+hits a sign-in wall, and comes back as a failure that reads like Grove being
+broken. Perplexity, Grok, Copilot, Cursor and Suno were all on it and all
+wrong for this person.
+
+**ChatGPT is the default** — research that has to be right, writing of any
+length, a cover letter, a plan, a script. Gemini gets images and Higgsfield
+gets video, and those are the only two exceptions.
+
+**Claude and Claude Code are a last resort**, for the one job in twenty that
+is genuinely heavy: a real project with several moving pieces, or work inside
+the codebase on this Mac. The mistake to avoid is named in the rule, because
+it is the one a model makes: *important is not the same as heavy*, and a cover
+letter is ChatGPT's.
+
+**An unsure pick is a question.** One short line naming the two it is choosing
+between, which is cheaper than sending a long job to the wrong one, and what
+they answer settles it. Measured live: "rebuild the whole auth system across
+the backend, the app and the tests" came back as *"Are we bringing in Claude
+Code for this, or tackling it with ChatGPT?"*
+
+**A prompt is read back before it is sent.** It is the whole of what the other
+one will do, and it is cheaper to fix a word now than to read a thousand of
+the wrong thing. That holds for the page ones through the ordinary confirm,
+and for the CLI — the heaviest thing Grove can start, running inside their own
+files — through `send`.
 
 Which one it picked is said in passing, the way you would mention who you
 asked — never as a disclaimer about what Grove cannot do.

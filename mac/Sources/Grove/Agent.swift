@@ -56,6 +56,8 @@ final class Agent {
     var approved: String?
     /** A job done natively rather than in Chrome (a text), run on their yes. */
     var send: (() async -> String?)?
+    /** What to say once `send` has worked, when "Sent." is not the right word. */
+    var sentLine = "Sent."
     /** An app it is working in by sight rather than a Chrome tab. */
     var desk = ""
     /** Words for a person have gone into that app's box: every press from here is held for a yes. */
@@ -204,14 +206,22 @@ final class Agent {
         three things a screenshot and a guessed coordinate are not.
       */
       if !to.command.isEmpty {
-        tasks[task.id] = nil
         let asked = Delegates.asked(from: goal, to: to)
         let command = Delegates.shell(to.command, task: asked)
-        Log.say("agent: handing this to \(to.name) — \(command.prefix(120))")
-        let (ok, _) = await Browser.run("tell application \"Terminal\"\nactivate\ndo script \"\(Delegates.applescript(command))\"\nend tell")
-        return ok
-          ? AgentResult(state: "done", spoken: "\(to.name) is on it in Terminal: \(asked.prefix(120))", task: task.id, detail: command)
-          : AgentResult(state: "failed", spoken: "I couldn't start \(to.name). Grove may need permission to control Terminal, in the Grove menu's checklist.", task: task.id)
+        Log.say("agent: \(to.name) is ready to run — \(command.prefix(120))")
+        /*
+          Asked for, like every other prompt that goes to another AI, and
+          more so: this one is the heaviest thing Grove can start and it
+          runs inside their own files. A prompt is the whole of what the
+          other one will do, and it is cheaper to fix a word now than to
+          read a thousand of the wrong thing.
+        */
+        task.sentLine = "\(to.name) is on it in Terminal."
+        task.send = {
+          let (ok, _) = await Browser.run("tell application \"Terminal\"\nactivate\ndo script \"\(Delegates.applescript(command))\"\nend tell")
+          return ok ? nil : "I couldn't start \(to.name). Grove may need permission to control Terminal, in the Grove menu's checklist."
+        }
+        return AgentResult(state: "confirm", spoken: "Handing this to \(to.name): \"\(asked.prefix(160))\". Go ahead?", task: task.id, detail: command)
       }
       task.delegate = to
       task.note = Delegates.note(for: to, task: Delegates.asked(from: goal, to: to))
@@ -353,7 +363,7 @@ final class Agent {
       tasks[id] = nil
       guard approve else { return AgentResult(state: "done", spoken: "Okay, I won't send it.", task: id) }
       if let failure = await send() { return AgentResult(state: "failed", spoken: failure, task: id) }
-      return AgentResult(state: "done", spoken: "Sent.", task: id)
+      return AgentResult(state: "done", spoken: task.sentLine, task: id)
     }
     if approve, let press = task.onYes {
       task.onYes = nil
