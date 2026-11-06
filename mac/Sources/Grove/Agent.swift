@@ -31,6 +31,8 @@ struct AgentResult {
   /** "done", "ask", "confirm" or "failed". */
   let state: String
   let spoken: String
+  /** Written in code rather than by the model: worded by `Say` before anyone hears it. */
+  var plain: Bool = false
   let task: String
   var detail: String = ""
 }
@@ -114,6 +116,12 @@ final class Agent {
     var acts = 0
     /** The sites it has been on, for what it learns afterwards. */
     var sites: [String] = []
+    /** The moves made, as words, kept as a route when the job is done (`Routes`). */
+    var trail: [String] = []
+    /** Moves sent together, made one after another without asking the model between. */
+    var queued: [[String: Any]] = []
+    /** Grove opened the tab this works in, so it may close it when the job is done. */
+    var opened = false
     /** The model asked to see the page; the next step carries a picture. */
     var look = false
     /** Where the last picture was taken, to turn a point on it into a point on the screen. */
@@ -155,6 +163,11 @@ final class Agent {
     Log.say("agent: stop")
     current += 1
     tasks.removeAll()
+    // Down to the mouse and the keyboard, not just to the loop. A step can be
+    // most of a minute long and one of them waits for a gap in their typing;
+    // stop arriving in the middle of that used to be noticed only afterwards,
+    // by which point it had taken the screen and typed.
+    Browser.acting = false
   }
   /** Shown in the notch as it goes. */
   var onStep: ((String, [String]) -> Void)?
@@ -221,7 +234,7 @@ final class Agent {
           let (ok, _) = await Browser.run("tell application \"Terminal\"\nactivate\ndo script \"\(Delegates.applescript(command))\"\nend tell")
           return ok ? nil : "I couldn't start \(to.name). Grove may need permission to control Terminal, in the Grove menu's checklist."
         }
-        return AgentResult(state: "confirm", spoken: "Handing this to \(to.name): \"\(asked.prefix(160))\". Go ahead?", task: task.id, detail: command)
+        return AgentResult(state: "confirm", spoken: "Handing this to \(to.name): \"\(asked.prefix(160))\". Go ahead?", plain: true, task: task.id, detail: command)
       }
       task.delegate = to
       task.note = Delegates.note(for: to, task: Delegates.asked(from: goal, to: to))
@@ -252,7 +265,7 @@ final class Agent {
     tasks[task.id] = task
     Log.say("agent: message \(task.id) to \(who)")
     guard !text.trimmingCharacters(in: .whitespaces).isEmpty else {
-      return AgentResult(state: "failed", spoken: "What should the message to \(who) say?", task: task.id)
+      return AgentResult(state: "failed", spoken: "What should the message to \(who) say?", plain: true, task: task.id)
     }
     let found = await Contacts.find(who)
     // Contacts has no number for them, but the app may well know them.
@@ -264,7 +277,7 @@ final class Agent {
     }
     if Contacts.refused {
       tasks[task.id] = nil
-      return AgentResult(state: "failed", spoken: "Your Mac hasn't let me look in Contacts. System Settings, Privacy and Security, Automation: under Grove, turn on Contacts and Messages.", task: task.id)
+      return AgentResult(state: "failed", spoken: "Your Mac hasn't let me look in Contacts. System Settings, Privacy and Security, Automation: under Grove, turn on Contacts and Messages.", plain: true, task: task.id)
     }
     if found.isEmpty {
       tasks[task.id] = nil
@@ -276,7 +289,7 @@ final class Agent {
     if found.count > 1 {
       task.choices = found
       let names = found.prefix(3).map(\.name).joined(separator: ", or ")
-      return AgentResult(state: "ask", spoken: "Which one: \(names)?", task: task.id)
+      return AgentResult(state: "ask", spoken: "Which one: \(names)?", plain: true, task: task.id)
     }
     return await ready(task, to: found[0])
   }
@@ -294,7 +307,7 @@ final class Agent {
   private func work(_ task: Task, in app: String) async -> AgentResult {
     guard let name = await Native.focus(app) else {
       tasks[task.id] = nil
-      return AgentResult(state: "failed", spoken: "I couldn't find \(app) on your Mac.", task: task.id)
+      return AgentResult(state: "failed", spoken: "I couldn't find \(app) on your Mac.", plain: true, task: task.id)
     }
     task.desk = name
     task.budget = max(task.budget, 240)
@@ -306,7 +319,7 @@ final class Agent {
     let app = task.app
     task.send = { app == "whatsapp" ? await Native.pressSend() : await Messages.send(text, to: person.address) }
     task.confirm = Pending(n: -1, url: "", summary: "")
-    return AgentResult(state: "confirm", spoken: "\(app == "whatsapp" ? "WhatsApp" : "Text") \(person.name): “\(text)”. Send it?", task: task.id)
+    return AgentResult(state: "confirm", spoken: "\(app == ", plain: truewhatsapp" ? "WhatsApp" : "Text") \(person.name): “\(text)”. Send it?", task: task.id)
   }
 
   /** Their answer to a question, or `approve` after a yes to a confirmation. */
@@ -345,7 +358,7 @@ final class Agent {
 
   func resume(task id: String, answer: String, approve: Bool) async -> AgentResult {
     guard let task = tasks[id] else {
-      return AgentResult(state: "failed", spoken: "I lost track of that one on your Mac. Tell me again and I'll start it fresh.", task: id)
+      return AgentResult(state: "failed", spoken: "I lost track of that one on your Mac. Tell me again and I'll start it fresh.", plain: true, task: id)
     }
     task.touched = Date()
     if !task.choices.isEmpty {
@@ -353,7 +366,7 @@ final class Agent {
       let picked = task.choices.first { said.contains($0.name.lowercased()) }
         ?? task.choices.first { $0.name.lowercased().split(separator: " ").contains { said.contains($0) && $0.count > 2 } }
         ?? (said.contains("first") ? task.choices.first : nil)
-      guard let picked else { return AgentResult(state: "ask", spoken: "Which one? \(task.choices.prefix(3).map(\.name).joined(separator: ", or ")).", task: task.id) }
+      guard let picked else { return AgentResult(state: "ask", spoken: "Which one? \(task.choices.prefix(3).map(\.name).joined(separator: ", plain: true, or ")).", task: task.id) }
       task.choices = []
       // Asked once: next time "Akash" or "my brother" means this one.
       if let who = task.history.first { Contacts.remember(who, picked) }
@@ -361,7 +374,7 @@ final class Agent {
     }
     if let send = task.send {
       tasks[id] = nil
-      guard approve else { return AgentResult(state: "done", spoken: "Okay, I won't send it.", task: id) }
+      guard approve else { return AgentResult(state: "done", spoken: "Okay, I won't send it.", plain: true, task: id) }
       if let failure = await send() { return AgentResult(state: "failed", spoken: failure, task: id) }
       return AgentResult(state: "done", spoken: task.sentLine, task: id)
     }
@@ -410,9 +423,11 @@ final class Agent {
     task.live = true
     defer { task.live = false }
     current += 1
+    // A new run may act; a stopped one may not, until this.
+    Browser.acting = true
     let mine = current
     for _ in 0..<60 where running { try? await _Concurrency.Task.sleep(nanoseconds: 250_000_000) }
-    guard mine == current else { return AgentResult(state: "stopped", spoken: "Stopped.", task: task.id) }
+    guard mine == current else { return AgentResult(state: "stopped", spoken: "Stopped.", plain: true, task: task.id) }
     live += 1
     defer { live -= 1; if !task.tab.isEmpty { lastTab = task.tab } }
     let started = Date()
@@ -420,9 +435,9 @@ final class Agent {
     Log.say("agent: \(task.id) chrome ready")
 
     while Date().timeIntervalSince(started) < (task.game ? Agent.gameBudget : task.budget) {
-      if mine != current { return AgentResult(state: "stopped", spoken: "Stopped.", task: task.id) }
+      if mine != current { return AgentResult(state: "stopped", spoken: "Stopped.", plain: true, task: task.id) }
       guard task.steps < (task.game ? Agent.gameSteps : Agent.maxSteps) else {
-        return AgentResult(state: "failed", spoken: "That took more steps than it should have, so I've stopped where it is. Tell me what to do next and I'll carry on from there.", task: task.id)
+        return AgentResult(state: "failed", spoken: "That took more steps than it should have, so I've stopped where it is. Tell me what to do next and I'll carry on from there.", plain: true, task: task.id)
       }
       task.steps += 1
       // They closed the tab it was working in. That is not Chrome failing:
@@ -495,9 +510,9 @@ final class Agent {
       if let error = page.error {
         tasks[task.id] = nil
         if error.lowercased().contains("javascript") {
-          return AgentResult(state: "failed", spoken: "Chrome stopped letting me read the page. Each Chrome profile has its own switch: in the window that's open, View, Developer, Allow JavaScript from Apple Events.", task: task.id)
+          return AgentResult(state: "failed", spoken: "Chrome stopped letting me read the page. Each Chrome profile has its own switch: in the window that's open, View, Developer, Allow JavaScript from Apple Events.", plain: true, task: task.id)
         }
-        return AgentResult(state: "failed", spoken: "Chrome wouldn't let me read that page, so I stopped rather than guess at it. Try asking again in a moment.", task: task.id)
+        return AgentResult(state: "failed", spoken: "Chrome wouldn't let me read that page, so I stopped rather than guess at it. Try asking again in a moment.", plain: true, task: task.id)
       }
       // Every move is checked against the page it was meant to change. Without
       // this the model only ever saw the new page, never whether its click had
@@ -506,6 +521,9 @@ final class Agent {
       let seen = "\(page.url)|\(page.title)|\(page.board)|\(page.chess)|\(page.text)|" + page.items.map { "\($0["label"] ?? "")=\($0["value"] ?? "")\($0["state"] ?? "")" }.joined()
       let unmoved = task.acted && seen == task.seen
       if unmoved {
+        // A move that did nothing is not part of the way there.
+        if !task.trail.isEmpty { task.trail.removeLast() }
+        task.queued = []
         task.history.append("Result: nothing on the page changed after that move. It did not work; try a different element or way.")
       }
       task.seen = seen
@@ -516,15 +534,53 @@ final class Agent {
       // An ordinary click on an ordinary page does not need it.
       let recent = task.history.suffix(2).joined()
       let hard = !page.board.isEmpty || !page.chess.isEmpty || recent.contains("nothing on the page changed") || recent.contains("already did")
-      guard let move = await Agent.next(goal: task.goal, plan: task.plan, history: task.history, page: page, manner: manner, think: hard || picture != nil, recent: task.steps == 1 || task.tab.isEmpty ? recent : "", picture: picture, learned: Lessons.known(for: page.url, goal: task.goal), note: task.note) else {
-        return AgentResult(state: "failed", spoken: "I lost my connection to think through the next step, so I've left it where it is. Ask again and I'll pick it up.", task: task.id)
+      // A move sent with others is made without asking again; the rest come
+      // from the model, with any route a job like this left before.
+      var move: [String: Any]
+      if !task.queued.isEmpty {
+        move = task.queued.removeFirst()
+      } else {
+        let route = task.steps <= 2 ? Routes.like(task.goal) : ""
+        let learned = [Lessons.known(for: page.url, goal: task.goal), route.isEmpty ? "" : "Routes that worked before for jobs like this — follow one when it fits, and send its moves several at a time with \"moves\":\n\(route)"].filter { !$0.isEmpty }.joined(separator: "\n")
+        guard let asked = await Agent.next(goal: task.goal, plan: task.plan, history: task.history, page: page, manner: manner, think: hard || picture != nil, recent: task.steps == 1 || task.tab.isEmpty ? recent : "", picture: picture, learned: learned, note: task.note) else {
+          return AgentResult(state: "failed", spoken: "I lost my connection to think through the next step, so I've left it where it is. Ask again and I'll pick it up.", plain: true, task: task.id)
+        }
+        move = asked
+        if let more = asked["moves"] as? [[String: Any]], let first = more.first {
+          move = first
+          task.queued = Array(more.dropFirst().prefix(5))
+        }
+      }
+      // Pressed by its words, for moves sent ahead of the page they land on.
+      // Not there means the page is not what the route expected: the rest are
+      // dropped and the model looks again.
+      if move["n"] == nil, let want = (move["label"] as? String)?.lowercased(), !want.isEmpty {
+        let labels = page.items.compactMap { item -> (Int, String)? in
+          guard let n = item["n"] as? Int, let l = item["label"] as? String else { return nil }
+          return (n, l.lowercased())
+        }
+        if let hit = labels.first(where: { $0.1 == want }) ?? labels.first(where: { $0.1.contains(want) }) {
+          move["n"] = hit.0
+        } else {
+          task.queued = []
+          task.history.append("“\(want)” is not on this page, so the moves sent ahead were dropped. Look again.")
+          continue
+        }
       }
       // Stop pressed while the model was thinking: the move it came back with is not made.
-      if mine != current { return AgentResult(state: "stopped", spoken: "Stopped.", task: task.id) }
+      if mine != current { return AgentResult(state: "stopped", spoken: "Stopped.", plain: true, task: task.id) }
       let action = (move["action"] as? String ?? "").lowercased()
       let n = (move["n"] as? Int) ?? Int("\(move["n"] ?? "")") ?? -1
       let text = move["text"] as? String ?? ""
       let label = Agent.label(of: n, in: page)
+      switch action {
+      case "go": task.trail.append("go \(move["url"] ?? "")")
+      case "click", "hover", "select": task.trail.append("\(action) “\(label.prefix(50))”\(action == "select" ? " → \(text)" : "")")
+      case "type": task.trail.append("type “\(text.prefix(60))” into “\(label.prefix(40))”")
+      case "keys": task.trail.append("keys \(text.prefix(60))")
+      case "tab": task.trail.append("use their tab on \(Lessons.site(page.tabs.indices.contains(n) ? page.tabs[n].url : ""))")
+      default: break
+      }
       Log.say("agent: \(task.id) \(action) \(n) \(label.prefix(40)) \(text.prefix(60))")
 
       // The same move on the same thing, again: the page is not doing what the
@@ -538,7 +594,7 @@ final class Agent {
       let repeats = task.moves.filter { $0 == signature }.count
       if repeats >= 3 && action != "scroll" && action != "wait" && action != "keys" {
         task.history.append("Stuck: tried \(action) on \(label) three times.")
-        return AgentResult(state: "ask", spoken: "\(label.isEmpty ? "That" : "“\(label.prefix(40))”") isn't responding on \(page.title.isEmpty ? "this page" : page.title). Should I try something else, or do you want to take it from here?", task: task.id)
+        return AgentResult(state: "ask", spoken: "\(label.isEmpty ? ", plain: trueThat" : "“\(label.prefix(40))”") isn't responding on \(page.title.isEmpty ? "this page" : page.title). Should I try something else, or do you want to take it from here?", task: task.id)
       }
       if repeats == 2 && action != "scroll" && action != "wait" {
         task.history.append("You already did \(action) on \(label) and the page did not change the way you wanted. Do something different, or ask them.")
@@ -621,6 +677,7 @@ final class Agent {
         if task.tab.isEmpty {
           await Browser.newTab()
           task.tab = Browser.tab
+          task.opened = true
         }
         await Browser.go(url)
         task.history.append("Went to \(url)")
@@ -751,8 +808,11 @@ final class Agent {
         let r = await Browser.js(Browser.selectJS(n, text))
         task.history.append("Chose \"\(text)\" in [\(n)] → \(r)")
       case "scroll":
-        _ = await Browser.js("window.scrollBy(0, innerHeight * 0.8); 'ok'")
-        task.history.append("Scrolled down")
+        // Up as well as down, because going back to something is half of what
+        // scrolling is for, and only down sent the agent past the thing and away.
+        let up = (move["up"] as? Bool) == true || text.lowercased() == "up"
+        _ = await Browser.js("window.scrollBy(0, innerHeight * \(up ? -0.8 : 0.8)); 'ok'")
+        task.history.append("Scrolled \(up ? "up" : "down")")
       case "back":
         _ = await Browser.js("history.back(); 'ok'")
         task.history.append("Went back")
@@ -812,16 +872,24 @@ final class Agent {
         let needsEyes = !task.desk.isEmpty || page.visual || !page.board.isEmpty || !page.chess.isEmpty
         let verdict = await Agent.check(goal: task.goal, claim: claim, history: task.history, page: page, picture: needsEyes ? await Agent.picture(app: task.desk) : nil)
         Log.say("agent: \(task.id) check \(verdict.ok ? "passed" : "refused"): \(verdict.why.prefix(120))")
+        if verdict.ok { Routes.keep(goal: task.goal, steps: task.trail) }
         if !verdict.ok {
           task.checks += 1
           if task.checks >= 3 {
             tasks[task.id] = nil
-            return AgentResult(state: "failed", spoken: "I couldn't get that done properly on your Mac: \(verdict.why)", task: task.id, detail: page.url)
+            return AgentResult(state: "failed", spoken: "I couldn't get that done properly on your Mac: \(verdict.why)", plain: true, task: task.id, detail: page.url)
           }
           task.history.append("Not done yet — a check of the page says: \(verdict.why) Carry on until it is really done.")
           continue
         }
         tasks[task.id] = nil
+        // A tab that was only a means to the job is closed with it — the
+        // article read to be summarised, the order placed — and only one Grove
+        // opened, never one of theirs.
+        if (move["close"] as? Bool) == true, task.opened {
+          _ = await Browser.run("tell application \"Google Chrome\" to close \(task.tab)")
+          task.tab = ""
+        }
         return AgentResult(state: "done", spoken: claim.isEmpty ? "Done on your Mac." : claim, task: task.id, detail: page.url)
       default:
         tasks[task.id] = nil
@@ -831,7 +899,7 @@ final class Agent {
       if task.history.count > 30 { task.history.removeFirst(task.history.count - 30) }
     }
     task.history.append("Paused to check in with them.")
-    return AgentResult(state: "ask", spoken: "This is taking longer than I'd like. It's on \((await Browser.read()).title.prefix(60)) now. Want me to keep going?", task: task.id)
+    return AgentResult(state: "ask", spoken: "This is taking longer than I'd like. It's on \((await Browser.read()).title.prefix(60)) now. Want me to keep going?", plain: true, task: task.id)
   }
 
   /**
@@ -844,7 +912,7 @@ final class Agent {
   private func askToConfirm(_ task: Task, n: Int, url: String, summary: String, label: String = "") -> AgentResult {
     if let approved = task.approved, approved == summary {
       tasks[task.id] = nil
-      return AgentResult(state: "done", spoken: "Done.", task: task.id, detail: url)
+      return AgentResult(state: "done", spoken: "Done.", plain: true, task: task.id, detail: url)
     }
     var said = summary
     let button = label.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -885,29 +953,31 @@ final class Agent {
   Before your first move there is no tab, and their open Chrome tabs are listed. If one is already on the site this job belongs on — above all the one in front of them, or the one your last task used — take it with {"action":"tab","n":2} and carry on from where it is: "play this song" with YouTube open means searching in that YouTube, not opening another. Otherwise go opens a new tab. Use only the site they named, or the obvious one for the job; never do it somewhere else because that happened to be open.
   Be quick, like someone who uses a browser all day: most jobs are two to four moves. Never check your own work by searching or scrolling the page once it is there: someone else checks it after you say done. Before every move, first ask whether what they asked for is already in front of them; if it is, reply done now, without scrolling, waiting or checking any further. Go straight to a search address instead of typing into a home page, and pick the first good result instead of reading them all.
   Before choosing, look at what the last move actually did ("Result" lines in So far, and the page itself) and at your plan. On your first move only, also include "plan": the three to six steps you will take, in one line.
-  Reply with ONE next move as JSON. Every move also carries "step": what you are doing, as a person would say it in four to seven words, e.g. "Searching Amazon for watermelon", "Adding it to your cart", "Opening checkout". Never numbers, brackets or button names in step.
+  Reply with ONE next move as JSON. Every move also carries "step": what you are doing, as a person would say it in four to seven words, naming the actual thing. Never numbers, brackets or button names in step.
   {"action":"go","url":"https://...","tab":2} — open an address; with "tab", in that one of their open tabs, in the same move. Go straight to search addresses when you can: https://www.youtube.com/results?search_query=..., https://www.google.com/search?q=..., https://www.amazon.com/s?k=..., https://www.linkedin.com/jobs/search/?keywords=..., https://www.indeed.com/jobs?q=...
-  {"action":"click","n":12,"summary":"..."} — when the click puts something in a cart or an order, summary is the question they will answer: the item, how many and the price, e.g. "One OG Cheeseburger from Burger's Priest, $11.99. Add it to your order?" Check the quantity is what they asked for (one, unless they said more) before adding.
+  {"action":"click","n":12,"summary":"..."} — when the click puts something in a cart or an order, summary is the question they will answer: the item, how many and the price, Check the quantity is what they asked for (one, unless they said more) before adding.
   {"action":"type","n":4,"text":"...","enter":true}
   {"action":"keys","text":"crane","enter":true} — real key presses, for pages that listen to the keyboard rather than a box: games like Wordle, shortcuts. Not for typing into a field. For named keys, give their names separated by spaces, several at once when that is the plan: "ArrowLeft ArrowLeft ArrowUp", "Escape", "Space", "Tab", "Backspace".
   {"action":"select","n":7,"text":"option"}
   {"action":"hover","n":12} — rest the pointer on something, for menus that only open on hover (an account menu, a category list). Read the page again after.
-  {"action":"scroll"} {"action":"back"} {"action":"wait"}
+  {"action":"scroll"} {"action":"scroll","up":true} {"action":"back"} {"action":"wait"} — scroll only to read more text. Everything you can press is already listed, including what is off screen above or below; to reach a button like "Show more", press it directly instead of scrolling to find it.
   {"action":"message","app":"whatsapp","to":"Akash","text":"..."} — a message to a person through an app installed on this Mac (\(Native.apps)) instead of its website. It finds them in Contacts and asks them before sending. Use it for those apps; use the website only for apps not listed.
   {"action":"app","name":"Notes"} — work in an app on this Mac rather than a website. Your next move gets a picture of its window: click points on it with x and y, type with {"action":"type","text":"...","into":"search" or "message"} (no n), press keys with keys. Use it for anything that lives in an app, and for odd jobs no website does. In an app that reaches people, "into":"message" is for words going to a person, and every press after that asks them first.
+  {"moves":[{"action":"click","label":"Play"},{"action":"keys","text":"ArrowUp"}]} — several moves at once, made one after another without you looking in between: use it when you know the way, above all when following a route from before. Name buttons by their words with "label" (they may not be on the page yet). The rest stop by themselves if a label is not found.
   {"action":"find","text":"flour"} — search the whole page for a word and get every place it appears with the lines around it. Use it first whenever you need a particular fact from a long page (an amount, a price, a time, a name) instead of scrolling and skimming.
   {"action":"move","from":"e2","to":"e4"} — a chess move, when the page has a Chess section.
   {"action":"look"} — see a picture of the window next move, when the text does not tell you what is on the page (a game drawn on a canvas, a video player, a frame). When you have a picture, {"action":"click","x":0.42,"y":0.61} clicks that point on it, as fractions of its width and height.
   {"action":"ask","question":"..."} — only when you cannot go on without them: a detail only they know, or a choice that is theirs and costs money (which item, which size, which restaurant). One short spoken question.
-  {"action":"confirm","n":31,"summary":"..."} — before anything that buys, sends, submits, books, applies or deletes. The summary is read aloud and they answer yes or no: say exactly what will happen, with the item, the price and total if shown, and where it goes, e.g. "Placing the order: one whole watermelon, $5.49, total $9.12, to 12 King Street. Go ahead?"
-  {"action":"done","summary":"..."} — the goal is reached. One or two sentences, said as their friend rather than a receipt: what is on their screen, and why you picked it or a light remark when there is one to make, e.g. "Peter Thiel on Competition is on. Fair warning, he'll talk you out of starting a restaurant."
+  {"action":"confirm","n":31,"summary":"..."} — before anything that buys, sends, submits, books, applies or deletes. The summary is read aloud and they answer yes or no: say exactly what will happen, with the item, the price and total if shown, and where it goes
+  {"action":"done","summary":"...","close":true} — with "close" true when the tab was only a means to the job and they will not want it afterwards: an article you read so you could summarise it, an order that has been placed, a message that has been sent. Leave it open when they will want to look at it: a video, a recipe, a page they asked to see.
+  {"action":"done","summary":"..."} — the goal is reached. One or two sentences, said as their friend rather than a receipt: what is on their screen, and why you picked it or a light remark when there is one to make. Say it fresh each time, the way you would to a friend in the room, never to a formula
   {"action":"fail","summary":"..."} — it cannot be done; say why plainly.
   Rules:
   - Orders: before checkout, ask them to confirm the delivery address and the item you picked if either was not stated. Never change payment details. Never press the final button with click; use confirm.
   - Never type into password or card fields. If a sign-in is needed, ask them to sign in on the Mac and say when they have.
   - \(Thinking.askRule) If they already settled it — in the goal or just before — do not ask it again.
   - When the goal says they will play or do it themselves, set it up for them (open it, start the game, pick the settings) and then done: never make their moves or do their part.
-  - Games of any kind: play them, properly and to the end, unless they only asked to open one or will play themselves. Find the rules from the page if you do not know them, think about every move, and use what fits the game: keys for keyboard games, a click for buttons and tiles, a point on the picture for anything drawn. Never stop at "started".
+  - Games of any kind: if the goal does not say whether you or they play, and nothing they told you before settles it, ask that first in one line. Then play properly and to the end, unless they only asked to open one or will play themselves. Find the rules from the page if you do not know them, think about every move, and use what fits the game: keys for keyboard games, a click for buttons and tiles, a point on the picture for anything drawn. Never stop at "started".
   - Videos, films and songs: get the thing itself playing, not a search page; the official upload when there is one, a full film only from a service they use. If it is already open in their tab, carry on there.
   - Popups are normal: cookie banners, sign-up offers, ads, "welcome" screens, newsletter boxes. When one is listed, close it or accept it (Accept, Agree, Continue, Close, X, No thanks, Maybe later) and carry on with the page underneath. A popup is never a reason to leave a site or to try another one.
   - Before looking anywhere else, check whether what you came for is already here and usable: a grid, a board, keys, a canvas, a Play or Start button, a frame. If it is, use it. A game, puzzle or player often lives in a frame from another site: go to the frame's address to open it on its own page, where you can read and press it, or use look and click on the picture. Leave a site only if it truly needs payment or an account they do not have, and say so when you do.
@@ -918,7 +988,7 @@ final class Agent {
   - Games and puzzles (Wordle and the like): read the board's states carefully before every guess. A letter marked correct stays in that exact position; present means it is in the word but not in that position; absent means it is not in the word at all, so never use it again. Work out every constraint, then guess a real English word that satisfies all of them. One guess per move: keys with the whole word and enter true. Never press an on-screen keyboard key by key. Close any help or welcome dialog first.
   - Chess: "play chess" means start a game and play it to the end, not stop once it has started. The Chess section lists every piece by square and which colour is yours. On your turn, think, then make one strong, sound move with move; the app then waits for their reply. Find whose turn it is from the move list in the text and from which pieces have moved. While waiting for an opponent to join or to move, wait. Never resign or offer a draw unless asked. If a promotion choice appears, pick the queen. When the game is over, done with the result in a sentence.
   - Options on an item (size, sides, extras, how many): each is listed with its words and whether it is checked. Pick exactly what they chose, then read the list again to see every one says checked before adding it; a choice that did not take is clicked again or by its words. The yes for adding names every option picked.
-  - Food and shopping: if they did not name the exact item or restaurant, ask, offering the best two or three by name and price ("Smash Burger Co, $14, or Five Guys, $16?"). Never use quick-add on something they did not choose. Ignore existing carts unless they mention them.
+  - Food and shopping: if they did not name the exact item or restaurant, ask, offering the best two or three by name and price. Never use quick-add on something they did not choose. Ignore existing carts unless they mention them.
   - Food: Uber Eats is https://www.ubereats.com/ and searches as https://www.ubereats.com/search?q=QUERY; DoorDash is https://www.doordash.com/ and https://www.doordash.com/search/store/QUERY. Their address and card are already on the account, so never type either. The order of it is: find the place, open it, find the item on its menu, add it (that add is a confirm, with the item and price in the summary), open the cart, then confirm the final button. If it asks for a tip or a delivery time, take the default. If the address shown is not one of theirs, stop and ask rather than changing it.
   - Shopping: Amazon searches as https://www.amazon.com/s?k=QUERY. Pick from the results page by what they asked for, not by what is sponsored first, and say which one in the add-to-cart summary.
   - LOOKING SOMETHING UP ENDS WITH THE ANSWER, NOT WITH A PAGE. A recipe, a price, opening times, directions, reviews, jobs, how to do something: get to where the answer actually is, read it, and put it in done in full enough to use. A recipe means its ingredients and its steps, written out. A comparison means the best two or three by name with their numbers. "I found a recipe", "it's on your screen" and a link are not answers — they asked for the thing, not for it to exist somewhere. Open the page as well, so it is in front of them, but the words come back either way, and a long answer is fine here: this one is read, not spoken.
@@ -1029,6 +1099,7 @@ final class Agent {
       if let v = item["value"] as? String, !v.isEmpty { s += " = \"\(v)\"" }
       if let st = item["state"] as? String, !st.isEmpty { s += " {\(st)}" }
       if item["popup"] != nil { s += " (popup)" }
+      if let w = item["where"] as? String { s += " (\(w), off screen: pressing it scrolls to it)" }
       return s
     }.joined(separator: "\n")
     let prompt = """
@@ -1462,10 +1533,23 @@ enum Browser {
     let (ok, out) = await borrow {
       await run("""
       tell application "Google Chrome"
+        -- Their own window, front first, as a tab beside theirs: a window of
+        -- Grove's own was one more thing to find and close.
         set made to missing value
-        try
-          set made to window id \(ownWindow.isEmpty ? "-1" : ownWindow)
-        end try
+        repeat with c in windows
+          try
+            with timeout of 3 seconds
+              execute active tab of c javascript "1"
+            end timeout
+            set made to c
+            exit repeat
+          on error msg
+            if msg does not contain "turned off" then
+              set made to c
+              exit repeat
+            end if
+          end try
+        end repeat
         if made is missing value then set made to (make new window)
         try
           with timeout of 3 seconds
@@ -1526,6 +1610,54 @@ enum Browser {
 
   /** When Grove itself last posted a click or a key press. See `handsIdle`. */
   nonisolated(unsafe) static var lastPosted = Date.distantPast
+
+  /**
+    False from the moment a run is stopped until another one starts.
+
+    The loop already checks whether it is still the current run, at the top of
+    each step and after each model call — but a step can take a long time in
+    the middle, and one of them now waits up to ten seconds for a gap in
+    their typing before taking the screen. Stop was pressed during that wait:
+    the wait finished, took the screen, and typed the prompt into ChatGPT
+    seven seconds after being told not to.
+
+      01:23:07  agent: stop
+      01:23:14  agent: waited 10.2s for a gap before taking the screen
+
+    So the stop reaches down here too, and the things that actually touch the
+    mouse and the keyboard check it themselves. Guarded at the primitives
+    rather than at the call sites because that is the layer where the harm
+    happens, and a path somebody adds later gets the guard for free.
+  */
+  nonisolated(unsafe) static var acting = true
+
+  /**
+    Whether Grove may put something on the real keyboard or mouse right now.
+
+    Two reasons it may not, and they are different kinds of wrong:
+
+    **It was told to stop.** A run that has been stopped or overtaken may not
+    act, however far through a step it is. No means no, including halfway
+    through waiting for a gap.
+
+    **Grove is the window in front.** Real keys go wherever the system is
+    pointing, and Grove's own notch panel takes focus when it is open — so
+    "type this into ChatGPT" typed it into Grove's own ask box, in front of
+    them, which then sat there as though they had written it. Nothing good
+    can come of Grove typing into itself, so it simply does not.
+  */
+  static func mayAct(_ what: String) -> Bool {
+    if !acting {
+      Log.say("agent: not \(what) — it was stopped")
+      return false
+    }
+    let front = NSWorkspace.shared.frontmostApplication
+    if front?.bundleIdentifier == Bundle.main.bundleIdentifier {
+      Log.say("agent: not \(what) — Grove is the window in front, and it will not type into itself")
+      return false
+    }
+    return true
+  }
 
   /**
     How long since **they** last touched the keyboard or the mouse.
@@ -1596,6 +1728,8 @@ enum Browser {
   static func waitForAGap() async {
     let waited = Date()
     while handsIdle() < 1.5, Date().timeIntervalSince(waited) < 10 {
+      // Stop, mid-wait. Carrying on afterwards is the whole bug this guards.
+      if !acting { Log.say("agent: stopped while waiting for a gap"); return }
       try? await _Concurrency.Task.sleep(nanoseconds: 250_000_000)
     }
     if Date().timeIntervalSince(waited) > 1 {
@@ -1713,12 +1847,14 @@ enum Browser {
 
   /** Real presses into whatever has focus, in an app or a page. */
   static func pressReal(_ text: String, enter: Bool) async {
+    guard mayAct("pressing keys") else { return }
     var list = presses(text)
     if enter { list.append(("Enter", 13, 36, nil)) }
     await realPresses(list)
   }
 
   private static func realPresses(_ list: [(key: String, code: Int, mac: Int?, char: String?)]) async {
+    guard mayAct("pressing keys") else { return }
     for press in list {
       if let mac = press.mac {
         _ = await run("tell application \"System Events\" to key code \(mac)")
@@ -1732,6 +1868,7 @@ enum Browser {
   /** A real scroll in whatever is under the pointer. */
   @MainActor
   static func realScroll() async {
+    guard mayAct("scrolling") else { return }
     CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -400, wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
     lastPosted = Date()
     try? await _Concurrency.Task.sleep(nanoseconds: 300_000_000)
@@ -1831,6 +1968,10 @@ enum Browser {
       if(pop&&found.length>20&&found.filter(function(e){return pop.contains(e);}).length>found.length*0.6)pop=null;
       var list=found.filter(field).concat(found.filter(function(e){return !field(e);}));
       if(pop)list=list.filter(function(e){return pop.contains(e);}).concat(list.filter(function(e){return !pop.contains(e);}));
+      var away=function(e){var r=e.getBoundingClientRect();return r.bottom<0?-r.bottom:(r.top>h?r.top-h:0);};
+      var rank=list.map(function(e,i){return {e:e,i:i,d:away(e)};});
+      rank.sort(function(a,b){var pa=pop&&pop.contains(a.e)?0:1,pb=pop&&pop.contains(b.e)?0:1;if(pa!==pb)return pa-pb;var fa=field(a.e)&&a.d===0?0:1,fb=field(b.e)&&b.d===0?0:1;if(fa!==fb)return fa-fb;return a.d-b.d||a.i-b.i;});
+      list=rank.map(function(x){return x.e;});
       var pressed=new Set(),marks=[];
       list.forEach(function(e){
         if(n>=140)return;
@@ -1840,7 +1981,7 @@ enum Browser {
           var lab=(e.labels&&e.labels[0])||(e.closest&&e.closest('label'));
           if(lab&&!pressed.has(lab)){box=lab;r=lab.getBoundingClientRect();}
         }
-        if(r.width<2||r.height<2||r.bottom<-h*0.2||r.top>h*1.6)return;
+        if(r.width<2||r.height<2)return;
         var st=getComputedStyle(box); if(st.visibility==='hidden'||st.display==='none')return;
         var edit=e.isContentEditable||e.getAttribute('role')==='textbox';
         var label=String(named(e,edit)||'').replace(/\\s+/g,' ').trim();
@@ -1856,6 +1997,7 @@ enum Browser {
         var state=(/^(checkbox|radio)$/.test(e.type||'')?(e.checked?'checked':'not checked'):'')||(e.getAttribute('aria-expanded')==='true'?'open':(e.getAttribute('aria-expanded')==='false'?'closed':''))||(e.disabled||e.getAttribute('aria-disabled')==='true'?'disabled':'')||e.getAttribute('data-state')||e.getAttribute('aria-pressed')||e.getAttribute('aria-checked')||e.getAttribute('aria-selected')||'';
         if(state&&state!=='false')it.state=state;
         if(pop&&pop.contains(e))it.popup=1;
+        if(r.bottom<0)it.where='above';else if(r.top>h)it.where='below';
         out.push(it); n++;
       });
       var board=[];
@@ -2015,6 +2157,7 @@ enum Browser {
   /** A real mouse drag, through Accessibility, which Grove already has for ⌘K. */
   @MainActor
   private static func realDrag(from a: CGPoint, to b: CGPoint) async {
+    guard mayAct("dragging") else { return }
     let source = CGEventSource(stateID: .hidSystemState)
     func post(_ type: CGEventType, _ p: CGPoint) {
       CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
@@ -2121,6 +2264,7 @@ enum Browser {
   /** A real click at a point on the screen. */
   @MainActor
   static func realClick(_ p: CGPoint) async {
+    guard mayAct("clicking") else { return }
     let source = CGEventSource(stateID: .hidSystemState)
     func post(_ type: CGEventType) {
       CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
@@ -2181,6 +2325,7 @@ enum Browser {
 
   /** Real key presses into whatever has focus. */
   static func realType(_ text: String) async {
+    guard mayAct("typing") else { return }
     _ = await run("tell application \"System Events\" to keystroke \(quoted(text))")
     try? await _Concurrency.Task.sleep(nanoseconds: 400_000_000)
   }

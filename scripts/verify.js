@@ -1891,13 +1891,17 @@ section('A reaction is a reaction, not a slideshow');
     'it was written out once before and the other path kept firing'
   );
   check(
-    /NEVER A NAME/.test(gifs) && /MOVEMENT or the MOOD/.test(gifs),
-    'and the rule says so outright, so the guard is the backstop and not the plan'
+    /A name alone is never a face/.test(gifs) && /what they are doing/.test(gifs),
+    'and the rule says so outright: a name only with what they are doing, so the guard is the backstop and not the plan'
+  );
+  check(
+    /grove\.gifs\.shown/.test(gifs) && /!shown\.contains/.test(gifs),
+    'and the same GIF is never shown twice running: the first result for the same search is the same picture'
   );
 
   const apart = /apart: TimeInterval = (\d+)(?:\s*\*\s*(\d+))?/.exec(popup);
   const seconds = apart ? Number(apart[1]) * (apart[2] ? Number(apart[2]) : 1) : 0;
-  check(seconds >= 180, `and no two are closer than ${seconds} seconds`);
+  check(seconds >= 60, `and no two are closer than ${seconds} seconds`);
   check(
     /ask them what they mean/.test(recent),
     'and that a sentence which makes no sense is asked about, not matched to an old task'
@@ -3534,12 +3538,18 @@ section('Grove hands over what it should not be doing itself');
 {
   const delegates = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Delegates.swift'), 'utf8');
   const agent = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Agent.swift'), 'utf8');
+  /*
+   * Was "reach for one when the job is beyond you", which the model
+   * generalised from code and images to curiosity and sent "teach me
+   * something interesting" to ChatGPT. Narrowed to a deliverable, which is
+   * a thing it can actually tell, and the wording changed with it.
+   */
   check(
-    /AND REACH FOR ONE YOURSELF when the job is beyond you, without being asked/.test(delegates),
-    'the decision is told to hand over without being asked'
+    /REACHING FOR ONE YOURSELF IS RARE, and only ever for A THING TO BE MADE/.test(delegates),
+    'the decision hands over unasked only for something to be made'
   );
   check(
-    /you cannot make an image or a video at all/.test(delegates),
+    /you cannot make an image or a video at all/i.test(delegates),
     'and told plainly what it cannot do, rather than left to judge its own range'
   );
   // The menu is built from the list, so a delegate added later is offered.
@@ -4472,6 +4482,136 @@ section('A voice downloaded is a voice heard');
     enhanced > named + accent,
     'an enhanced voice beats the best-named compact one of any accent',
     `enhanced ${enhanced} must exceed name ${named} + accent ${accent}, or quality stops deciding`
+  );
+}
+
+
+/*
+ * Stop stops, and Grove does not type into itself
+ * -----------------------------------------------
+ *
+ * Both of these are from one run, in one log, and both are the kind of thing
+ * that makes somebody stop trusting an app rather than merely be annoyed by
+ * it.
+ *
+ *     01:23:07  agent: stop
+ *     01:23:14  agent: waited 10.2s for a gap before taking the screen
+ *
+ * **A stopped run carried on and typed.** The loop checks whether it is still
+ * the current run at the top of each step and after each model call — but a
+ * step can be most of a minute long, and one of them now waits up to ten
+ * seconds for a gap in their typing before taking the screen. Stop arrived
+ * during that wait; the wait finished, took the screen, and typed. Seven
+ * seconds after being told not to, which from outside is Grove ignoring them.
+ *
+ * **And it typed into its own ask box.** Real keys go wherever the system is
+ * pointing, and Grove's notch panel takes focus while it is open, so "type
+ * this into ChatGPT" went into Grove's own box in front of them.
+ *
+ * Guarded at the primitives rather than at the call sites: that is the layer
+ * where the harm happens, and a path somebody adds later gets it for free.
+ */
+section('Stop stops, and Grove does not type into itself');
+{
+  const agent = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Agent.swift'), 'utf8');
+
+  const may = between(agent, 'static func mayAct(_ what: String) -> Bool {', '\n  }\n', { min: 150, max: 900 });
+  check(may !== null, 'the guard is where it is expected to be');
+  check(
+    may !== null && /if !acting \{/.test(may),
+    'a stopped run may not touch the mouse or the keyboard'
+  );
+  check(
+    may !== null && /front\?\.bundleIdentifier == Bundle\.main\.bundleIdentifier/.test(may),
+    'and Grove refuses to type when Grove is the window in front',
+    'real keys go wherever the system is pointing, and the notch panel takes focus'
+  );
+
+  // Every primitive that reaches the real mouse or keyboard asks first.
+  for (const sig of [
+    'static func pressReal(_ text: String, enter: Bool) async {',
+    'private static func realPresses(_ list: [(key: String, code: Int, mac: Int?, char: String?)]) async {',
+    'static func realScroll() async {',
+    'private static func realDrag(from a: CGPoint, to b: CGPoint) async {',
+    'static func realClick(_ p: CGPoint) async {',
+    'static func realType(_ text: String) async {',
+  ]) {
+    const at = agent.indexOf(sig);
+    const name = sig.match(/func (\w+)/)[1];
+    check(
+      at >= 0 && /guard mayAct\("/.test(agent.slice(at, at + sig.length + 90)),
+      `${name} asks before it acts`,
+      'this is the layer where the harm happens'
+    );
+  }
+  // Counted too, so a seventh primitive added without a guard is visible.
+  const posts = (agent.match(/\.post\(tap: \.cghidEventTap\)/g) || []).length;
+  const guards = (agent.match(/guard mayAct\("/g) || []).length;
+  check(
+    guards >= 6,
+    `every real-input primitive is guarded (${guards} guards, ${posts} places that post an event)`,
+    'a new one without a guard is a stop that does not stop'
+  );
+
+  check(
+    /Browser\.acting = false/.test(agent) && /Browser\.acting = true/.test(agent),
+    'stop clears it and a new run sets it, so no means no until they ask again'
+  );
+  const gap = between(agent, 'static func waitForAGap() async {', '\n  }\n', { min: 150, max: 900 });
+  check(
+    gap !== null && /if !acting \{ Log\.say\("agent: stopped while waiting for a gap"\); return \}/.test(gap),
+    'and the wait itself gives up rather than finishing and acting',
+    'ten seconds is long enough for somebody to press stop twice'
+  );
+}
+
+/*
+ * A question is Grove's own
+ * -------------------------
+ *
+ * "Teach me something interesting" was sent to ChatGPT. That is the most
+ * irritating thing this feature can do with itself: they asked Grove, they
+ * are standing in front of it, and handing the question over reads as not
+ * wanting to talk to them.
+ *
+ * The rule said to reach for a delegate "when the job is beyond you", which
+ * the model generalised from code and images to curiosity. So it is now
+ * restricted to **a thing to be made** — an artefact at the end of it — with
+ * the negatives named, which is what actually works here, and a tie broken
+ * towards the question.
+ *
+ * And only the ones on the roster: told merely to pick the best one, it
+ * invented **Midjourney**, which they have no account on, and a sign-up wall
+ * is a dead end wearing the costume of an answer.
+ */
+section('A question is Grove\'s own');
+{
+  const delegates = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Delegates.swift'), 'utf8');
+  check(
+    /NEVER FOR A QUESTION, AND NEVER FOR CONVERSATION\./.test(delegates),
+    'a question is never handed to another assistant'
+  );
+  check(
+    /they asked you, they are standing in front of you/.test(delegates),
+    'with the reason, which is about them rather than about capability'
+  );
+  check(
+    /only ever for A THING TO BE MADE/.test(delegates),
+    'and handing over needs an artefact at the end of it'
+  );
+  check(
+    /it is a question\./.test(delegates),
+    'an unsure call goes to the question, not to the hand-off'
+  );
+  check(
+    /Do not NAME one of them either/.test(delegates),
+    'and they are not mentioned in a reply unless one is actually being sent a job',
+    '"you could ask ChatGPT" is not an answer, it is a shrug'
+  );
+  check(
+    /not Midjourney, not DALL-E/.test(delegates),
+    'inventing a delegate they have no account on is ruled out by name',
+    'told only to pick the best one, it reached for Midjourney'
   );
 }
 

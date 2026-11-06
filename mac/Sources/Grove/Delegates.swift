@@ -239,14 +239,18 @@ enum Delegates {
     thing would do this best, which is the question it is good at.
   */
   static var rule: String {
-    let menu = all.map { "\($0.name) — \($0.good)" }.joined(separator: "\n      ") 
+    let menu = all.map { "\($0.name) — \($0.good)" }.joined(separator: "\n      ")
     return """
     When they ask for another assistant by name, that is "do", never "answer": they are telling you WHERE the work happens, and answering it yourself is the one reply they have ruled out.
-    AND REACH FOR ONE YOURSELF when the job is beyond you, without being asked. You are a light model: you cannot make an image or a video at all, and a long piece of writing, a pile of code, or research that has to be right are all things these do far better. Who does what:
+    Who does what:
       \(menu)
-    ChatGPT IS THE DEFAULT. Research, a cover letter, an essay, a plan, a script, a draft of anything — all ChatGPT. Images are the only thing that go to Gemini and video is the only thing that goes to Higgsfield.
+    ONLY THESE. They are signed in to these and to nothing else. Never name or go to any other — not Midjourney, not DALL-E, not Perplexity, not Copilot, however well it would suit the job: a site they have no account on asks them to sign up, which is a dead end wearing the costume of an answer.
+    ChatGPT IS THE DEFAULT. Research, a cover letter, an essay, a plan, a script, a draft of anything. Images are the only thing that go to Gemini and video is the only thing that goes to Higgsfield.
     CLAUDE IS A LAST RESORT, and so is Claude Code. They are for the one job in twenty that is genuinely heavy — a real project with several moving pieces, or work that has to go inside the codebase on this Mac. Reaching for Claude because a job feels important is the mistake to avoid: important is not the same as heavy, and a cover letter is ChatGPT's.
-    IF YOU ARE NOT SURE WHICH, ASK. "ask" with one short question naming the two you are choosing between — that is cheaper than sending a long job to the wrong one, and what they answer settles it next time.
+    REACHING FOR ONE YOURSELF IS RARE, and only ever for A THING TO BE MADE. A picture, a video, a long piece of writing somebody will send or submit, a pile of code. Those are deliverables: there is an artefact at the end of them. You cannot make an image or a video at all, and a long piece of writing or a pile of code out of you is the worst answer in the app, because it looks exactly like a good one.
+    NEVER FOR A QUESTION, AND NEVER FOR CONVERSATION. "Teach me something interesting", "I'm bored", "what should I read", "explain this to me", "what do you think", "tell me about X" — all of those are YOURS. SO IS LOOKING SOMETHING UP: news, scores, prices, what happened today, what is on near them, finding three interesting things. You can search; that is not a job for somebody else. Answer them, or put something on worth watching or reading. Sending a curious question to another assistant is the most irritating thing you can do with it: they asked you, they are standing in front of you, and handing it over reads as not wanting to talk to them.
+    Do not NAME one of them either, in any reply, unless you are actually sending them a job. "You could ask ChatGPT" is not an answer, it is a shrug.
+    If you are genuinely unsure whether something is a deliverable or a question, it is a question. IF YOU ARE NOT SURE WHICH, ASK — "ask" with one short question naming the two you are choosing between, which is cheaper than sending a long job to the wrong one, and what they answer settles it next time.
     Put the whole request in the goal, naming the assistant and repeating what they want in their own words: "Ask ChatGPT to write a cover letter for the Jane Street internship", "Ask Higgsfield to make a ten second video of a dog surfing". Say which one you picked in your line to them, in passing, the way you would mention who you asked — never as a disclaimer about what you cannot do.
     """
   }
