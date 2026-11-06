@@ -3230,7 +3230,7 @@ laterSection('A job can be handed to another AI, and never by accident', async (
       ['get chatgpt to draft the email to my landlord', 'chatgpt'],
       ['have gemini summarise that paper', 'gemini'],
       ['run this by perplexity', 'perplexity'],
-      ['ask claude code to fix the failing tests', 'vscode'],
+      ['ask claude code to fix the failing tests', 'claude-code'],
       ['Ask Claude to write a cover letter for the Jane Street internship', 'claude'],
       // Named, but nothing is being handed over.
       ['what do you think of claude', '-'],
@@ -3280,10 +3280,124 @@ laterSection('A job can be handed to another AI, and never by accident', async (
       'and what is handed over is the request, not the instruction to hand it over',
       `got ${JSON.stringify(asked)} — "Ask Claude to ask Claude" is what the seam exists to prevent`
     );
+    /*
+     * A delegate that is a program, not a page.
+     *
+     * Driving Claude Code by taking pictures of VS Code and clicking where
+     * its panel appeared to be is how "type this into Claude" typed it into
+     * the editor instead: app, click, type, click, click, and the run's own
+     * parting lesson was "use keyboard shortcuts rather than guessing icon
+     * locations". A CLI has an exact way in, so it gets one.
+     */
+    check(
+      /Delegate\(id: "claude-code"[\s\S]{0,400}?command: "claude \{task\}"\)/.test(delegates),
+      'Claude Code is run, not looked at'
+    );
+    check(
+      /if !to\.command\.isEmpty \{[\s\S]{0,600}?tell application \\"Terminal\\"/.test(agent),
+      'and a delegate with a command never enters the browser loop at all'
+    );
+    /*
+     * The escaping, run rather than read. Two parsers sit between here and
+     * the program — the shell and AppleScript's own string — and skipping
+     * either means a sentence with an apostrophe in it fails to run, or
+     * runs as something nobody wrote.
+     */
+    fs.writeFileSync(path.join(dir, 'esc.swift'),
+      `for nasty in [${[
+        `draft Priya's email about the "big" launch`,
+        'fix it; echo PWNED',
+        'run $(whoami) and `date`',
+        `a'b"c$d\`e;f|g&h`,
+      ].map((n) => JSON.stringify(n)).join(', ')}] {\n` +
+      `  print(Delegates.shell("printf '%s\\\\n' {task}", task: nasty))\n}\n`);
+    fs.copyFileSync(path.join(ROOT, 'mac/Sources/Grove/Delegates.swift'), path.join(dir, 'Delegates2.swift'));
+    const escDir = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-esc-'));
+    try {
+      fs.copyFileSync(path.join(dir, 'Delegates2.swift'), path.join(escDir, 'Delegates.swift'));
+      fs.copyFileSync(path.join(dir, 'esc.swift'), path.join(escDir, 'main.swift'));
+      const b2 = cp.spawnSync('swiftc', ['-O', 'Delegates.swift', 'main.swift', '-o', 'esc'], { cwd: escDir, encoding: 'utf8' });
+      if (b2.status !== 0) {
+        check(false, 'the escaping could not be compiled on its own', String(b2.stderr).slice(0, 300));
+      } else {
+        const cmds = String(cp.spawnSync(path.join(escDir, 'esc'), [], { encoding: 'utf8' }).stdout).trim().split('\n').filter(Boolean);
+        check(cmds.length === 4, 'all four awkward sentences produced a command', `got ${cmds.length}`);
+        // Run each through a real shell and compare what arrived with what went in.
+        const wanted = [
+          `draft Priya's email about the "big" launch`,
+          'fix it; echo PWNED',
+          'run $(whoami) and `date`',
+          `a'b"c$d\`e;f|g&h`,
+        ];
+        const got = cmds.map((c) => String(cp.spawnSync('/bin/sh', ['-c', c], { encoding: 'utf8' }).stdout).replace(/\n$/, ''));
+        check(
+          got.length === wanted.length && got.every((g, i) => g === wanted[i]),
+          'and each arrives at the program as one argument, byte for byte',
+          got.map((g, i) => `${g === wanted[i] ? 'ok ' : 'BAD'} ${JSON.stringify(g)}`).join('\n         ')
+        );
+        /*
+         * The independent signal, because the check above compares text and
+         * the text legitimately contains the word PWNED: a sentence that was
+         * executed rather than passed produces a SECOND line of output. One
+         * line each means one argument each, whatever it said.
+         */
+        const lines = cmds.map((c) => String(cp.spawnSync('/bin/sh', ['-c', c], { encoding: 'utf8' }).stdout).replace(/\n$/, '').split('\n').length);
+        check(
+          lines.every((n) => n === 1),
+          'nothing in a sentence is ever run as a command',
+          `a semicolon, a $(…) or a backtick that ran would print a second line — got ${lines.join(', ')}`
+        );
+      }
+    } finally {
+      fs.rmSync(escDir, { recursive: true, force: true });
+    }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/*
+ * Grove hands over what it should not be doing itself
+ * ---------------------------------------------------
+ *
+ * It runs on a lite model with a calendar and a pair of hands. It cannot
+ * make a picture and it cannot make a video, and a thousand words of code or
+ * a real piece of research out of it is the worst answer in the app, because
+ * it looks exactly like a good one. Their browser is signed in to things
+ * that do each of those properly and they are already paying for them.
+ *
+ * So the list is not a menu of sites, it is a list of jobs this model should
+ * not be doing — and it reaches for them unasked, which is the half that
+ * makes the feature worth having.
+ */
+section('Grove hands over what it should not be doing itself');
+{
+  const delegates = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Delegates.swift'), 'utf8');
+  check(
+    /AND REACH FOR ONE YOURSELF when the job is beyond you, without being asked/.test(delegates),
+    'the decision is told to hand over without being asked'
+  );
+  check(
+    /you cannot make an image or a video at all/.test(delegates),
+    'and told plainly what it cannot do, rather than left to judge its own range'
+  );
+  // The menu is built from the list, so a delegate added later is offered.
+  check(
+    /let menu = all\.map \{ "\\\(\$0\.name\) — \\\(\$0\.good\)" \}/.test(delegates),
+    'what each one is for comes from the list itself',
+    'a hand-written menu is one a new delegate is missing from'
+  );
+  for (const [id, what] of [['higgsfield', 'video'], ['claude-code', 'codebase'], ['suno', 'music']]) {
+    check(
+      new RegExp(`Delegate\\(id: "${id}"`).test(delegates),
+      `there is somewhere to send ${what}`
+    );
+  }
+  check(
+    /never as a disclaimer about what you cannot do/.test(delegates),
+    'and it says who it asked in passing, not as an apology for its own limits'
+  );
+}
 
 /*
  * The lite model has no thinking to configure, and says so with a 400

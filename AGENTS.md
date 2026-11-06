@@ -1956,6 +1956,37 @@ thinking is for boards and recovery, eyes only where the words cannot show it,
 "go" can take one of their tabs in the same move, and the brief says done the
 moment it is done. Pad thai, search to recipe: 26s including an interruption.
 
+**A finished job is not a lost one.** The Mac forgets a task once it is done,
+so resuming it answers "lost track", and the phone used to start it again, with
+the request joined to itself, and the working sound playing over a trailer that
+was already on. Finished now means the answer is what it did, and anything new
+they asked is a new job in its own words.
+
+**The working sound is a wave, not a beep** (`waveSamples` in grove-remote):
+low filtered noise swelling over three seconds, silent at both ends so it loops
+without a seam, peaking near a third of full scale. Native, so it needs a build.
+
+**The reader marks after it measures.** Setting `data-grove` between two
+measurements made YouTube work out its styles a hundred and forty times: twelve
+seconds to read a page of results. Pictures of the task's window are taken
+without taking the screen, and a check with nothing to look at uses the light
+model. A YouTube trailer, ask to done: 25s, from 42.
+
+**Typing in an app only pastes.** Select-all and delete is how a web box is
+cleared, and in an app it is how a misplaced click into a code editor, instead of
+the chat panel beside it, empties the file. In apps Grove pastes where it clicked.
+
+**A follow-up goes to a Mac job only if the job is waiting on them.** "Pull it
+up on my Mac", after reading their email on the phone, went into the YouTube job
+from two sentences before, because a bare answer attached to any task from the
+last ten minutes. Now only a task asking, confirming or still working takes one;
+anything else is a new job, with the thing written into the goal.
+
+**Mac results ride on the next reply.** A finished job heard while Grove is
+busy is added to the end of whatever it says next, "Oh, and on your Mac: …",
+instead of arriving minutes later on its own. A question still waits its turn,
+because it needs the microphone.
+
 Texts go through Messages, not a website (`agent.message`): the person is
 found in Contacts by name or relation, a pick among several is remembered,
 and the exact words are read back before sending.
@@ -2014,6 +2045,44 @@ do every one of those steps. Three things made it do them badly:
   everywhere. Two quiet polls, because these answers arrive in bursts. It
   waits for the answer to *begin* too — the length right after Return is the
   prompt sitting in the box, which is already "not growing".
+
+**And it reaches for one unasked**, which is the half that makes this worth
+having. Grove runs on a lite model with a calendar and a pair of hands: it
+cannot make a picture, it cannot make a video, and a thousand words of code or
+a real piece of research out of it is the worst answer in the app, because it
+looks exactly like a good one. So the list is not a menu of sites, it is a
+list of jobs this model should not be doing — and what each one is for is
+built from the list itself, so a delegate added later is offered rather than
+missed by a hand-written menu.
+
+Said as what each is FOR rather than as a rule about when to delegate, because
+a rule needs a line and there isn't one: "write me something" could be a
+sentence or a dissertation. What the model can judge is which thing would do
+this best, which is the question it is good at. Measured on the live model
+with nothing named: an image went to ChatGPT, a video to Higgsfield, a cover
+letter to Claude and "proper research on which ebike" to Perplexity, while the
+capital of Australia, a hello and "play wordle" stayed exactly where they were.
+
+Which one it picked is said in passing, the way you would mention who you
+asked — never as a disclaimer about what Grove cannot do.
+
+**A delegate that is a program is run, not looked at.** Driving Claude Code by
+taking pictures of VS Code and clicking where its panel appeared to be is how
+*"type this into Claude"* typed it into the editor instead — measured: `app`,
+`click`, `type`, `click`, `click`, and the run's own parting lesson was "use
+keyboard shortcuts rather than guessing icon locations". A CLI has an exact
+way in, so it gets one: `command` on the delegate, run in Terminal, which is
+visible, interruptible and deterministic — three things a screenshot and a
+guessed coordinate are not. Those never enter the browser loop at all.
+
+**Two parsers sit between a sentence and that program**, and skipping either
+is how *"draft Priya's email"* either fails to run or runs as something nobody
+wrote. The request is wrapped in shell single quotes with any single quote
+closed and reopened, and the result is then escaped for AppleScript's own
+string. `npm run verify` compiles the real function and runs its output
+through a real shell: four awkward sentences, each arriving as one argument
+byte for byte, and one line of output each — because a sentence that was
+executed rather than passed prints a second one.
 
 It is not a second brain: nothing in the file decides anything. A delegate is
 a destination plus a page of notes about that destination, handed to the same

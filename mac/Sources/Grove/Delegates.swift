@@ -46,10 +46,22 @@ enum Delegates {
     let url: String
     /** An app on this Mac, driven by sight. Empty for a website. */
     let app: String
+
     /** What the words people actually use for it, lowercased. */
     let said: [String]
     /** What it is for, one line, so the model can pick between them. */
     let good: String
+    /**
+      A command to run in Terminal instead, with {task} where the request goes.
+
+      For the ones that are a program rather than a page. Driving Claude Code
+      by taking pictures of VS Code and clicking at where its panel looked
+      like it was is how "type this into Claude" ended up typing it into the
+      editor — measured: app, click, type, click, click, and the run's own
+      parting lesson was "use keyboard shortcuts rather than guessing icon
+      locations". A CLI has an exact way in, so it gets one.
+    */
+    var command: String = ""
   }
 
   /**
@@ -82,12 +94,22 @@ enum Delegates {
     Delegate(id: "copilot", name: "GitHub Copilot", url: "https://github.com/copilot", app: "",
              said: ["copilot", "github copilot"],
              good: "questions about a repository"),
+    Delegate(id: "claude-code", name: "Claude Code", url: "", app: "",
+             said: ["claude code", "claudecode", "claude cli", "codex"],
+             good: "real work in a codebase on this Mac — reading it, changing it, running it",
+             command: "claude {task}"),
     Delegate(id: "vscode", name: "VS Code", url: "", app: "Visual Studio Code",
-             said: ["vs code", "vscode", "visual studio code", "claude code", "codex", "my editor"],
-             good: "work in a codebase on this Mac"),
+             said: ["vs code", "vscode", "visual studio code", "my editor"],
+             good: "looking at a file that is already open"),
     Delegate(id: "cursor", name: "Cursor", url: "", app: "Cursor",
              said: ["cursor"],
              good: "work in a codebase on this Mac"),
+    Delegate(id: "higgsfield", name: "Higgsfield", url: "https://higgsfield.ai/", app: "",
+             said: ["higgsfield", "higgs field"],
+             good: "video, and moving a still image"),
+    Delegate(id: "suno", name: "Suno", url: "https://suno.com/create", app: "",
+             said: ["suno"],
+             good: "music, written and sung"),
   ]
 
   /**
@@ -163,6 +185,26 @@ enum Delegates {
   }
 
   /**
+    A shell command with the request in it, safe to put in an AppleScript
+    string that goes to Terminal.
+
+    Two layers, because there are two parsers between here and the program:
+    the request is wrapped in shell single quotes with any single quote
+    closed and reopened (the only escape single quotes have), and the result
+    is then escaped for AppleScript's own string. Skipping either one means a
+    sentence with an apostrophe in it — *"draft Priya's email"* — either
+    fails to run or runs as something nobody wrote.
+  */
+  static func shell(_ template: String, task: String) -> String {
+    let quoted = "'" + task.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    return template.replacingOccurrences(of: "{task}", with: quoted)
+  }
+
+  static func applescript(_ command: String) -> String {
+    command.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+  }
+
+  /**
     What the mover needs to know, put at the top of the task's history so it
     rides with every move.
 
@@ -188,9 +230,34 @@ enum Delegates {
     """
   }
 
-  /** How the decision is told that this is even a choice. One line, in the brief. */
+  /**
+    How the decision is told that this is a choice, and when to make it
+    without being asked.
+
+    Two halves, and the second is the one that makes this worth having.
+    Naming an assistant is an instruction about where the work happens, and
+    answering it yourself is the one reply they have ruled out — that much
+    was always here. What was missing is that **Grove should reach for these
+    on its own.** It runs on a lite model with a calendar and a pair of
+    hands; it cannot make a picture, it cannot make a video, and a thousand
+    words of code or a real piece of research out of it is the worst answer
+    in the app, because it looks exactly like a good one.
+
+    Their browser is already signed in to things that do each of those
+    properly, and they are already paying for them. So the list below is not
+    a menu of sites, it is a list of jobs this model should not be doing.
+
+    Said as what each is FOR rather than as a rule about when to delegate,
+    because a rule needs a line and there isn't one — "write me something"
+    could be a sentence or a dissertation. What the model can judge is which
+    thing would do this best, which is the question it is good at.
+  */
   static var rule: String {
-    let names = all.map(\.name).joined(separator: ", ")
-    return "When they ask for another assistant to do it — \(names), or any assistant by name — that is \"do\", never \"answer\". They are telling you WHERE the work happens, and answering it yourself is the one reply they have ruled out. Put the whole request in the goal, naming the assistant and repeating what they want done in their own words: \"Ask Claude to write a cover letter for the Jane Street internship\"."
+    let menu = all.map { "\($0.name) — \($0.good)" }.joined(separator: "; ")
+    return """
+    When they ask for another assistant to do it — by name, any of them — that is "do", never "answer": they are telling you WHERE the work happens, and answering it yourself is the one reply they have ruled out.
+    AND REACH FOR ONE YOURSELF when the job is beyond you, without being asked. You are a light model: you cannot make an image or a video at all, and a long piece of writing, a pile of code, or research that has to be right are all things these do far better. Pick the one that fits and send it there — \(menu) — rather than producing a worse version yourself. A picture, a video or a song is always one of these; so is "write me a script/essay/proposal", a plan somebody will act on, and anything that needs reading a codebase.
+    Either way, put the whole request in the goal, naming the assistant and repeating what they want in their own words: "Ask Claude to write a cover letter for the Jane Street internship", "Ask Higgsfield to make a ten second video of a dog surfing". Say which one you picked in your line to them, in passing, the way you would mention who you asked — never as a disclaimer about what you cannot do.
+    """
   }
 }

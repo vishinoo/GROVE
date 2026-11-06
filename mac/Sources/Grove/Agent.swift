@@ -194,6 +194,25 @@ final class Agent {
     // — that the answer is the point, that it takes a minute, and that
     // waiting is free.
     if let to = Delegates.wanted(in: goal) {
+      /*
+        A program, not a page: run it rather than looking at it.
+
+        Driving Claude Code by taking pictures of VS Code and clicking where
+        its panel appeared to be is how "type this into Claude" typed it into
+        the editor instead. A CLI has an exact way in, and Terminal running
+        it in its own window is visible, interruptible and deterministic —
+        three things a screenshot and a guessed coordinate are not.
+      */
+      if !to.command.isEmpty {
+        tasks[task.id] = nil
+        let asked = Delegates.asked(from: goal, to: to)
+        let command = Delegates.shell(to.command, task: asked)
+        Log.say("agent: handing this to \(to.name) — \(command.prefix(120))")
+        let (ok, _) = await Browser.run("tell application \"Terminal\"\nactivate\ndo script \"\(Delegates.applescript(command))\"\nend tell")
+        return ok
+          ? AgentResult(state: "done", spoken: "\(to.name) is on it in Terminal: \(asked.prefix(120))", task: task.id, detail: command)
+          : AgentResult(state: "failed", spoken: "I couldn't start \(to.name). Grove may need permission to control Terminal, in the Grove menu's checklist.", task: task.id)
+      }
       task.delegate = to
       task.note = Delegates.note(for: to, task: Delegates.asked(from: goal, to: to))
       // Most of a delegation is somebody else writing, so a minute's budget
@@ -316,7 +335,7 @@ final class Agent {
 
   func resume(task id: String, answer: String, approve: Bool) async -> AgentResult {
     guard let task = tasks[id] else {
-      return AgentResult(state: "failed", spoken: "I lost track of that one on your Mac. Ask me again?", task: id)
+      return AgentResult(state: "failed", spoken: "I lost track of that one on your Mac. Tell me again and I'll start it fresh.", task: id)
     }
     task.touched = Date()
     if !task.choices.isEmpty {
@@ -393,7 +412,7 @@ final class Agent {
     while Date().timeIntervalSince(started) < (task.game ? Agent.gameBudget : task.budget) {
       if mine != current { return AgentResult(state: "stopped", spoken: "Stopped.", task: task.id) }
       guard task.steps < (task.game ? Agent.gameSteps : Agent.maxSteps) else {
-        return AgentResult(state: "failed", spoken: "I went round in circles on your Mac and stopped. It's on the page I got to.", task: task.id)
+        return AgentResult(state: "failed", spoken: "That took more steps than it should have, so I've stopped where it is. Tell me what to do next and I'll carry on from there.", task: task.id)
       }
       task.steps += 1
       // They closed the tab it was working in. That is not Chrome failing:
@@ -455,7 +474,7 @@ final class Agent {
         }
         task.look = false
       } else if !task.tab.isEmpty, page.error == nil, task.look || (page.visual && page.chess.isEmpty) {
-        if let shot = await Browser.borrow({ await Browser.shot() }) {
+        if let shot = await Browser.taskShot() {
           picture = shot.jpeg
           task.shotBounds = shot.bounds
         } else if task.look {
@@ -468,7 +487,7 @@ final class Agent {
         if error.lowercased().contains("javascript") {
           return AgentResult(state: "failed", spoken: "Chrome stopped letting me read the page. Each Chrome profile has its own switch: in the window that's open, View, Developer, Allow JavaScript from Apple Events.", task: task.id)
         }
-        return AgentResult(state: "failed", spoken: "I couldn't read that page in Chrome, so I stopped rather than guess.", task: task.id)
+        return AgentResult(state: "failed", spoken: "Chrome wouldn't let me read that page, so I stopped rather than guess at it. Try asking again in a moment.", task: task.id)
       }
       // Every move is checked against the page it was meant to change. Without
       // this the model only ever saw the new page, never whether its click had
@@ -488,7 +507,7 @@ final class Agent {
       let recent = task.history.suffix(2).joined()
       let hard = !page.board.isEmpty || !page.chess.isEmpty || recent.contains("nothing on the page changed") || recent.contains("already did")
       guard let move = await Agent.next(goal: task.goal, plan: task.plan, history: task.history, page: page, manner: manner, think: hard || picture != nil, recent: task.steps == 1 || task.tab.isEmpty ? recent : "", picture: picture, learned: Lessons.known(for: page.url, goal: task.goal), note: task.note) else {
-        return AgentResult(state: "failed", spoken: "I couldn't work out the next step on your Mac.", task: task.id)
+        return AgentResult(state: "failed", spoken: "I lost my connection to think through the next step, so I've left it where it is. Ask again and I'll pick it up.", task: task.id)
       }
       // Stop pressed while the model was thinking: the move it came back with is not made.
       if mine != current { return AgentResult(state: "stopped", spoken: "Stopped.", task: task.id) }
@@ -509,7 +528,7 @@ final class Agent {
       let repeats = task.moves.filter { $0 == signature }.count
       if repeats >= 3 && action != "scroll" && action != "wait" && action != "keys" {
         task.history.append("Stuck: tried \(action) on \(label) three times.")
-        return AgentResult(state: "ask", spoken: "I'm going in circles on \(page.title.isEmpty ? "this page" : page.title). What should I pick?", task: task.id)
+        return AgentResult(state: "ask", spoken: "\(label.isEmpty ? "That" : "“\(label.prefix(40))”") isn't responding on \(page.title.isEmpty ? "this page" : page.title). Should I try something else, or do you want to take it from here?", task: task.id)
       }
       if repeats == 2 && action != "scroll" && action != "wait" {
         task.history.append("You already did \(action) on \(label) and the page did not change the way you wanted. Do something different, or ask them.")
@@ -538,7 +557,11 @@ final class Agent {
           let forPerson = (move["into"] as? String ?? "message").lowercased() != "search"
           if let point { await Browser.realClick(point) }
           // What is typed is what the box says afterwards, unless they asked to add to it.
-          if (move["append"] as? Bool) == true { await Native.paste(text) } else { await Browser.replaceByHand(text) }
+          // Pasted where it clicked, and nothing more. Select-all and delete is
+          // how a web box is cleared, but in an app Grove cannot be sure the
+          // cursor is in the box it meant: one click into a code editor
+          // instead of the chat beside it, and select-all-delete empties the file.
+          await Native.paste(text)
           task.history.append("Typed \"\(text)\" into \(forPerson ? "the message box" : "the search box")")
           if comms && forPerson { task.drafted = true }
           if enter {
@@ -798,7 +821,7 @@ final class Agent {
       if task.history.count > 30 { task.history.removeFirst(task.history.count - 30) }
     }
     task.history.append("Paused to check in with them.")
-    return AgentResult(state: "ask", spoken: "I'm partway through on your Mac. Keep going?", task: task.id)
+    return AgentResult(state: "ask", spoken: "This is taking longer than I'd like. It's on \((await Browser.read()).title.prefix(60)) now. Want me to keep going?", task: task.id)
   }
 
   /**
@@ -932,14 +955,17 @@ final class Agent {
   private static func picture(app: String = "") async -> Data? {
     guard CGPreflightScreenCaptureAccess() else { return nil }
     if !app.isEmpty { return await Browser.shot(app: app)?.jpeg }
-    return await Browser.borrow { await Browser.shot()?.jpeg }
+    return await Browser.taskShot()?.jpeg
   }
 
   /** Whether the page really shows the goal reached, judged by a reader that did not do the work. */
   private static func check(goal: String, claim: String, history: [String], page: Browser.Page, picture: Data?) async -> (ok: Bool, why: String) {
     let info = Bundle.main.infoDictionary ?? [:]
     guard let key = info["GroveGeminiKey"] as? String, !key.isEmpty,
-          let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent") else { return (true, "") }
+          // Reading words is the light model's job and takes it a second; a picture
+          // is the one thing worth the stronger one. The check sits between the
+          // job being done and the phone hearing so, with the working sound on.
+          let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(picture == nil ? "gemini-flash-lite-latest" : "gemini-flash-latest"):generateContent") else { return (true, "") }
     let system = """
     You check another assistant's work in a web browser before the person is told it is finished. Judge only from the page as it is now (and the picture, when there is one) against what the person asked for, read the way they meant it: "play" a game means actually playing it — keep going until it is over or they would be satisfied, not a few moves; "correctly" means correct; "find" means it is on the screen; "order" or "send" means it reached the step they asked for. A claim is not evidence. If the page does not clearly show it, it is not achieved.
     Reply as JSON: {"achieved":true|false,"why":"one sentence: what on the page shows it, or what is still missing and what to do next"}
@@ -1755,6 +1781,9 @@ enum Browser {
   // their insides there, and a reader that stops at the light DOM sees an
   // empty page where the whole thing is. No // comments inside the script:
   // it is sent as one line, and the first one would swallow the rest.
+  // Marked after everything is measured (`marks`): a mark between two
+  // measurements makes the page work out its styles again, and on YouTube that
+  // was twelve seconds of a hundred and forty recalculations.
   static func read() async -> Page {
     let code = """
     (function(){
@@ -1792,7 +1821,7 @@ enum Browser {
       if(pop&&found.length>20&&found.filter(function(e){return pop.contains(e);}).length>found.length*0.6)pop=null;
       var list=found.filter(field).concat(found.filter(function(e){return !field(e);}));
       if(pop)list=list.filter(function(e){return pop.contains(e);}).concat(list.filter(function(e){return !pop.contains(e);}));
-      var pressed=new Set();
+      var pressed=new Set(),marks=[];
       list.forEach(function(e){
         if(n>=140)return;
         var r=e.getBoundingClientRect();
@@ -1809,7 +1838,7 @@ enum Browser {
         if(!label&&e.tagName!=='INPUT'&&e.tagName!=='TEXTAREA'&&e.tagName!=='SELECT')return;
         if(pressed.has(box))return;
         pressed.add(box);
-        box.setAttribute('data-grove',n); window.__grove[n]=box;
+        marks.push(box); window.__grove[n]=box;
         var it={n:n,tag:e.tagName.toLowerCase(),label:label.slice(0,70)};
         if(e.type)it.type=e.type; if(edit){it.type='textbox';it.value=(e.innerText||'').trim().slice(0,60);} if(e.autocomplete)it.auto=e.autocomplete;
         if((e.tagName==='INPUT'||e.tagName==='TEXTAREA')&&e.type!=='password')it.value=(e.value||'').slice(0,60);
@@ -1834,6 +1863,7 @@ enum Browser {
       for(var k=0;k<4&&top&&at===0;k++,top=top.parentElement){var probe=(top.innerText||'').replace(/[ \\t]+/g,' ').trim().slice(0,40);if(probe.length>8){var i=whole.indexOf(probe);if(i>0)at=i;}}
       var start=Math.max(0,at-300);
       var text=(start>0?'(…from where the page is scrolled to)\\n':'')+whole.slice(start,start+4000)+(whole.length>start+4000?'\\n(…more below)':'');
+      marks.forEach(function(m,i){m.setAttribute('data-grove',i);});
       var big=0;all('canvas,iframe').forEach(function(e){var r=e.getBoundingClientRect();big=Math.max(big,(Math.min(r.right,innerWidth)-Math.max(r.left,0))*(Math.min(r.bottom,innerHeight)-Math.max(r.top,0))/(innerWidth*innerHeight));});
       var frames=[];all('iframe').forEach(function(f){var r=f.getBoundingClientRect();if(r.width*r.height<innerWidth*innerHeight*0.08||!f.src||/^(about|javascript|data):/.test(f.src))return;var same=false;try{same=!!(f.contentDocument&&f.contentDocument.body);}catch(x){}if(!same)frames.push((f.title||f.name||'frame').slice(0,60)+' at '+f.src.slice(0,180)+' ('+Math.round(r.width)+'x'+Math.round(r.height)+')');});
       var popText=pop?(pop.innerText||'').replace(/\\s+/g,' ').trim().slice(0,240):'';
@@ -2009,6 +2039,34 @@ enum Browser {
     await take(pid: NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome").first?.processIdentifier)
   }
 
+  /**
+    The task's own tab, pictured where it is. A window is captured whole even
+    under other windows, so this neither brings Chrome forward nor waits for a
+    gap in their typing — it shows the task's tab in its window, picks that
+    window out by its frame, and takes it. Taking the screen for a picture
+    cost up to ten seconds a step while somebody was typing.
+  */
+  static func taskShot() async -> Shot? {
+    let parts = tab.components(separatedBy: " of window id ")
+    guard parts.count == 2, let tabID = parts[0].split(separator: " ").last else { return await borrow { await shot() } }
+    let (ok, out) = await run("""
+    tell application "Google Chrome"
+      set w to window id \(parts[1])
+      repeat with i from 1 to (count of tabs of w)
+        if (id of tab i of w) as string is "\(tabID)" then set active tab index of w to i
+      end repeat
+      set b to bounds of w
+      return ((item 1 of b) as string) & "," & ((item 2 of b) as string) & "," & ((item 3 of b) as string) & "," & ((item 4 of b) as string)
+    end tell
+    """)
+    let v = out.split(separator: ",").compactMap { Double($0) }
+    guard ok, v.count == 4 else { return await borrow { await shot() } }
+    try? await _Concurrency.Task.sleep(nanoseconds: 200_000_000)
+    let frame = CGRect(x: v[0], y: v[1], width: v[2] - v[0], height: v[3] - v[1])
+    let chrome = NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome").first?.processIdentifier
+    return await take(pid: chrome, at: frame)
+  }
+
   /** The window in front, of whichever app they are in, or of the app named. */
   @MainActor
   static func shot(app: String?) async -> Shot? {
@@ -2017,10 +2075,14 @@ enum Browser {
   }
 
   @MainActor
-  private static func take(pid: pid_t?) async -> Shot? {
+  private static func take(pid: pid_t?, at frame: CGRect? = nil) async -> Shot? {
     guard let pid,
           let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
-          let window = list.first(where: { ($0[kCGWindowOwnerPID as String] as? pid_t) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }),
+          let window = list.first(where: { w in
+            guard (w[kCGWindowOwnerPID as String] as? pid_t) == pid, (w[kCGWindowLayer as String] as? Int) == 0 else { return false }
+            guard let frame, let raw = w[kCGWindowBounds as String] as? NSDictionary, let b = CGRect(dictionaryRepresentation: raw) else { return frame == nil }
+            return abs(b.minX - frame.minX) < 3 && abs(b.minY - frame.minY) < 3 && abs(b.width - frame.width) < 3
+          }),
           let number = window[kCGWindowNumber as String] as? Int,
           let raw = window[kCGWindowBounds as String] as? NSDictionary,
           let bounds = CGRect(dictionaryRepresentation: raw) else { return nil }
