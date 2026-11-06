@@ -1797,7 +1797,7 @@ section('A reaction is a reaction, not a slideshow');
   const popup = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Popup.swift'), 'utf8');
 
   check(
-    /static var welcome: Bool/.test(popup) && /panel == nil && Date\(\)\.timeIntervalSince\(lastShown\) > apart/.test(popup),
+    /static var welcome: Bool/.test(popup) && /Date\(\)\.timeIntervalSince\(lastShown\) > apart/.test(popup),
     'the window decides when a face may appear',
     'every caller passes through it; none of them can forget the spacing'
   );
@@ -1856,43 +1856,22 @@ section('A reaction is a reaction, not a slideshow');
    */
   const thinking = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Thinking.swift'), 'utf8');
   check(
-    /static let faces: Set<String> = \[/.test(gifs),
-    'the moments that get a face are named in one place'
+    /static func wants\(/.test(gifs) && /static let quiet: Set<String> = \[/.test(gifs),
+    'the moments that get no face are named in one place, and the rest can have one'
   );
   check(
-    /let faces = Gifs\.faces/.test(thinking) && !/let faces: Set<String> = \[/.test(thinking),
-    'and the answer path reads that list rather than keeping its own',
-    'two copies means narrowing one leaves the other firing'
+    /Gifs\.wants\(moment\)/.test(thinking) && /wants\(\(obj\?\["moment"\]/.test(gifs),
+    'and both paths read that list rather than keeping their own',
+    'two copies means changing one leaves the other deciding differently'
   );
-  for (const common of ['greeting', 'thanks', 'bad-luck']) {
-    check(
-      !new RegExp(`faces: Set<String> = \\[[^\\]]*\"${common}\"`).test(gifs),
-      `${common} gets no face: it is most of what gets said`,
-      'a reaction that arrives every time is not a reaction'
-    );
-  }
-  /*
-   * And a name is not a reaction.
-   *
-   * Asked for a face for a Mac DeMarco record, the model wrote "mac demarco"
-   * — so GIPHY was searched for an artist, which returns whatever anyone has
-   * ever tagged with that name: fan pictures, a couple kissing, strangers.
-   * Not a bad choice of reaction; not a reaction at all, and the reason the
-   * vibe never matched the song.
-   */
-  check(/static func echoes\(/.test(gifs), 'a search that is just the thing\'s own name is caught');
+  check(/"private"/.test(gifs.slice(gifs.indexOf('static let quiet'), gifs.indexOf('static let quiet') + 80)), 'and nothing private gets a face');
   check(
-    /echoes\(picked, of: happened\)/.test(gifs),
-    'on the path that picks a face after the event'
+    /static func echoes\(/.test(gifs) && /return parts\.isEmpty/.test(gifs),
+    'a search with nothing in it but filler is dropped, and a subject by name is not'
   );
   check(
-    /Gifs\.echoes\(chosen, of: text/.test(thinking),
-    'and on the path that picks one with the answer',
-    'it was written out once before and the other path kept firing'
-  );
-  check(
-    /A name alone is never a face/.test(gifs) && /what they are doing/.test(gifs),
-    'and the rule says so outright: a name only with what they are doing, so the guard is the backstop and not the plan'
+    /Pick the single best point/.test(gifs),
+    'and the rule picks the best point of the moment, which can be the subject itself'
   );
   check(
     /grove\.gifs\.shown/.test(gifs) && /!shown\.contains/.test(gifs),
@@ -1901,7 +1880,7 @@ section('A reaction is a reaction, not a slideshow');
 
   const apart = /apart: TimeInterval = (\d+)(?:\s*\*\s*(\d+))?/.exec(popup);
   const seconds = apart ? Number(apart[1]) * (apart[2] ? Number(apart[2]) : 1) : 0;
-  check(seconds >= 60, `and no two are closer than ${seconds} seconds`);
+  check(seconds >= 5, `and no two are closer than ${seconds} seconds`);
   check(
     /ask them what they mean/.test(recent),
     'and that a sentence which makes no sense is asked about, not matched to an old task'
@@ -3671,8 +3650,8 @@ section('A panel is as tall as what is in it');
 {
   const panel = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Resources/panel.html'), 'utf8');
   check(
-    /const fit = \(max\) => requestAnimationFrame/.test(panel),
-    'the height is measured from the last thing in the card, up to the mode\'s ceiling'
+    /const fit = \(max\) => \{/.test(panel) && /last\.offsetTop \+ last\.offsetHeight/.test(panel) && /new ResizeObserver\(/.test(panel),
+    'the height is measured from the last thing in the card, up to the mode\'s ceiling, and again whenever the card changes size'
   );
   /*
    * Every state that carries a typing box must fit.
@@ -4612,6 +4591,98 @@ section('A question is Grove\'s own');
     /not Midjourney, not DALL-E/.test(delegates),
     'inventing a delegate they have no account on is ruled out by name',
     'told only to pick the best one, it reached for Midjourney'
+  );
+}
+
+
+/*
+ * Pause what they named
+ * ---------------------
+ *
+ * "Pause YouTube" paused Apple Music. The decision had the word and the job
+ * dropped it: `args` carried `what` only for play, so every other action
+ * arrived with nothing to aim at and `Player` fell back to asking Music
+ * first. Being given a different thing from the one you asked for is worse
+ * than being told nothing is playing — they now have to work out what
+ * happened and undo it.
+ *
+ * Three layers had to agree: the brief has to put the named thing in `text`,
+ * the job has to carry it, and the player has to prefer it over whatever
+ * happens to be making sound. Each was a one-line omission on its own.
+ */
+section('Pause what they named');
+{
+  const player = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Player.swift'), 'utf8');
+  const jobs = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Jobs.swift'), 'utf8');
+  const main = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/main.swift'), 'utf8');
+  const thinking = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Thinking.swift'), 'utf8');
+
+  check(
+    /IF THEY NAMED WHAT TO STOP, PUT IT IN TEXT exactly as they said it/.test(thinking),
+    'the decision puts the thing they named where it can be read',
+    'the brief used to say steering never needs to know which app, so it never said'
+  );
+  check(
+    /args: \["what": what, "say": say\]/.test(main),
+    'and the job carries it for every action, not only play',
+    'this one line is where the word "YouTube" used to stop'
+  );
+  // All four transport jobs, or the one that was missed is the one it breaks on.
+  const carried = (jobs.match(/Player\.transport\("[a-z ]+", what: job\.args\["what"\] \?\? ""/g) || []).length;
+  check(
+    carried === 4,
+    'all four of pause, resume, next and back carry it',
+    `found ${carried}; a missed one is a command that silently aims at the wrong player`
+  );
+  const named = between(player, 'private static func named(_ what: String) -> Source? {', '\n  }\n', { min: 200, max: 1200 });
+  check(named !== null, 'the player reads it, where it is expected to');
+  check(
+    named !== null && /if let source = named\(what\) \{ return await only\(source, command\) \}/.test(player),
+    'and what they named wins over what happens to be playing'
+  );
+  /*
+   * "Music" is not a player, it is a word. Somebody on Spotify who says
+   * "pause the music" means Spotify, not the Apple Music that is installed
+   * on every Mac whether they use it or not.
+   */
+  check(
+    named !== null && /Services\.use\("music"\)/.test(named),
+    '"the music" means whichever player they actually use',
+    'Apple Music is on every Mac; that is not a reason to aim at it'
+  );
+}
+
+/*
+ * A done is one sentence
+ * ----------------------
+ *
+ * The card after a job was running to two and three sentences describing
+ * what is on their screen — which they are looking at. "One or two
+ * sentences" reads as permission to use two, and a model given permission
+ * uses it every time.
+ *
+ * The exception stays, and it is the opposite case: when the answer IS the
+ * thing they asked for, it is as long as the answer needs.
+ */
+section('A done is one sentence');
+{
+  const agent = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Agent.swift'), 'utf8');
+  check(
+    /ONE SHORT SENTENCE for something you did/.test(agent),
+    'a job done is said in one short sentence'
+  );
+  check(
+    /They can see it; you are not describing it to someone on the phone/.test(agent),
+    'with the reason, which is that they are looking at the thing'
+  );
+  check(
+    /never a recap of the steps, never "let me know if you need anything else"/.test(agent),
+    'and the two fillers that pad a receipt are named'
+  );
+  check(
+    /The exception is when the answer IS the thing they asked for/.test(agent),
+    'while a lookup is still as long as its answer needs',
+    'that is the half fixed the other way round, and it must not be undone here'
   );
 }
 

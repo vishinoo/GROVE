@@ -24,16 +24,70 @@ enum Player {
   static var hasPaused: Bool { paused != nil }
 
   @MainActor
-  static func transport(_ command: String, done: @escaping (Bool, String) -> Void) {
+  static func transport(_ command: String, what: String = "", done: @escaping (Bool, String) -> Void) {
     Task { @MainActor in
-      let result = await act(command)
+      let result = await act(command, what)
       Log.say("player: \(command) → \(result.said)")
       done(result.ok, result.said)
     }
   }
 
   @MainActor
-  private static func act(_ command: String) async -> (ok: Bool, said: String) {
+  /**
+    The player they named, when they named one.
+
+    "Pause YouTube" paused Apple Music, because the order below asks Music
+    first and nothing carried the word "YouTube" this far — the decision had
+    it and the job dropped it. Asking for one thing and being given another
+    is worse than being told nothing is playing: they now have to work out
+    what happened and undo it.
+
+    "Music" is read through what they actually use (`Services`), so somebody
+    on Spotify who says "pause the music" gets Spotify and not the Apple
+    Music that happens to be installed on every Mac.
+  */
+  private static func named(_ what: String) -> Source? {
+    let w = what.lowercased()
+    guard !w.isEmpty else { return nil }
+    if w.contains("spotify") { return .spotify }
+    if ["youtube", "chrome", "browser", "video", "tab", "netflix", "crave", "prime", "twitch", "film", "movie", "episode"]
+      .contains(where: { w.contains($0) }) { return .chrome }
+    if ["music", "song", "track", "playlist", "album"].contains(where: { w.contains($0) }) {
+      let use = Services.use("music").lowercased()
+      if use.contains("spotify") { return .spotify }
+      if use.contains("youtube") { return .chrome }
+      return .music
+    }
+    return nil
+  }
+
+  /** One source, asked directly, because they named it. */
+  @MainActor
+  private static func only(_ source: Source, _ command: String) async -> (ok: Bool, said: String) {
+    let back = command == "pause" ? "Paused." : command == "play" ? "Playing." : command == "next track" ? "Skipped." : "Back one."
+    switch source {
+    case .chrome:
+      let hit = await Browser.everyTab(video(command == "pause" ? "pause" : command == "play" ? "play" : command == "next track" ? "next" : "previous"))
+      if hit, command == "pause" { paused = .chrome }
+      return hit ? (true, back) : (true, "Nothing's playing in Chrome.")
+    case .music, .spotify:
+      let app = source == .music ? "Music" : "Spotify"
+      guard NSWorkspace.shared.runningApplications.contains(where: { $0.localizedName == app }) else {
+        return (true, "\(app) isn't open.")
+      }
+      _ = await tell(app, command)
+      if command == "pause" { paused = source }
+      return (true, back)
+    case .system:
+      mediaKey(command == "next track" ? 17 : command == "previous track" ? 18 : 16)
+      return (true, back)
+    }
+  }
+
+  @MainActor
+  private static func act(_ command: String, _ what: String = "") async -> (ok: Bool, said: String) {
+    // What they named wins over what happens to be playing.
+    if let source = named(what) { return await only(source, command) }
     switch command {
     case "pause":
       if await appPlaying("Music") { _ = await tell("Music", "pause"); paused = .music; return (true, "Paused.") }

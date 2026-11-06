@@ -40,10 +40,10 @@ enum Jobs {
   static func run(_ job: Job, done: @escaping (Bool, String) -> Void) {
     switch job.kind {
     case "music.play": MainActor.assumeIsolated { Music.start(job.args["what"] ?? "", playlistOnly: job.args["playlist"] == "yes", done: done) }
-    case "music.pause": MainActor.assumeIsolated { Player.transport("pause", done: done) }
-    case "music.resume": MainActor.assumeIsolated { Player.transport("play", done: done) }
-    case "music.next": MainActor.assumeIsolated { Player.transport("next track", done: done) }
-    case "music.previous": MainActor.assumeIsolated { Player.transport("previous track", done: done) }
+    case "music.pause": MainActor.assumeIsolated { Player.transport("pause", what: job.args["what"] ?? "", done: done) }
+    case "music.resume": MainActor.assumeIsolated { Player.transport("play", what: job.args["what"] ?? "", done: done) }
+    case "music.next": MainActor.assumeIsolated { Player.transport("next track", what: job.args["what"] ?? "", done: done) }
+    case "music.previous": MainActor.assumeIsolated { Player.transport("previous track", what: job.args["what"] ?? "", done: done) }
     case "music.shuffle": Music.simple("set shuffle enabled to true\n  if player state is not playing then play", spoken: "Shuffling.", done: done)
     case "volume.up": Music.volume(by: 12, done: done)
     case "volume.down": Music.volume(by: -12, done: done)

@@ -24,6 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   var voice = Voice()
   let agent = Agent.shared
   var status: NSStatusItem!
+  /** The window opening Grove from Finder shows: modes. */
+  var home: Home!
 
   /** What ⌘K captured, held until the answer comes back. */
   var captured: Captured?
@@ -46,6 +48,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     Log.say("launch: accessibility \(AXIsProcessTrusted() ? "granted" : "not granted"), screen recording \(CGPreflightScreenCaptureAccess() ? "granted" : "not granted"), signed in \(account.session != nil)")
 
     notch = Notch(look: look)
+    home = MainActor.assumeIsolated { Home(look: look) }
+    MainActor.assumeIsolated {
+      home.onDone = { [weak self] said in self?.notch.show("done", ["title": said, "text": "", "ok": true], pin: false, closeAfter: 2.5) }
+    }
     link = Link(account: account)
     shortcut = Shortcut()
 
@@ -58,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       let changedColour = incoming.colour != nil && incoming.colour != self.look.colour
       self.look.apply(incoming)
       self.notch.setLook(self.look)
+      MainActor.assumeIsolated { self.home.setLook() }
       if changedColour { self.notch.show("synced", ["label": self.look.colourLabel], pin: false, closeAfter: 2.2) }
       self.refreshMenu()
     }
@@ -176,6 +183,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidBecomeActive(_ notification: Notification) { refreshMenu() }
 
+  /**
+    Opened again from Finder, Spotlight or Launchpad while already running,
+    which before did nothing visible at all. It toggles the Grove window.
+  */
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    MainActor.assumeIsolated { home.toggle() }
+    return false
+  }
+
+  @objc private func openHome() { MainActor.assumeIsolated { home.show() } }
+
+  /** A mode, started or ended by name: in code, with no model asked what "study mode" meant. */
+  private func runMode(_ start: Bool, _ mode: Mode, said: String, reply: ((Bool, String, [String: String]) -> Void)? = nil) {
+    Log.say("mode: \(said.prefix(40)) → \(start ? "start" : "end") \(mode.name)")
+    Recent.said(said, did: "\(start ? "Started" : "Ended") \(mode.name) mode", from: reply != nil)
+    Task { @MainActor in
+      let line = start ? await Modes.start(mode) : await Modes.stop(mode)
+      self.notch.show("done", ["title": line, "text": "", "ok": true], pin: false, closeAfter: 2.5)
+      reply?(true, line, ["state": "done"])
+    }
+  }
+
   @objc private func openURL(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
     guard let text = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue, let url = URL(string: text) else { return }
     if url.scheme == "grove-mac" { account.handle(url) }
@@ -233,7 +262,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       if agent.running { agent.stop() }
       Recent.said(instruction, did: "Stopped everything")
       Log.say("ask: \(instruction.prefix(40)) → stopped everything\(busy ? "" : " (nothing was going)")")
-      notch.show("done", ["title": busy ? "Stopped" : "Okay", "text": busy ? "Okay, stopped." : "No worries.", "ok": true], pin: false, closeAfter: 2)
+      notch.show("done", ["title": busy ? "Stopped" : "Okay", "text": "", "ok": true], pin: false, closeAfter: 2.5)
+      Say.manner = look.manner
+      Task { @MainActor in
+        let line = await Say.line(busy ? "Stopped what I was doing, as they asked." : "Nothing was going on; no harm done.", within: 1.5)
+        self.notch.show("done", ["title": busy ? "Stopped" : "Okay", "text": line, "ok": true], pin: false, closeAfter: 2.5)
+      }
+      return
+    }
+    if let hit = MainActor.assumeIsolated({ Modes.heard(instruction) }) {
+      runMode(hit.start, hit.mode, said: instruction)
       return
     }
     // While the Mac is reading aloud, "stop" or "pause" is about the reading.
@@ -281,7 +319,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Recent.said(instruction, did: "Music: \(action) \(what)")
         let kinds = ["pause": "music.pause", "resume": "music.resume", "next": "music.next", "previous": "music.previous", "louder": "volume.up", "quieter": "volume.down", "shuffle": "music.shuffle"]
         let kind = kinds[action] ?? "music.play"
-        self.run(Job(id: UUID().uuidString, kind: kind, args: kind == "music.play" ? ["what": what, "say": say] : ["say": say], fromPhone: false)) { _, _, _ in }
+        // `what` rides with every action, not just play: "pause YouTube"
+        // paused Apple Music because the word never left this line.
+        self.run(Job(id: UUID().uuidString, kind: kind, args: ["what": what, "say": say], fromPhone: false)) { _, _, _ in }
       case .act(let goal, let say):
         Recent.said(instruction, did: "On Chrome: \(goal)")
         self.runAgent(Job(id: UUID().uuidString, kind: "agent.start", args: ["goal": goal, "say": say], fromPhone: false)) { _, _, _ in }
@@ -548,6 +588,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       reply(true, "Stopped.", ["state": "stopped"])
       return
     }
+    if job.kind == "mode.start" || job.kind == "mode.stop" {
+      let name = job.args["name"] ?? ""
+      guard let mode = MainActor.assumeIsolated({ Modes.all.first { $0.name.lowercased() == name.lowercased() } }) else {
+        reply(false, "There's no mode called \(name) on your Mac.", [:]); return
+      }
+      runMode(job.kind == "mode.start", mode, said: name, reply: reply)
+      return
+    }
+    // The phone writes its own goal ("Start study mode on the Mac"); a mode named in full is run, not browsed for.
+    if job.kind == "agent.start", let hit = MainActor.assumeIsolated({ Modes.inGoal(job.args["goal"] ?? "") }) {
+      runMode(hit.start, hit.mode, said: job.args["goal"] ?? "", reply: reply)
+      return
+    }
     if job.kind.hasPrefix("agent.") { runAgent(job, reply: reply); return }
     if job.kind == "music.now" {
       Task { @MainActor in
@@ -605,11 +658,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       if job.fromPhone || job.kind.hasPrefix("music.") || job.kind.hasPrefix("open.") {
         // Grove's own line when it had one ("Some Calvin Harris. You've earned it."),
         // the plain receipt when it did not, or when it went wrong.
-        let said = ok ? (job.args["say"].flatMap { $0.isEmpty ? nil : $0 } ?? spoken) : spoken
         Recent.ended(ok ? spoken : "failed: \(spoken)")
         if !job.fromPhone { self.link.news(what: "On the Mac: \(title)", state: ok ? "done" : "failed", said: spoken) }
-        self.notch.show("done", ["title": title, "text": said, "ok": ok], pin: false, closeAfter: said == spoken ? 2.8 : 4)
-        if ok && ["music.play", "music.next", "music.previous"].contains(job.kind) { self.reactToSong(said: said) }
+        // Grove's own line when the decision wrote one; otherwise the receipt,
+        // worded the way Grove would say it now rather than "Paused." every time.
+        let own = ok ? job.args["say"].flatMap { $0.isEmpty ? nil : $0 } : nil
+        Say.manner = self.look.manner
+        Task { @MainActor in
+          var said = spoken
+          if let own { said = own } else { said = await Say.line(spoken, about: title, within: 1.8) }
+          self.notch.show("done", ["title": title, "text": said, "ok": ok], pin: false, closeAfter: 4)
+          if ok && ["music.play", "music.next", "music.previous"].contains(job.kind) { self.reactToSong(said: said) }
+        }
       }
       reply(ok, spoken, [:])
     }
@@ -657,6 +717,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let first = said ?? ["agent.start": "Opening Chrome", "agent.message": "Finding them in Contacts"][job.kind] ?? "Carrying on"
     notch.show("job", ["title": goal.isEmpty ? "Carrying on" : goal, "from": from, "steps": [first], "at": 0], pin: true)
     agent.manner = look.manner
+    Say.manner = look.manner
     if job.fromPhone && job.kind == "agent.start" { Recent.said(goal, did: "On Chrome: \(goal)", from: true) }
     agent.recent = Recent.text
     // The phone waits on an answer and the job may be a whole game of chess,
@@ -677,11 +738,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     Task { @MainActor in
       // A run started here can take its time: someone is watching the notch.
       // The phone is waiting on an answer, so its runs check in sooner.
-      let result: AgentResult
+      let raw: AgentResult
       switch job.kind {
-      case "agent.start": result = await self.agent.start(goal: goal, budget: 240)
-      case "agent.message": result = await self.agent.message(to: job.args["to"] ?? "", text: job.args["text"] ?? "", app: job.args["app"] ?? "messages")
-      default: result = await self.agent.resume(task: job.args["task"] ?? "", answer: job.args["answer"] ?? "", approve: job.args["approve"] == "yes")
+      case "agent.start": raw = await self.agent.start(goal: goal, budget: 240)
+      case "agent.message": raw = await self.agent.message(to: job.args["to"] ?? "", text: job.args["text"] ?? "", app: job.args["app"] ?? "messages")
+      default: raw = await self.agent.resume(task: job.args["task"] ?? "", answer: job.args["answer"] ?? "", approve: job.args["approve"] == "yes")
+      }
+      // A line written in code is worded before anyone hears it; the model's
+      // own (a done summary, a question it asked) is said as it wrote it.
+      var result = raw
+      if raw.plain {
+        result = AgentResult(state: raw.state, spoken: await Say.line(raw.spoken, about: goal), task: raw.task, detail: raw.detail)
       }
       switch result.state {
       case "ask" where !job.fromPhone, "confirm" where !job.fromPhone:
@@ -708,7 +775,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           found is not.
         */
         let answer = result.spoken.count > 280
-        let read = min(10, 2.5 + Double(result.spoken.count) * 0.04)
+        // Long enough to read once, not to sit on: the card then fades to the greeting.
+        let read = min(6, 2.5 + Double(result.spoken.count) * 0.025)
         self.notch.show("done", ["title": "Done", "text": result.spoken, "ok": result.state == "done"],
                         pin: true, closeAfter: answer ? nil : read, thenHome: !answer)
         if result.state == "done" { self.react(to: "They asked for: \(goal)\nIt is done.", said: result.spoken) }
@@ -790,7 +858,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     that is already up (the song it just played has its own).
   */
   private func reactToPhone(heard: String, replied: String) {
-    guard Gifs.on, !replied.isEmpty, Date().timeIntervalSince(lastGif) > 60, !Self.screenLocked else { return }
+    guard Gifs.on, !replied.isEmpty, Date().timeIntervalSince(lastGif) > 20, !Self.screenLocked else { return }
     react(to: "They said to you on their phone: \(heard)", said: replied)
   }
 
@@ -874,6 +942,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     menu.addItem(.separator())
     menu.addItem(item("Show the log", #selector(showLog)))
+    menu.addItem(item("Modes…", #selector(openHome), key: ","))
+    menu.addItem(.separator())
     menu.addItem(item("Quit Grove", #selector(quit), key: "q"))
     status.menu = menu
   }
