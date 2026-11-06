@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     Log.trim()
+    installEditMenu()
     // Asked once, so Grove is in the Screen Recording list to be switched on.
     if !CGPreflightScreenCaptureAccess() && !UserDefaults.standard.bool(forKey: "grove.asked.screen") {
       UserDefaults.standard.set(true, forKey: "grove.asked.screen")
@@ -51,6 +52,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     home = MainActor.assumeIsolated { Home(look: look) }
     MainActor.assumeIsolated {
       home.onDone = { [weak self] said in self?.notch.show("done", ["title": said, "text": "", "ok": true], pin: false, closeAfter: 2.5) }
+      // Chosen on the Mac: paint everything here at once, then tell the phone,
+      // which keeps it and comes back with the same answer. Local first, so it
+      // recolours as they press and whether or not the phone is there.
+      home.onColour = { [weak self] key, label, stops in
+        guard let self else { return }
+        self.look.apply(LookUpdate(colour: key, label: label, stops: stops))
+        self.notch.setLook(self.look)
+        MainActor.assumeIsolated { self.home.setLook() }
+        self.link.colour(key)
+        self.refreshMenu()
+      }
     }
     link = Link(account: account)
     shortcut = Shortcut()
@@ -559,14 +571,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     case "listen":
       AppDelegate.listensItself = (message["on"] as? Bool) ?? true
       showSettings()
-    case "shared":
-      // Empty means Grove takes ⌘K everywhere, which is a thing somebody may
-      // well want; it is not the same as never having been set, so it is
-      // written rather than left to fall back to the default.
-      Shortcut.shared = ((message["apps"] as? String) ?? "")
-        .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-      Log.say("⌘K: shared with \(Shortcut.shared.isEmpty ? "nothing — Grove takes it everywhere" : Shortcut.shared.joined(separator: ", "))")
-      showSettings()
     case "permissions":
       Permission.requestAll { [weak self] in self?.showSettings() }
     case "signin":
@@ -816,7 +820,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if age < 180 || (now.signature == last.signature && age < 1200) { return }
       }
       remarked = (Date(), now.signature)
-      guard let said = await Thinking.remark(now: now.text, manner: look.manner, about: look.about, recent: Recent.text) else { return }
+      // A paused song is not what they are doing, and a playing one only is
+      // when they are in their music app: otherwise the hello is about what is
+      // in front of them, not a song they put on an hour ago.
+      var seen = now
+      if !now.playing || now.app != "Music" { seen.song = now.playing && now.app.isEmpty ? now.song : "" }
+      guard let said = await Thinking.remark(now: seen.text, manner: look.manner, about: look.about, recent: Recent.text) else { return }
       Log.say("remark: \(said.line) [\(said.gif)]")
       notch.send("remark", ["text": said.line])
       react(said.gif)
@@ -972,7 +981,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       "missing": missing,
       "gifs": Gifs.on,
       "listen": AppDelegate.listensItself,
-      "shared": Shortcut.shared.joined(separator: ", "),
     ], pin: true)
   }
 
@@ -996,6 +1004,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     UserDefaults.standard.set(option, forKey: "grove.shortcut.option")
     refreshMenu()
   }
+  /**
+    An Edit menu, so ⌘V works.
+
+    Grove has no Dock icon and no menu bar of its own (LSUIElement), and
+    nothing ever set `NSApp.mainMenu` — which is where the *key equivalents*
+    for Cut, Copy, Paste and Select All live. Without it those shortcuts are
+    not bound to anything, so ⌘V did nothing in every text field in the app:
+    the notch's ask box, and every link field in the Grove window. Typing out
+    a URL by hand is the opposite of what that window is for.
+
+    The menu is never shown — there is no menu bar to show it in — and that
+    is fine. It exists to carry the shortcuts. The selectors are the standard
+    ones, which AppKit routes to whatever has focus, so this works for the
+    web views and for anything added later without either knowing about it.
+  */
+  private func installEditMenu() {
+    let edit = NSMenu(title: "Edit")
+    for (title, selector, key) in [
+      ("Undo", Selector(("undo:")), "z"),
+      ("Redo", Selector(("redo:")), "Z"),
+      ("Cut", #selector(NSText.cut(_:)), "x"),
+      ("Copy", #selector(NSText.copy(_:)), "c"),
+      ("Paste", #selector(NSText.paste(_:)), "v"),
+      ("Select All", #selector(NSText.selectAll(_:)), "a"),
+    ] {
+      let item = NSMenuItem(title: title, action: selector, keyEquivalent: key.lowercased())
+      if key != key.lowercased() { item.keyEquivalentModifierMask = [.command, .shift] }
+      edit.addItem(item)
+    }
+    let holder = NSMenuItem()
+    holder.submenu = edit
+    let main = NSMenu()
+    main.addItem(holder)
+    NSApp.mainMenu = main
+  }
+
   @objc private func showLog() { NSWorkspace.shared.open(Log.url) }
   @objc private func quit() { NSApp.terminate(nil) }
 }

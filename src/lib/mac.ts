@@ -35,6 +35,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import * as SecureStore from 'expo-secure-store';
 
 import { lightSelection } from './lightModel';
+import { loadPersona, savePersona } from './persona';
 import * as auth from './noctusAuth';
 
 const SECRET_KEY = 'grove.mac.secret';
@@ -126,6 +127,32 @@ function heard(m: Record<string, unknown>) {
     if (nid) heardNews = [...heardNews, nid].slice(-50);
     noteMacWork({ what: news.what, state: news.state, said: news.said, task: news.task });
     newsListeners.forEach((listener) => listener(news));
+  } else if (m.t === 'colour' && typeof m.key === 'string') {
+    /*
+     * A colour chosen on the Mac.
+     *
+     * It has only ever gone the other way — the phone sends its colour and
+     * the Mac paints itself with it — because the phone is where Settings
+     * lives. But the Mac is where somebody sits with a keyboard, and the
+     * field is the one thing both ends share, so a pair that disagree about
+     * it look like two apps.
+     *
+     * Kept straight away, and `sentLook` is cleared so the next send is not
+     * skipped as "nothing changed": the phone's copy really did change, and
+     * the Mac needs to hear it confirmed rather than assume.
+     */
+    const key = m.key;
+    void (async () => {
+      try {
+        const persona = await loadPersona();
+        if (persona.sky === key) return;
+        await savePersona({ ...persona, sky: key });
+        sentLook = null;
+        colourListeners.forEach((listener) => listener(key));
+      } catch {
+        // A colour that could not be saved is not worth a failure anywhere.
+      }
+    })();
   } else if (m.t === 'heard' || m.t === 'fact') {
     const heard: MacHeard = m.t === 'heard'
       ? { said: String(m.said ?? ''), replied: String(m.replied ?? '') }
@@ -332,6 +359,21 @@ export function onMacHeard(listener: (heard: MacHeard) => void): () => void {
   heardListeners.add(listener);
   return () => {
     heardListeners.delete(listener);
+  };
+}
+
+/**
+ * Told when the Mac picks a colour, so a screen showing it can follow.
+ *
+ * Saved either way; this is only for anything already on screen. Without it
+ * the phone has the new colour and goes on drawing the old one until the next
+ * time it reads the persona, which looks like the change not having worked.
+ */
+const colourListeners = new Set<(key: string) => void>();
+export function onMacColour(listener: (key: string) => void): () => void {
+  colourListeners.add(listener);
+  return () => {
+    colourListeners.delete(listener);
   };
 }
 

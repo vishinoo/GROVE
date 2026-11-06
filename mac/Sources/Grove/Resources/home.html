@@ -1,0 +1,478 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Grove</title>
+<!--
+  The Grove window (Home.swift). Drawn to match Settings on the phone: glass
+  cards on the phone's own colours, grey section headings, white pill
+  buttons, green switches, coloured tiles for each kind of thing.
+
+  Everything saves as it is typed, the way the phone's settings do. There is
+  no Save button to forget.
+-->
+<style>
+:root {
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
+  --a: #061C26; --b: #1F7A8C; --c: #C9EDE6;
+  --ink: #FFFFFF;
+  --soft: rgba(255,255,255,0.62);
+  --faint: rgba(255,255,255,0.42);
+  --line: rgba(255,255,255,0.14);
+  --card: rgba(255,255,255,0.075);
+  --well: rgba(8,10,16,0.32);
+  --green: #4CD964;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; color: var(--ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+/*
+  The same field as the notch and the phone, over black.
+
+  It was a gradient painted once, which is a reasonable likeness and reads as
+  a different app the moment you have both open. The field is the one thing
+  every Grove surface shares, and it is already driven by the colours the
+  phone sends, so the window follows the phone's colour without anything new
+  being plumbed.
+*/
+body { background: #000; -webkit-user-select: none; user-select: none; }
+#gl { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; opacity: 0; transition: opacity 500ms ease; }
+#gl.on { opacity: 1; }
+/* A little weight under the cards so text stays readable wherever the field is bright. */
+.under { position: fixed; inset: 0; z-index: 1; pointer-events: none; background: linear-gradient(180deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.3) 40%, rgba(0,0,0,0.5) 100%); }
+main { position: relative; z-index: 2; max-width: 640px; margin: 0 auto; padding: 56px 28px 64px; }
+
+header { margin-bottom: 30px; }
+header h1 { font: 700 34px/1.1 var(--display); letter-spacing: -0.01em; margin: 0 0 8px; }
+header p { margin: 0; color: var(--soft); font-size: 15px; line-height: 1.45; }
+
+.back { display: inline-flex; align-items: center; gap: 6px; color: var(--soft); font: 500 15px var(--sans); background: none; border: 0; padding: 0; cursor: pointer; margin-bottom: 18px; }
+.back:hover { color: var(--ink); }
+
+h2 { font: 600 15px var(--sans); color: rgba(255,255,255,0.78); margin: 30px 4px 12px; letter-spacing: 0.005em; }
+
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 26px; overflow: hidden; -webkit-backdrop-filter: blur(24px) saturate(140%); backdrop-filter: blur(24px) saturate(140%); }
+.row { display: flex; align-items: center; gap: 16px; padding: 16px 20px; min-height: 68px; }
+.row + .row, .empty + .row { border-top: 1px solid var(--line); }
+.row.press { cursor: pointer; }
+.row.press:hover { background: rgba(255,255,255,0.04); }
+.grow { flex: 1; min-width: 0; }
+.title { font: 600 17px/1.25 var(--sans); }
+.sub { color: var(--soft); font-size: 14px; line-height: 1.35; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.label { font: 400 16px var(--sans); }
+.note { color: var(--soft); font-size: 14px; line-height: 1.5; padding: 16px 20px; }
+.note b { color: var(--ink); font-weight: 600; }
+
+.tile { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 12px; display: grid; place-items: center; color: #fff; font: 700 18px var(--display); box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.25); }
+.tile svg { width: 22px; height: 22px; }
+.k-playlist { background: linear-gradient(180deg, #FF5A7A, #F2365B); }
+.k-spotify { background: linear-gradient(180deg, #35D86B, #1DB954); }
+.k-video { background: linear-gradient(180deg, #FF4B4B, #E01E1E); }
+.k-site { background: linear-gradient(180deg, #5AC8FA, #2D8CF0); }
+.k-app { background: linear-gradient(180deg, #8E8E93, #636366); }
+.k-mode { background: linear-gradient(160deg, var(--b), color-mix(in srgb, var(--a) 70%, #000)); }
+
+.pill { border: 0; border-radius: 999px; background: #FFFFFF; color: #0B0C12; font: 600 15px var(--sans); padding: 10px 22px; cursor: pointer; white-space: nowrap; }
+.pill:hover { background: #ECECEC; }
+.pill.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.28); }
+.pill.ghost:hover { background: rgba(255,255,255,0.08); }
+.pill.small { font-size: 13.5px; padding: 7px 14px; }
+.pill:disabled { opacity: 0.4; cursor: default; }
+
+.round { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 50%; border: 0; background: transparent; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.22); color: var(--soft); font: 400 18px/1 var(--sans); cursor: pointer; display: grid; place-items: center; padding: 0; }
+.round:hover { color: var(--ink); background: rgba(255,255,255,0.08); }
+
+.on { display: inline-flex; align-items: center; gap: 7px; color: var(--soft); font-size: 13.5px; margin-top: 4px; }
+.swatch { display: flex; gap: 8px; align-items: center; }
+.swatch i { width: 15px; height: 15px; border-radius: 5px; display: block; box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.3); }
+.row.press.now { background: rgba(255,255,255,0.07); }
+.tick { color: var(--green); font: 600 17px var(--sans); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px rgba(76,217,100,0.6); }
+
+input[type=text] { width: 100%; background: var(--well); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); font: 400 15.5px var(--sans); padding: 11px 14px; outline: none; -webkit-user-select: text; user-select: text; }
+input[type=text]::placeholder { color: var(--faint); }
+input[type=text]:focus { border-color: rgba(255,255,255,0.4); }
+.name input { font: 600 17px var(--sans); background: transparent; border: 0; padding: 0; }
+.name input:focus { border: 0; }
+
+.kind { appearance: none; -webkit-appearance: none; background: rgba(255,255,255,0.08); border: 1px solid var(--line); color: var(--ink); font: 500 13px var(--sans); border-radius: 999px; padding: 6px 12px; outline: none; cursor: pointer; }
+
+.switch { position: relative; width: 58px; height: 34px; flex: 0 0 58px; border-radius: 999px; background: rgba(255,255,255,0.18); cursor: pointer; transition: background 160ms ease; border: 0; padding: 0; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 28px; height: 28px; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: transform 180ms cubic-bezier(.3,.9,.3,1); }
+.switch.yes { background: var(--green); }
+.switch.yes::after { transform: translateX(24px); }
+
+.adds { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { border: 0; border-radius: 999px; background: rgba(255,255,255,0.1); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); font: 500 13.5px var(--sans); padding: 8px 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
+.chip:hover { background: rgba(255,255,255,0.18); }
+.chip i { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+
+.danger { color: #FF6B6B; background: none; border: 0; font: 500 15px var(--sans); cursor: pointer; padding: 0; }
+.footer { display: flex; align-items: center; justify-content: space-between; margin-top: 28px; padding: 0 4px; }
+.empty { padding: 26px 20px; color: var(--soft); font-size: 15px; line-height: 1.5; }
+.toast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 20px); opacity: 0; background: rgba(20,24,26,0.92); border: 1px solid var(--line); border-radius: 999px; padding: 10px 18px; font-size: 14px; transition: all 220ms ease; pointer-events: none; -webkit-backdrop-filter: blur(20px); }
+.toast.up { opacity: 1; transform: translate(-50%, 0); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div class="under"></div>
+<main>
+  <section id="list">
+    <header>
+      <h1>Modes</h1>
+      <p>One word that sets the room up. A playlist, a video in the background, the sites and apps you work in, opened together and closed together.</p>
+    </header>
+    <h2>Your modes</h2>
+    <div class="card" id="modes"></div>
+    <h2>Colour</h2>
+    <div class="card" id="colours"></div>
+    <div class="card" style="margin-top:12px"><div class="note">Changing it here changes it on your phone too. It is the same field on both, so they stay a matching pair.</div></div>
+
+    <h2>Saying it</h2>
+    <div class="card"><div class="note">Say <b>"study mode"</b> to ⌘K or to Grove on your phone and it starts. <b>"End study mode"</b> closes what it opened: its own browser window, the apps it launched, and the music it put on. Nothing you already had open is touched.</div></div>
+  </section>
+
+  <section id="edit" hidden>
+    <button class="back" id="back">‹ Modes</button>
+    <h2 style="margin-top:6px">Name</h2>
+    <div class="card"><div class="row name"><div class="tile k-mode" id="initial">S</div><div class="grow"><input type="text" id="name" placeholder="Study" spellcheck="false"></div></div></div>
+
+    <h2>What it opens</h2>
+    <div class="card" id="steps"></div>
+    <div class="card" style="margin-top:12px"><div class="row"><div class="adds">
+      <button class="chip" data-add="playlist"><i class="k-playlist"></i>Playlist</button>
+      <button class="chip" data-add="video"><i class="k-video"></i>YouTube video</button>
+      <button class="chip" data-add="site"><i class="k-site"></i>Website</button>
+      <button class="chip" data-add="app"><i class="k-app"></i>App</button>
+      <button class="chip" id="tabs">Add the tabs open in Chrome</button>
+    </div></div></div>
+
+    <h2>When it runs</h2>
+    <div class="card">
+      <div class="row"><div class="grow"><div class="label">Tuck the browser window away</div><div class="sub">Minimised once it has loaded, so a video plays without being in front</div></div><button class="switch" id="tuck"></button></div>
+      <div class="row"><div class="grow"><div class="label">Quit the apps it opened when it ends</div><div class="sub">Apps that were already open stay open</div></div><button class="switch" id="quit"></button></div>
+    </div>
+
+    <div class="footer">
+      <button class="danger" id="delete">Delete mode</button>
+      <button class="pill" id="run">Start</button>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+<datalist id="appnames"></datalist>
+
+<script>
+const post = (m) => window.webkit && window.webkit.messageHandlers.grove.postMessage(m);
+const $ = (id) => document.getElementById(id);
+let modes = [];
+let editing = null;
+let saveTimer = null;
+
+const KINDS = {
+  playlist: { label: 'Playlist', hint: 'A playlist in Music, or a Spotify link' },
+  video: { label: 'YouTube', hint: 'A YouTube link, or what to search for' },
+  site: { label: 'Website', hint: 'canvas.ualberta.ca' },
+  app: { label: 'App', hint: 'Notion' },
+};
+const ICONS = {
+  playlist: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 17.5a2.5 2.5 0 1 1-2-2.45V6.2l11-2.2v11.5a2.5 2.5 0 1 1-2-2.45V7.3l-7 1.4v8.8z"/></svg>',
+  video: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>',
+  site: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.4 3.8 5.2 3.8 8.5s-1.2 6.1-3.8 8.5c-2.6-2.4-3.8-5.2-3.8-8.5S9.4 5.9 12 3.5z"/></svg>',
+  app: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/></svg>',
+  // The clipboard, matching the notch's own icon set.
+  paste: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4" width="10" height="16" rx="2.5"/><path d="M9.5 4V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1"/></svg>',
+};
+/* The same four as the phone (field-shader.ts). Changing one changes both. */
+const COLOURS = [
+  { key: 'tide', label: 'Tide', blurb: 'Deep sea, teal and seafoam', c: ['#061C26', '#1F7A8C', '#C9EDE6', '#E3B868'] },
+  { key: 'ember', label: 'Ember', blurb: 'Wildfire at dusk', c: ['#2A0C07', '#C9431C', '#FBD29A', '#8E2A4A'] },
+  { key: 'moss', label: 'Moss', blurb: 'Forest floor and lichen', c: ['#0B1710', '#2E6A45', '#DCE6B8', '#A8873A'] },
+  { key: 'aurora', label: 'Aurora', blurb: 'Northern lights', c: ['#060A1E', '#22B394', '#D2F3E6', '#7B4FD4'] },
+];
+let colour = 'tide';
+
+function drawColours() {
+  $('colours').innerHTML = COLOURS.map((c) => `
+    <div class="row press ${c.key === colour ? 'now' : ''}" data-colour="${c.key}">
+      <div class="swatch">${c.c.map((hex) => `<i style="background:${hex}"></i>`).join('')}</div>
+      <div class="grow"><div class="title">${c.label}</div><div class="sub">${c.blurb}</div></div>
+      ${c.key === colour ? '<span class="tick">✓</span>' : ''}
+    </div>`).join('');
+  $('colours').querySelectorAll('[data-colour]').forEach((el) => (el.onclick = () => {
+    colour = el.dataset.colour;
+    const picked = COLOURS.find((c) => c.key === colour);
+    // Here first, so the window recolours as they press rather than when the
+    // phone gets round to answering — and the same if the phone is not there.
+    S.look = { stops: picked.c, speed: S.look.speed, warp: S.look.warp };
+    const r = document.documentElement.style;
+    r.setProperty('--a', picked.c[0]); r.setProperty('--b', picked.c[1]); r.setProperty('--c', picked.c[2]);
+    drawColours();
+    post({ t: 'colour', key: colour });
+  }));
+}
+
+const tileClass = (s) => s.kind === 'playlist' && /spotify/i.test(s.value) ? 'k-spotify' : `k-${s.kind}`;
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
+
+function toast(text) {
+  const t = $('toast');
+  t.textContent = text;
+  t.classList.add('up');
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => t.classList.remove('up'), 2600);
+}
+
+function summary(m) {
+  const filled = m.steps.filter((s) => s.value.trim());
+  if (!filled.length) return 'Nothing in it yet';
+  return filled.map((s) => s.kind === 'site' ? s.value.replace(/^https?:\/\/(www\.)?/, '').split('/')[0] : s.value).join(' · ');
+}
+
+function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => post({ t: 'save', modes }), 250);
+}
+
+function drawList() {
+  const box = $('modes');
+  if (!modes.length) {
+    box.innerHTML = '<div class="empty">No modes yet. Make one for studying, deep work, the gym or winding down, and start it with a word.</div>';
+  } else {
+    box.innerHTML = modes.map((m) => `
+      <div class="row press" data-open="${m.id}">
+        <div class="tile k-mode">${esc((m.name || '?').trim().charAt(0).toUpperCase() || '?')}</div>
+        <div class="grow">
+          <div class="title">${esc(m.name || 'Untitled')}</div>
+          ${m.running ? '<div class="on"><span class="dot"></span>On now</div>' : `<div class="sub">${esc(summary(m))}</div>`}
+        </div>
+        <button class="pill ${m.running ? 'ghost' : ''}" data-run="${m.id}">${m.running ? 'End' : 'Start'}</button>
+      </div>`).join('');
+  }
+  box.insertAdjacentHTML('beforeend', `
+    <div class="row press" id="new">
+      <div class="round" style="width:44px;height:44px;flex-basis:44px;border-radius:12px">+</div>
+      <div class="grow"><div class="title">New mode</div></div>
+    </div>`);
+  $('new').onclick = () => {
+    const m = { id: uid(), name: '', steps: [{ kind: 'playlist', value: '' }], tuck: true, quitApps: true, running: false };
+    modes.push(m);
+    open(m.id);
+    $('name').focus();
+  };
+  box.querySelectorAll('[data-open]').forEach((row) => (row.onclick = () => open(row.dataset.open)));
+  box.querySelectorAll('[data-run]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); run(b.dataset.run); }));
+}
+
+function current() { return modes.find((m) => m.id === editing); }
+
+function open(id) {
+  editing = id;
+  $('list').hidden = true;
+  $('edit').hidden = false;
+  drawEdit();
+  window.scrollTo(0, 0);
+}
+
+function drawEdit() {
+  const m = current();
+  if (!m) return close();
+  if (document.activeElement !== $('name')) $('name').value = m.name;
+  $('initial').textContent = (m.name || 'S').trim().charAt(0).toUpperCase() || 'S';
+  $('tuck').classList.toggle('yes', !!m.tuck);
+  $('quit').classList.toggle('yes', !!m.quitApps);
+  $('run').textContent = m.running ? 'End' : 'Start';
+  $('run').classList.toggle('ghost', !!m.running);
+  drawSteps();
+}
+
+function drawSteps() {
+  const m = current();
+  const box = $('steps');
+  if (!m.steps.length) {
+    box.innerHTML = '<div class="empty">Add a playlist, a video, a site or an app below.</div>';
+    return;
+  }
+  box.innerHTML = m.steps.map((s, i) => `
+    <div class="row" data-i="${i}">
+      <div class="tile ${tileClass(s)}">${ICONS[s.kind] || ''}</div>
+      <select class="kind" data-kind="${i}">
+        ${Object.entries(KINDS).map(([k, v]) => `<option value="${k}" ${k === s.kind ? 'selected' : ''}>${v.label}</option>`).join('')}
+      </select>
+      <div class="grow"><input type="text" data-value="${i}" value="${esc(s.value)}" placeholder="${esc(KINDS[s.kind]?.hint || '')}" spellcheck="false" ${s.kind === 'app' ? 'list="appnames"' : ''}></div>
+      ${s.kind === 'app' ? '' : `<button class="round" data-paste="${i}" title="Paste a link">${ICONS.paste}</button>`}
+      <button class="round" data-remove="${i}" title="Remove">×</button>
+    </div>`).join('');
+  box.querySelectorAll('[data-kind]').forEach((el) => (el.onchange = () => { m.steps[+el.dataset.kind].kind = el.value; drawSteps(); save(); }));
+  box.querySelectorAll('[data-value]').forEach((el) => (el.oninput = () => {
+    const s = m.steps[+el.dataset.value];
+    s.value = el.value;
+    el.closest('.row').querySelector('.tile').className = `tile ${tileClass(s)}`;
+    save();
+  }));
+  /*
+    A visible way to paste, next to the thing being pasted into.
+
+    ⌘V works now that the app has an Edit menu to hang it on, but a link is
+    the one thing in this window nobody types: it is copied from the browser,
+    and the gesture people reach for is a button they can see. It also reads
+    the clipboard directly, so it works the same whether or not the field
+    happens to have focus.
+  */
+  box.querySelectorAll('[data-paste]').forEach((el) => (el.onclick = async () => {
+    const i = +el.dataset.paste;
+    let text = '';
+    try { text = (await navigator.clipboard.readText()) || ''; } catch { text = ''; }
+    text = text.trim();
+    if (!text) return toast('Nothing on the clipboard.');
+    m.steps[i].value = text;
+    drawSteps();
+    save();
+    toast('Pasted.');
+  }));
+  box.querySelectorAll('[data-remove]').forEach((el) => (el.onclick = () => { m.steps.splice(+el.dataset.remove, 1); drawSteps(); save(); }));
+}
+
+function close() {
+  // A mode left with no name and nothing in it was a misclick on New.
+  modes = modes.filter((m) => m.name.trim() || m.steps.some((s) => s.value.trim()));
+  save();
+  editing = null;
+  $('edit').hidden = true;
+  $('list').hidden = false;
+  drawList();
+}
+
+function run(id) {
+  const m = modes.find((x) => x.id === id);
+  if (!m) return;
+  if (!m.running && !m.steps.some((s) => s.value.trim())) return toast('Add something for it to open first.');
+  clearTimeout(saveTimer);
+  post({ t: 'save', modes });
+  post({ t: m.running ? 'stop' : 'start', id });
+  toast(m.running ? `Ending ${m.name || 'it'}…` : `Starting ${m.name || 'it'}…`);
+}
+
+$('back').onclick = close;
+$('name').oninput = () => { const m = current(); m.name = $('name').value; $('initial').textContent = (m.name || 'S').trim().charAt(0).toUpperCase() || 'S'; save(); };
+$('tuck').onclick = () => { const m = current(); m.tuck = !m.tuck; drawEdit(); save(); };
+$('quit').onclick = () => { const m = current(); m.quitApps = !m.quitApps; drawEdit(); save(); };
+$('run').onclick = () => run(editing);
+$('delete').onclick = () => {
+  const m = current();
+  if (m.running) post({ t: 'stop', id: m.id });
+  modes = modes.filter((x) => x.id !== m.id);
+  post({ t: 'save', modes });
+  editing = null;
+  $('edit').hidden = true;
+  $('list').hidden = false;
+  drawList();
+};
+document.querySelectorAll('[data-add]').forEach((b) => (b.onclick = () => {
+  const m = current();
+  m.steps.push({ kind: b.dataset.add, value: '' });
+  drawSteps();
+  const inputs = $('steps').querySelectorAll('input');
+  inputs[inputs.length - 1]?.focus();
+}));
+$('tabs').onclick = () => post({ t: 'tabs', id: editing });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && editing) close();
+  if (e.key === 'w' && e.metaKey) post({ t: 'close' });
+});
+
+/* the field: the same shader as the notch and the phone */
+const S = { flow: 1, look: { stops: ['#061C26', '#1F7A8C', '#C9EDE6', '#0d1416'], speed: 1, warp: 1 } };
+  /* the field: the same shader as the phone */
+  const canvas = document.getElementById('gl');
+  const gl = canvas.getContext('webgl', { antialias: false, premultipliedAlpha: true });
+  if (gl) {
+    const FRAG = `precision highp float;
+uniform vec2 uRes; uniform float uT; uniform float uRT; uniform vec3 uC0; uniform vec3 uC1; uniform vec3 uC2; uniform vec3 uC3; uniform float uWarp;
+float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float noise(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f); return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y); }
+float fbm(vec2 p){ float v = 0.0; float a = 0.5; mat2 m = mat2(1.6, 1.2, -1.2, 1.6); for (int i = 0; i < 5; i++) { v += a * noise(p); p = m * p; a *= 0.5; } return v; }
+mat2 rot(float a){ float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }
+vec3 paint(vec2 p, float t){ vec2 q = vec2(fbm(p * 1.1 + vec2(0.0, t * 0.12)), fbm(p * 1.1 + vec2(5.2, 1.3) - t * 0.10)); vec2 r = vec2(fbm(p + uWarp * q + vec2(1.7, 9.2) + t * 0.15), fbm(p + uWarp * q + vec2(8.3, 2.8) - t * 0.13)); float f = fbm(p + uWarp * r); vec3 col = mix(uC0, uC1, smoothstep(0.18, 0.62, f)); col = mix(col, uC3, smoothstep(0.35, 0.75, r.y) * 0.7); col = mix(col, uC2, smoothstep(0.45, 0.95, length(q)) * 0.9); return col; }
+void main(){ vec2 frag = gl_FragCoord.xy; vec2 uv = (frag - 0.5 * uRes) / min(uRes.x, uRes.y); float t = uT; vec2 p = rot(0.5) * uv; p = vec2(p.x * 0.38 + t * 0.06, p.y * 1.5) * 1.6; vec3 col = paint(p, t); col *= 1.0 - 0.32 * dot(uv, uv); col += (hash(frag + fract(uRT) * 61.0) - 0.5) * 0.035; gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0); }`;
+    const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }'));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FRAG));
+    gl.linkProgram(prog); gl.useProgram(prog);
+    const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'a'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    const U = {}; ['uRes', 'uT', 'uRT', 'uC0', 'uC1', 'uC2', 'uC3', 'uWarp'].forEach((n) => (U[n] = gl.getUniformLocation(prog, n)));
+    const hex = (x) => [1, 3, 5].map((i) => parseInt(x.slice(i, i + 2), 16) / 255);
+    let C = S.look.stops.map(hex), clock = 0, last = performance.now(), flow = 1, speed = S.look.speed, warp = S.look.warp;
+    const frame = (now) => {
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      {
+        const k = Math.min(1, dt * 2.5), target = S.look.stops.map(hex);
+        C = C.map((c, i) => c.map((v, j) => v + (target[i][j] - v) * k));
+        speed += (S.look.speed - speed) * k; warp += (S.look.warp - warp) * k;
+        flow += (S.flow - flow) * Math.min(1, dt * 3);
+        clock += dt * speed * flow;
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
+        if (w > 0 && h > 0) {
+          if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+          gl.viewport(0, 0, w, h);
+          gl.uniform2f(U.uRes, w, h * 1.6); gl.uniform1f(U.uT, clock); gl.uniform1f(U.uRT, now / 1000);
+          gl.uniform3fv(U.uC0, C[0]); gl.uniform3fv(U.uC1, C[1]); gl.uniform3fv(U.uC2, C[2]); gl.uniform3fv(U.uC3, C[3]);
+          gl.uniform1f(U.uWarp, warp);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+        }
+      }
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  }
+
+window.grove = (msg) => {
+  const d = msg.d || {};
+  if (msg.t === 'state') {
+    if (d.look && d.look.stops && d.look.stops.length >= 3) {
+      const stops = d.look.stops;
+      const r = document.documentElement.style;
+      r.setProperty('--a', stops[0]); r.setProperty('--b', stops[1]); r.setProperty('--c', stops[2]);
+      // The field reads these every frame and eases towards them, so a colour
+      // changed on the phone arrives here as a drift rather than a jump.
+      S.look = { stops, speed: d.look.speed ?? 1, warp: d.look.warp ?? 1 };
+      document.getElementById('gl')?.classList.add('on');
+      if (d.look.colour) colour = d.look.colour;
+      drawColours();
+    }
+    // What is on screen wins over what came back: the box being typed into
+    // is newer than the copy that was saved a moment ago.
+    const local = new Map(modes.map((m) => [m.id, m]));
+    modes = d.modes.map((m) => editing === m.id && local.has(m.id) ? { ...local.get(m.id), running: m.running } : m);
+    if (editing && local.has(editing) && !modes.some((m) => m.id === editing)) modes.push(local.get(editing));
+    // Editing, only the switch that says whether it is on is redrawn: redrawing
+    // the rows would take the cursor out of the box being typed into.
+    if (editing) {
+      const m = current();
+      if (m) { $('run').textContent = m.running ? 'End' : 'Start'; $('run').classList.toggle('ghost', !!m.running); }
+    } else drawList();
+  } else if (msg.t === 'said') {
+    toast(d.text);
+  } else if (msg.t === 'tabs') {
+    const m = current();
+    if (!m) return;
+    if (!d.urls.length) return toast('No Chrome window is open.');
+    for (const url of d.urls) if (!m.steps.some((s) => s.value === url)) m.steps.push({ kind: /youtube\.com\/watch|youtu\.be\//.test(url) ? 'video' : 'site', value: url });
+    drawSteps();
+    save();
+    toast(`Added ${d.urls.length} tab${d.urls.length === 1 ? '' : 's'}.`);
+  } else if (msg.t === 'apps') {
+    $('appnames').innerHTML = d.names.map((n) => `<option value="${esc(n)}">`).join('');
+  }
+};
+post({ t: 'apps' });
+</script>
+</body>
+</html>

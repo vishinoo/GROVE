@@ -53,7 +53,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
 .more:hover { background: rgba(255,255,255,0.24); }
 .more i { display: block; width: 3px; height: 3px; border-radius: 50%; background: #FFFFFF; box-shadow: -5px 0 0 #FFFFFF, 5px 0 0 #FFFFFF; }
 .set { display: grid; gap: 2px; }
-.set .line { display: flex; align-items: center; gap: 10px; min-height: 34px; border-bottom: 1px solid rgba(255,255,255,0.12); }
+.set .line { display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
 .set .line:last-child { border-bottom: 0; }
 .set .line input { flex: 1; min-width: 0; background: rgba(8,10,16,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; color: #FFFFFF; font: 400 12.5px var(--sans); padding: 6px 10px; outline: none; -webkit-user-select: text; user-select: text; }
 .set .line input::placeholder { color: rgba(255,255,255,0.45); }
@@ -137,10 +137,18 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
   const setH = (n) => { panel.style.setProperty('--h', (n + S.notchH) + 'px'); size(); };
   // As tall as what is there, up to the mode's size: a short answer gets a
   // short card rather than floating above empty glass.
-  const fit = (max) => requestAnimationFrame(() => {
-    const last = body.lastElementChild;
-    if (last) setH(Math.min(max, last.offsetTop + last.offsetHeight + 16));
-  });
+  const fit = (max) => {
+    S.fitMax = max;
+    requestAnimationFrame(() => {
+      const last = body.lastElementChild;
+      if (last) setH(Math.min(max, last.offsetTop + last.offsetHeight + 16));
+    });
+  };
+  // Measured again whenever what is in the card changes size — text still
+  // laying out, a line starting to glide, an answer replacing a taller card —
+  // so a height taken at the wrong moment cannot stay: a three-line answer
+  // once sat over a card's worth of empty glass.
+  new ResizeObserver(() => { if (S.fitMax && panel.classList.contains('open')) fit(S.fitMax); }).observe(body);
 
   // Grove's remark on what they are doing stands in for the greeting for a few minutes.
   const remarkFresh = () => S.remark && Date.now() - S.remarkAt < 5 * 60 * 1000;
@@ -242,7 +250,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     const m = S.mode, d = S.data;
     S.flow = m === 'thinking' ? 2.6 : m === 'listening' ? 1.7 : m === 'job' ? 2.2 : 1;
     if (m === 'idle') {
-      setH(S.signedIn ? (S.phone ? 156 : 180) : 200);
+      if (!d.keep) setH(S.signedIn ? (S.phone ? 156 : 180) : 200);
       body.innerHTML = `
         <div class="row space"><span class="hello${remarkFresh() ? ' glide remark' : ''}">${esc(remarkFresh() ? S.remark : greeting())}</span><span class="small row" style="margin-right:34px;flex:none"><span class="dot ${S.phone ? 'on' : ''}"></span>${S.phone ? 'iPhone connected' : 'iPhone not connected'}</span></div>
         ${S.signedIn && !S.phone ? '<span class="small">Open Grove on your iPhone, signed in to Noctus with the same Google account, and it connects by itself.</span>' : ''}
@@ -252,6 +260,12 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
         <form class="ask" id="ask"><input id="ask-input" placeholder="Ask, or tell it to do something" autocomplete="off"><button class="mic" type="button" id="mic" aria-label="Speak"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button><button class="chip" type="submit">Ask</button></form>`;
       wireAsk();
       micOn();
+      // Come home from a finished card: the same size if the greeting fits,
+      // and only as much taller as it needs if it does not, never cut off.
+      if (d.keep) requestAnimationFrame(() => {
+        const last = body.lastElementChild, now = parseFloat(panel.style.getPropertyValue('--h')) - S.notchH || 0;
+        if (last) setH(Math.max(now, last.offsetTop + last.offsetHeight + 16));
+      });
     }
     if (m === 'listening') {
       setH(232);
@@ -276,6 +290,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
       micOn();
       fit(164);
     }
+    S.fitMax = 0;
     if (m === 'rewrite' || m === 'answer') {
       setH(m === 'rewrite' ? 236 : 220);
       // One row: reply in the same box as the first ask, the mic (or, for
@@ -315,7 +330,8 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     }
     if (m === 'done') {
       setH(110);
-      body.innerHTML = `<div class="row space"><span class="hello glide" style="font-size:18px;padding-right:12px">${esc(d.title)}</span><span class="small row" style="margin-right:34px;flex:none"><span class="dot ${d.ok ? 'on' : ''}"></span>${d.ok ? 'Done' : 'Didn’t work'}</span></div><div class="small scroll">${esc(plain(d.text))}</div>`;
+      body.innerHTML = `<div class="row space"><span class="hello glide" style="font-size:18px;padding-right:12px">${esc(d.title)}</span><span class="small row" style="margin-right:34px;flex:none"><span class="dot ${d.ok ? 'on' : ''}"></span>${d.ok ? 'Done' : 'Didn’t work'}</span></div><div class="small scroll">${esc(plain(d.text))}</div><form class="ask" id="ask" style="margin-top:12px"><input id="ask-input" placeholder="Ask something else" autocomplete="off"></form>`;
+      wireAsk();
       // A recipe needs the room; a receipt does not.
       fit(String(d.text || '').length > 280 ? 360 : 250);
     }
@@ -339,7 +355,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     }
     if (m === 'settings') {
       const missing = d.missing || [];
-      setH(356);
+      setH(372);
       body.innerHTML = `
         <div class="row space"><span class="label" style="margin-left:34px">Settings</span></div>
         <div class="set">
@@ -347,16 +363,12 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
           <div class="line"><span class="name">Noctus</span><span class="val">${d.signedIn ? esc(d.email || 'Signed in') : 'Not signed in'}</span>${d.signedIn ? '<button class="chip" data-act="signout">Sign out</button>' : '<button class="chip solid" data-act="signin">Sign in</button>'}</div>
           <div class="line"><span class="name">Shortcut</span><button class="chip ${d.option ? '' : 'solid'}" data-short="0">⌘K</button><button class="chip ${d.option ? 'solid' : ''}" data-short="1">⌥⌘K</button></div>
           <div class="line"><span class="name">Mic on with ⌘K</span><span class="val">Summoning Grove opens it; elsewhere, press the mic</span><button class="chip ${d.listen ? 'solid' : ''}" data-listen="1">On</button><button class="chip ${d.listen ? '' : 'solid'}" data-listen="0">Off</button></div>
-          <form class="line" id="shared-form"><span class="name">Apps that keep ⌘K</span><input id="shared" value="${esc(d.shared || '')}" placeholder="none — Grove takes it everywhere" autocomplete="off"><button class="chip" type="submit">Save</button></form>
           <div class="line"><span class="name">GIF reactions</span><span class="val">Pop-ups for songs, tasks, hellos</span><button class="chip ${d.gifs ? 'solid' : ''}" data-gifs="1">On</button><button class="chip ${d.gifs ? '' : 'solid'}" data-gifs="0">Off</button></div>
           <div class="line"><span class="name">Permissions</span><span class="val">${missing.length ? esc(missing.length + ' to allow') : 'All allowed'}</span>${missing.length ? '<button class="chip" data-act="permissions">Allow</button>' : ''}</div>
         </div>`;
-      fit(400);
+      fit(430);
       // Saved on Return or on Save, never per keystroke: a half-typed list is
       // a list, and writing it would share ⌘K with "Termin".
-      const form = document.getElementById('shared-form'), apps = document.getElementById('shared');
-      form?.addEventListener('submit', (e) => { e.preventDefault(); post({ t: 'shared', apps: apps.value }); });
-      apps?.addEventListener('focus', () => post({ t: 'focus' }));
     }
     if (m === 'synced') {
       setH(100);
@@ -402,7 +414,21 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
       document.documentElement.style.setProperty('--notch-h', S.notchH + 'px');
       panel.classList.toggle('fake', !o.hardware);
     },
-    show(p) { S.mode = p.mode; S.data = p; panel.classList.add('open'); render(); closer(); glide(); },
+    show(p) {
+      // Back to the greeting from a finished card: the same card, the result
+      // fading out and the greeting fading in, rather than a jump to another
+      // size. Not while they are typing a next ask into it.
+      if (p.keep && panel.classList.contains('open')) {
+        const typing = document.activeElement && document.activeElement.id === 'ask-input' && document.activeElement.value.trim();
+        if (typing) return;
+        body.style.transition = 'opacity 260ms ease';
+        body.style.opacity = '0';
+        setTimeout(() => { S.mode = p.mode; S.data = p; render(); closer(); glide(); body.style.opacity = '1'; }, 260);
+        return;
+      }
+      body.style.opacity = '1';
+      S.mode = p.mode; S.data = p; panel.classList.add('open'); render(); closer(); glide();
+    },
     tuck() { panel.classList.remove('open'); size(); },
     untuck() { panel.classList.add('open'); size(); },
     suggestions(list) { S.suggestions = list; if (S.mode === 'idle') { render(); glide(); } },

@@ -253,6 +253,11 @@ final class Link {
   }
 
   /** A fact they stated, or a claim they said was wrong, for the phone's memory to act on. */
+  /** A colour chosen on the Mac, for the phone to adopt and keep. */
+  func colour(_ key: String) {
+    deliver(["t": "colour", "key": key])
+  }
+
   func fact(_ line: String, wrong: String) {
     deliver(["t": "fact", "line": String(line.prefix(240)), "wrong": String(wrong.prefix(240))])
   }

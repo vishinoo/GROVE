@@ -4686,6 +4686,98 @@ section('A done is one sentence');
   );
 }
 
+
+/*
+ * ⌘V works, and the colour goes both ways
+ * ---------------------------------------
+ *
+ * Grove has no Dock icon and no menu bar of its own, and nothing ever set
+ * `NSApp.mainMenu` — which is where the key equivalents for Cut, Copy, Paste
+ * and Select All live. So ⌘V was not bound to anything, in any text field in
+ * the app: the notch's ask box, and every link field in the Grove window.
+ * Typing a URL out by hand is the opposite of what that window is for.
+ *
+ * And the colour had only ever travelled one way, phone to Mac, because the
+ * phone is where Settings lives. But the Mac is where somebody sits with a
+ * keyboard, and the field is the one thing both ends share — a pair that
+ * disagree about it look like two different apps.
+ */
+section('⌘V works, and the colour goes both ways');
+{
+  const main = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/main.swift'), 'utf8');
+  const home = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Home.swift'), 'utf8');
+  const link = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Link.swift'), 'utf8');
+  const page = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Resources/home.html'), 'utf8');
+  const macts = fs.readFileSync(path.join(ROOT, 'src/lib/mac.ts'), 'utf8');
+
+  const menu = between(main, 'private func installEditMenu() {', '\n  }\n', { min: 300, max: 1600 });
+  check(menu !== null, 'the Edit menu is where it is expected to be');
+  check(
+    menu !== null && /NSApp\.mainMenu = main/.test(menu),
+    'the app has a main menu, which is where ⌘V is bound',
+    'without one the shortcut is not attached to anything, in any field'
+  );
+  for (const key of ['"x"', '"c"', '"v"', '"a"']) {
+    check(menu !== null && menu.includes(key), `${key} is bound`);
+  }
+  check(
+    /installEditMenu\(\)/.test(main) && main.indexOf('installEditMenu()') < main.indexOf('private func installEditMenu'),
+    'and it is installed at launch rather than defined and forgotten'
+  );
+
+  /*
+   * The same four colours in three places, which cannot be helped — one is
+   * Swift, one is a web page and one is the phone — so they are checked
+   * against each other rather than trusted.
+   */
+  const phone = fs.readFileSync(path.join(ROOT, 'src/components/field-shader.ts'), 'utf8');
+  // The captured name, not the whole match: the three spell the line
+  // differently and stripping punctuation left "keytide" beside "tide".
+  const keys = (src, re) => [...src.matchAll(re)].map((m) => m[1]);
+  const onPhone = keys(phone, /key: '(tide|ember|moss|aurora)'/g);
+  const onMac = keys(home, /\("(tide|ember|moss|aurora)",/g);
+  const onPage = keys(page, /key: '(tide|ember|moss|aurora)'/g);
+  check(
+    onPhone.length === 4 && onMac.join() === onPhone.join() && onPage.join() === onPhone.join(),
+    'the Mac, its settings page and the phone offer the same colours in the same order',
+    `phone ${onPhone.join()} / mac ${onMac.join()} / page ${onPage.join()}`
+  );
+  // And the actual hex, since a matching list of names with different colours
+  // is the version of this bug nobody would notice until they saw both.
+  const hex = (src) => (src.match(/#[0-9A-F]{6}/g) || []).filter((h) => phone.includes(h));
+  check(
+    hex(home).length >= 16 && hex(page).length >= 16,
+    'with the same stops, not just the same names',
+    `mac ${hex(home).length}, page ${hex(page).length} of the phone's hex values found`
+  );
+
+  check(
+    /func colour\(_ key: String\) \{[\s\S]{0,200}?deliver\(\["t": "colour", "key": key\]\)/.test(link),
+    'the Mac can tell the phone which one was picked'
+  );
+  check(
+    /home\.onColour = \{[\s\S]{0,600}?self\.notch\.setLook\(self\.look\)[\s\S]{0,300}?self\.link\.colour\(key\)/.test(main),
+    'and paints everything here before it tells the phone',
+    'otherwise it recolours when the phone answers, and not at all when it is away'
+  );
+  check(
+    /m\.t === 'colour' && typeof m\.key === 'string'/.test(macts) && /savePersona\(\{ \.\.\.persona, sky: key \}\)/.test(macts),
+    'the phone keeps it'
+  );
+  check(
+    /sentLook = null;/.test(macts),
+    'and does not then skip sending it back as "nothing changed"',
+    'the phone\'s copy really did change; the Mac needs it confirmed rather than assumed'
+  );
+
+  // The paste button, for the one field nobody types into.
+  check(
+    /data-paste="\$\{i\}"/.test(page) && /navigator\.clipboard\.readText\(\)/.test(page),
+    'a link row has a button that pastes, not only a shortcut',
+    'a link is copied from a browser; the gesture people reach for is a button they can see'
+  );
+}
+
 /* ------------------------------------------------------------- verdict */
 
 /*
