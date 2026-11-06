@@ -449,7 +449,7 @@ const GCAL_READ: Ability = {
 const DOC_FIND: Ability = {
   id: 'doc.find',
   name: 'Docs',
-  what: 'Finds one of your Google Docs and tells you what is in it.',
+  what: 'Finds one of their GOOGLE DOCS, in their Google Drive, and tells them what is in it. Only Google Docs: never a file on their computer, never a download, and never a way to look something up in the world.',
   where: 'server',
   wired: true,
   needs: ['email'],
@@ -591,7 +591,7 @@ const DOC_CREATE: Ability = {
 const DOC_RECENT: Ability = {
   id: 'doc.recent',
   name: 'Documents written',
-  what: 'The documents Grove has written for them, newest first, with their links. Use before sending or sharing one.',
+  what: 'ONLY the documents Grove itself wrote for them, newest first, with their links. Use before sending or sharing one of those. Never for a file they downloaded, made themselves, or have somewhere on their computer — this cannot see those.',
   where: 'device',
   wired: true,
   needs: [],
@@ -2103,15 +2103,24 @@ const CALENDAR_MOVE: Ability = {
 const REMIND: Ability = {
   id: 'reminders.add',
   name: 'Reminder',
-  what: 'Catches a thought without you stopping.',
+  what: 'Catches a thought, or adds something to one of their lists, without them stopping.',
   where: 'device',
   wired: true,
   needs: ['reminders-permission'],
   args: {
     what: { type: 'string', what: 'the thing to remember', required: true },
     when: { type: 'string', what: 'when to be reminded' },
+    list: {
+      type: 'string',
+      what: 'the list it goes in, when they named one ("shopping", "groceries", "work")',
+    },
   },
-  examples: ['remind me to call the landlord', 'remind me to buy milk at six'],
+  examples: [
+    'remind me to call the landlord',
+    'remind me to buy milk at six',
+    'add toothpaste to my shopping list',
+    'put eggs on the grocery list',
+  ],
   run: async (args) => {
     const what = (args.what || '').trim().replace(/^to\s+/i, '');
     if (!what) return { ok: false, spoken: 'Remind you to do what?' };
@@ -2121,7 +2130,7 @@ const REMIND: Ability = {
     // A reminder with no time is still a useful reminder, unlike a moved event
     // with no time — so this one does not refuse.
     const due = args.when ? readWhen(args.when) : null;
-    const saved = await addReminder(what, due);
+    const saved = await addReminder(what, due, args.list);
     if (!saved.ok) return { ok: false, spoken: 'Could not save that reminder.' };
     // Naming the list makes the claim checkable. "Added to your reminders" is
     // true of a reminder saved somewhere nobody looks.
@@ -2130,6 +2139,68 @@ const REMIND: Ability = {
       ok: true,
       spoken: due ? `Reminder set for ${sayWhen(due)}${where}.` : `Added${where}.`,
       detail: saved.list,
+    };
+  },
+};
+
+/**
+ * Reading a list back.
+ *
+ * The other half of `reminders.add`, and missing for as long as it existed:
+ * Grove could write to their lists and never read one. So "what's on my
+ * shopping list" and "what am I running low on" had no tool that fitted, and
+ * the model reached for whatever was nearest — a web search for what this one
+ * person had at home, or the shopping tool, which opens a shop to buy things.
+ *
+ * The same shape as the gap `openReminders` was written to close for "what am
+ * I supposed to be doing": a store written to and never read is a store that
+ * knows less than the last few minutes of conversation.
+ */
+const REMINDERS_READ: Ability = {
+  id: 'reminders.read',
+  name: 'A list',
+  what: 'Reads back what is on one of their lists, or everything outstanding. Use for "what is on my shopping list", "what am I running low on", "what have I got to do".',
+  where: 'device',
+  wired: true,
+  needs: ['reminders-permission'],
+  reads: true,
+  args: {
+    list: {
+      type: 'string',
+      what: 'which list, when they named one ("shopping", "groceries"). Leave out for everything outstanding.',
+    },
+  },
+  examples: [
+    "what's on my shopping list",
+    'what am I running low on',
+    'read me my list',
+    "what's left on my to do list",
+  ],
+  run: async (args) => {
+    if (!(await ensureRemindersAccess())) {
+      return { ok: false, spoken: 'I need permission for Reminders. It is in iOS Settings.' };
+    }
+    const found = (await openReminders(40, args.list).catch(() => null)) ?? [];
+    const named = (args.list || '').trim();
+    if (found.length === 0) {
+      return {
+        ok: true,
+        spoken: named ? `Nothing on your ${named} list.` : 'Nothing outstanding.',
+        detail: '',
+      };
+    }
+    // Spoken is shortened for an ear; detail carries the whole list, which is
+    // what the model answers from. The rule this file is built on.
+    const first = found.slice(0, 5).map((r) => r.title);
+    const more = found.length - first.length;
+    return {
+      ok: true,
+      spoken:
+        `${named ? `On your ${named} list: ` : ''}${first.join(', ')}` +
+        (more > 0 ? `, and ${more} more.` : '.'),
+      detail: found
+        .map((r) => `${r.title}${r.list ? ` [${r.list}]` : ''}${r.due ? ` — due ${r.due.toISOString()}` : ''}${r.overdue ? ' (overdue)' : ''}`)
+        .join('\n'),
     };
   },
 };
@@ -3518,7 +3589,11 @@ const MAC_USE: Ability = {
       if (stopped.ok && last) noteMacWork({ ...last, state: 'stopped', said: stopped.spoken });
       return stopped;
     }
-    const fresh = macTask && Date.now() - macTask.at < 10 * 60_000 ? macTask.id : '';
+    // Only a task that is waiting on them takes a bare answer. "Pull it up on my
+    // Mac" after reading their email went into the YouTube job from two
+    // sentences before, because any task from the last ten minutes did.
+    const waitingOn = macWork();
+    const fresh = macTask && Date.now() - macTask.at < 10 * 60_000 && waitingOn && waitingOn.task === macTask.id && ['ask', 'confirm', 'working'].includes(waitingOn.state) ? macTask.id : '';
     const task = (args.task || '').trim() || fresh;
     const approve = /^(yes|confirmed?)$/i.test((args.confirmed || '').trim());
     const answer = (args.answer || '').trim();
@@ -3534,11 +3609,25 @@ const MAC_USE: Ability = {
       // with one it has dropped starts it again rather than saying "I lost
       // track", which is a sentence about our bookkeeping, not their job.
       if (!approve && result.state === 'failed' && /lost track/i.test(result.spoken)) {
-        const again = [goal || macWork()?.what, answer].filter(Boolean).join('. ');
+        /*
+          A job the Mac finished is not a job it lost. "Play the trailer" was
+          done, the Mac forgot the task as it does once one is done, and the
+          phone heard "lost track" and started it again — with the request
+          said twice, and the working sound going over a trailer already
+          playing. Finished means the answer is what it did; anything more
+          they asked is a new job, on its own words.
+        */
+        const last = macWork();
+        const finished = last && last.task === task && ['done', 'answered'].includes(last.state);
+        const said = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        if (finished && (!answer || said(answer) === said(goal || last.what))) {
+          return { ok: true, spoken: last.said || 'That’s done.' };
+        }
+        const again = finished ? answer : [goal || last?.what, answer].filter(Boolean).join('. ');
         if (again) result = await macJob('agent.start', { goal: again }, 88_000);
       }
-    } else if (goal) {
-      result = await macJob('agent.start', { goal }, 88_000);
+    } else if (goal || answer) {
+      result = await macJob('agent.start', { goal: goal || answer }, 88_000);
     } else {
       return { ok: false, spoken: 'What should I do on your Mac?' };
     }
@@ -3695,7 +3784,7 @@ const RIDE: Ability = {
 const DELIVERY: Ability = {
   id: 'food.order',
   name: 'Food',
-  what: 'Opens a delivery app, searched for what you asked for. You order and pay there.',
+  what: 'Orders food to be delivered, when they ask for food to be ordered or delivered. Never for "where should I eat" or "where should I go for dinner": that is a recommendation, answered and asked about, not an order.',
   where: 'device',
   wired: true,
   needs: [],
@@ -4224,6 +4313,7 @@ const MAIL_IMPORTANT: Ability = {
 };
 
 export const ABILITIES: Ability[] = [
+  REMINDERS_READ,
   NOW,
   FRICTION,
   COMMITMENT_DONE,

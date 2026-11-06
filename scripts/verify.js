@@ -4230,6 +4230,119 @@ section('A lookup comes back with the answer, not a page');
   );
 }
 
+
+/*
+ * A list is a list, not a shop
+ * ----------------------------
+ *
+ * "Add toothpaste to my shopping list" is the commonest thing anybody says to
+ * an assistant, and it had nowhere to go: every reminder landed in the default
+ * list, nothing took a list name, and the model — finding no tool that fitted
+ * — reached for the shopping tool, **which opens Amazon to buy toothpaste.**
+ * Measured, against the real declarations: `shop_order`. It takes a press, so
+ * nothing was bought silently, but the right answer is a line in a list.
+ *
+ * And Grove could write to their lists and never read one, so "what's on my
+ * shopping list" and "what am I running low on" had nothing either. The same
+ * shape as the gap `openReminders` was written to close for "what am I
+ * supposed to be doing": a store written to and never read knows less than
+ * the last few minutes of conversation.
+ */
+section('A list is a list, not a shop');
+{
+  const abilitiesSrc = fs.readFileSync(path.join(ROOT, 'src/lib/abilities.ts'), 'utf8');
+  const device = fs.readFileSync(path.join(ROOT, 'src/lib/deviceCalendar.ts'), 'utf8');
+  const brain = fs.readFileSync(path.join(ROOT, 'src/lib/brain.ts'), 'utf8');
+
+  const add = ALL.find((a) => a.id === 'reminders.add');
+  const read = ALL.find((a) => a.id === 'reminders.read');
+  check(!!add && !!read, 'there is a way into a list and a way back out of it');
+  check(!!add && !!add.args.list, 'adding takes the list they named');
+  check(!!read && !!read.args.list, 'and reading takes it too');
+  check(!!read && read.reads === true, 'reading a list is a read, so a question can reach it');
+  check(!!add && add.reads !== true, 'and adding to one is not, so a question can never write');
+
+  /*
+   * The two halves must agree. A thing added to "shopping" and then not
+   * found by "my shopping list" is worse than no list support at all: it is
+   * there, they are told it is there, and it cannot be found.
+   */
+  // A literal count, not a regex: what matters is that the same line of code
+  // appears on both sides, and spelling that line as a pattern is how a
+  // check comes to pass against something slightly different.
+  const strip = String.raw`(wanted || '').toLowerCase().replace(/\b(my|the|list)\b/g, '').trim()`;
+  const both = device.split(strip).length - 1;
+  check(
+    both === 2,
+    'adding and reading strip the same words off a list name',
+    `found ${both}; they must agree or a thing added to "shopping" is not found by "my shopping list"`
+  );
+  check(
+    device.includes('falls back to the usual list rather than refusing'),
+    'a name that matches nothing still saves it somewhere',
+    'a reminder in the wrong list is recoverable; a lost one is not'
+  );
+  check(
+    device.includes('reads everything rather than'),
+    'and reading an unknown list name is too wide rather than empty',
+    'they can see which list each line came from'
+  );
+
+  // The rule, which is what stopped it reaching for a shop.
+  check(
+    /A LIST IS NOT AN ORDER\./.test(brain),
+    'and the rules say outright that writing it down is not buying it'
+  );
+  check(
+    /never the shopping or food tool, which open a shop to buy the thing/.test(brain),
+    'naming the tools it must not reach for, since those are the ones it reached for'
+  );
+}
+
+/*
+ * Two things Grove cannot do, said rather than faked
+ * --------------------------------------------------
+ *
+ * Both were measured against the real declarations and both came back as a
+ * confident wrong answer, which is the failure this app cares about most.
+ *
+ * "Set my alarm for 7:30" quietly became a reminder. iOS does not let any app
+ * but Apple's own set an alarm — the same class of platform limit as not
+ * being able to receive a key press in the background. A reminder in place of
+ * an alarm does not wake anybody, and they find that out at eight.
+ *
+ * "How much did I spend eating out last week" became a WEB SEARCH. There is
+ * no bank, no card and no receipts in this app, and searching the internet
+ * cannot find out what one person spent. Of all the ways to be wrong, that
+ * one produces an answer that looks researched.
+ */
+section('Two things Grove cannot do, said rather than faked');
+{
+  const brain = fs.readFileSync(path.join(ROOT, 'src/lib/brain.ts'), 'utf8');
+  check(
+    /YOU CANNOT SET AN ALARM\./.test(brain),
+    'an alarm is refused rather than substituted'
+  );
+  check(
+    /A reminder set quietly in place of an alarm is the worst answer here/.test(brain),
+    'and the substitution is named, since that is what it did',
+    'it does not wake anybody, and they find that out at eight'
+  );
+  check(
+    /YOU DO NOT KNOW WHAT THEY SPEND\./.test(brain),
+    'spending is said to be unknown rather than searched for'
+  );
+  check(
+    /searching the internet cannot find out what one person spent/.test(brain),
+    'with the reason, because the wrong answer here looks researched'
+  );
+  // There is no spending ability to reach, so the rule is the whole of it.
+  check(
+    !ALL.some((a) => /spend|budget|bank|transaction/i.test(a.id + ' ' + a.name)),
+    'and there is genuinely no such tool to call'
+  );
+}
+
 /* ------------------------------------------------------------- verdict */
 
 /*

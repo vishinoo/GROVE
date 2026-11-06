@@ -386,13 +386,34 @@ function preferredList(
  * in the last few minutes.
  */
 export async function openReminders(
-  limit = 20
-): Promise<{ title: string; due: Date | null; overdue: boolean }[] | null> {
+  limit = 20,
+  wanted?: string
+): Promise<{ title: string; due: Date | null; overdue: boolean; list: string }[] | null> {
   const m = mod();
   if (!m || !(await ensureRemindersAccess())) return null;
   try {
-    const lists = await m.getCalendarsAsync(m.EntityTypes.REMINDER);
-    if (lists.length === 0) return [];
+    const all = await m.getCalendarsAsync(m.EntityTypes.REMINDER);
+    if (all.length === 0) return [];
+    /*
+     * One list when they named one.
+     *
+     * Matched the same loose way `addReminder` matches, from the same words,
+     * because the two halves have to agree: a thing added to "shopping" and
+     * then not found by "my shopping list" is worse than no list support at
+     * all. A name that matches nothing reads everything rather than
+     * refusing — the answer is then too wide instead of empty, and they can
+     * see which list each line came from.
+     */
+    const want = (wanted || '').toLowerCase().replace(/\b(my|the|list)\b/g, '').trim();
+    const named = want
+      ? all.filter(
+          (c: { title?: string }) =>
+            (c.title || '').toLowerCase().includes(want) ||
+            (want.includes((c.title || '').toLowerCase()) && (c.title || '').length > 2)
+        )
+      : [];
+    const lists = named.length ? named : all;
+    const byId = new Map(lists.map((c: { id: string; title?: string }) => [c.id, c.title || '']));
     // A wide window rather than a precise one: an undated reminder and one due
     // in three months are both things someone may be asked about.
     const from = new Date(Date.now() - 180 * 86_400_000);
@@ -411,6 +432,7 @@ export async function openReminders(
           title: (r.title ?? '').trim(),
           due: due && Number.isFinite(due.getTime()) ? due : null,
           overdue: !!due && due.getTime() < now,
+          list: byId.get(r.calendarId ?? '') ?? '',
         };
       })
       .filter((r) => r.title)
@@ -430,13 +452,35 @@ export async function openReminders(
  */
 export async function addReminder(
   title: string,
-  due: Date | null
+  due: Date | null,
+  wanted?: string
 ): Promise<{ ok: boolean; list?: string }> {
   const m = mod();
   if (!m || !(await ensureRemindersAccess())) return { ok: false };
   try {
     const lists = await m.getCalendarsAsync(m.EntityTypes.REMINDER);
-    const list = preferredList(lists);
+    /*
+     * The list they named, when they named one.
+     *
+     * "Add toothpaste to my shopping list" is the commonest thing anybody
+     * says to an assistant and it had nowhere to go: every reminder landed
+     * in the default list, and the model, finding nothing that took a list,
+     * reached for the shopping tool instead — which opens Amazon to BUY
+     * toothpaste. A list is not an order.
+     *
+     * Matched loosely and never strictly: "shopping" finds "Shopping", "my
+     * shopping list" and "Groceries 🛒" is found by "groceries". A name that
+     * matches nothing falls back to the usual list rather than refusing,
+     * because a reminder in the wrong list is recoverable and a lost one is
+     * not — and the line said back names where it landed, so it is visible.
+     */
+    const want = (wanted || '').toLowerCase().replace(/\b(my|the|list)\b/g, '').trim();
+    const named = want
+      ? lists.find((c: { title?: string }) => (c.title || '').toLowerCase() === want) ??
+        lists.find((c: { title?: string }) => (c.title || '').toLowerCase().includes(want)) ??
+        lists.find((c: { title?: string }) => want.includes((c.title || '').toLowerCase()) && (c.title || '').length > 2)
+      : undefined;
+    const list = named ?? preferredList(lists);
     if (!list) return { ok: false };
     await m.createReminderAsync(list.id, {
       title,

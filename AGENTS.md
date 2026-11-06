@@ -1500,6 +1500,57 @@ a one-import regression that type-checks and whose only symptom would be a
 sentence in Settings quietly becoming untrue. It also asserts `startAgain`
 clears all of them; it used to clear three stores and leave five.
 
+## A list is a list, not a shop
+
+*"Add toothpaste to my shopping list"* is the commonest thing anybody says to
+an assistant, and it had nowhere to go. Every reminder landed in the default
+list, nothing took a list name, and the model — finding no tool that fitted —
+reached for the shopping tool, **which opens Amazon to buy toothpaste**.
+Measured against the real declarations: `shop_order`. It takes a press, so
+nothing was bought silently; the right answer is still a line in a list.
+
+And Grove could write to their lists and never read one, so *"what's on my
+shopping list"* and *"what am I running low on"* had nothing either — the
+same shape as the gap `openReminders` was written to close for "what am I
+supposed to be doing". A store written to and never read knows less than the
+last few minutes of conversation.
+
+So `reminders.add` takes a list and `reminders.read` is its other half.
+**Both match a name the same way**, from the same line of code, because a
+thing added to "shopping" and then not found by "my shopping list" is worse
+than no list support at all: it is there, they are told it is there, and it
+cannot be found. A name that matches nothing still saves it, in the usual
+list, and the line said back names where it landed — a reminder in the wrong
+list is recoverable and a lost one is not. Reading an unknown name reads
+everything, so the answer is too wide rather than empty.
+
+`npm run verify` counts that shared line twice rather than matching a pattern
+for it: spelling a line of code as a regex is how a check comes to pass
+against something slightly different.
+
+**And "to-?do" never matched "to do".** The gate had the hyphenated spelling
+and not the one most people type, so "what's left on my to do list" could not
+reach a tool at all — found by the harness the moment the ability advertised
+that phrase, which is exactly what that check is for.
+
+## Two things Grove cannot do, said rather than faked
+
+Both were measured against the real declarations, and both came back as a
+confident wrong answer, which is the failure this app cares about most.
+
+**"Set my alarm for 7:30" quietly became a reminder.** iOS does not let any
+app but Apple's own set an alarm — the same class of platform limit as not
+being able to receive a key press in the background. A reminder in place of an
+alarm does not wake anybody, and they find that out at eight. So it is said
+plainly, with a reminder offered as a reminder.
+
+**"How much did I spend eating out last week" became a web search.** There is
+no bank, no card and no receipts in this app, and searching the internet
+cannot find out what one person spent. Of all the ways to be wrong, that one
+produces an answer that looks researched. Grove says it cannot see their
+spending, and may offer to search their mail for receipts while saying that is
+not the whole picture.
+
 ## Money
 
 No ability spends any, and rides and takeaways do not change that — they stop at
@@ -2030,6 +2081,20 @@ anything else is a new job, with the thing written into the goal.
 busy is added to the end of whatever it says next, "Oh, and on your Mac: …",
 instead of arriving minutes later on its own. A question still waits its turn,
 because it needs the microphone.
+
+**Questions stay on the phone; the Mac is for showing and doing.** "Mac
+default for everything it can do" sent plain questions to Chrome, many times
+slower than the phone's own search. Recommendations ("where should I go for
+dinner") are questions, not orders, and a vague pick ("play something
+interesting") is asked as two or three real options, never filled from one old
+passing mention and never a question about which app. A sentence that changes a
+running Mac job goes to that job.
+
+**Tabs are theirs, and tidied.** Jobs open a tab in their own Chrome window
+again, and `done` with `close` shuts a tab Grove opened when it was only a means
+(an article read to summarise it, an order placed). The reader lists what can be
+pressed on the whole page, nearest first, marked above or below, so "Show more"
+is pressed rather than scrolled towards; scroll goes both ways.
 
 Texts go through Messages, not a website (`agent.message`): the person is
 found in Contacts by name or relation, a pick among several is remembered,
