@@ -3386,99 +3386,127 @@ section('A panel is as tall as what is in it');
  * was asked for, the confirm card is a card like the others, and a later
  * tidy-up that treated them all the same would read as consistency.
  */
-section('The microphone is on unless they turn it off');
+/*
+ * The microphone opens by itself on ⌘K, and nowhere else
+ * ------------------------------------------------------
+ *
+ * This has been wrong in both directions, and the second was worse than the
+ * first. It began opening only when Grove had asked something, which left
+ * somebody opening the notch to find the microphone off. Then it opened on
+ * every card with a box — an answer, a question, every step of a job — and
+ * that is a microphone that is on most of the time. The worst of it was the
+ * Mac listening alongside the phone: two recognisers on one room, each
+ * hearing the other's half of a sentence.
+ *
+ * ⌘K is the one moment that cannot be anything else. Somebody pressed a key
+ * meaning to talk, and nobody opens a panel by accident with a keyboard
+ * shortcut. Everywhere else the button is still there, and pressing it is a
+ * decision rather than a guess about one.
+ */
+section('The microphone opens by itself on ⌘K, and nowhere else');
 {
   const main = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/main.swift'), 'utf8');
   const notch = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Notch.swift'), 'utf8');
   const panel = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Resources/panel.html'), 'utf8');
 
-  // One rule, asked once per card, where every card is drawn. Twenty-odd
-  // show() calls each deciding for themselves is twenty-odd chances for the
-  // one that gets forgotten to be the one somebody has to click.
   check(
-    /var wantsMic: \(\(String, \[String: Any\], Bool\) -> Bool\)\?/.test(notch) &&
-      /if payload\["mic"\] == nil, wantsMic\?\(mode, data, pin\) == true \{ payload\["mic"\] = true \}/.test(notch),
+    /var wantsMic: \(\(String, \[String: Any\]\) -> Bool\)\?/.test(notch) &&
+      /if payload\["mic"\] == nil, wantsMic\?\(mode, data\) == true \{ payload\["mic"\] = true \}/.test(notch),
     'one rule decides it, where every card is drawn'
   );
-  const rule = between(main, 'private func openMicOn(_ mode: String, _ data: [String: Any], _ pinned: Bool) -> Bool {', '\n  }\n', { min: 300, max: 2400 });
+  const rule = between(main, 'private func openMicOn(_ mode: String, _ data: [String: Any]) -> Bool {', '\n  }\n', { min: 300, max: 2200 });
   check(rule !== null, 'the rule is where it is expected to be');
   check(
-    rule !== null && /\["idle", "answer", "waiting", "thinking", "job"\]\.contains\(mode\)/.test(rule),
-    'every card with somewhere to say something into listens',
-    'opening the notch and finding the microphone off is the thing this exists to stop'
+    rule !== null && /guard \(data\["summoned"\] as\? Bool\) == true/.test(rule),
+    'nothing opens the microphone by itself except a summon',
+    'an answer, a question and every step of a job is a microphone on most of the time'
   );
-  // Every one of those must actually have a microphone button, or there is
-  // nowhere to show it is listening and no way to stop it.
-  const regions = {
-    idle: between(panel, "if (m === 'idle')", "if (m === 'listening')", { min: 200, max: 2200 }),
-    thinking: between(panel, "if (m === 'thinking')", "if (m === 'rewrite' || m === 'answer')", { min: 200, max: 2200 }),
-    answer: between(panel, "if (m === 'rewrite' || m === 'answer')", "if (m === 'job')", { min: 200, max: 2200 }),
-    job: between(panel, "if (m === 'job')", "if (m === 'done')", { min: 200, max: 2200 }),
-    waiting: between(panel, "if (m === 'waiting')", "if (m === 'pair')", { min: 200, max: 2200 }),
-  };
-  for (const mode of ['idle', 'answer', 'waiting', 'thinking', 'job']) {
-    const region = regions[mode];
-    check(region !== null, `the ${mode} card is where it is expected to be`);
-    check(
-      region !== null && /id="mic"/.test(region) && /micOn\(\)/.test(region),
-      `the ${mode} card has a microphone button and draws it as on`,
-      'a card that listens with no button cannot show it is listening or be stopped'
-    );
-  }
   /*
-   * The money line, unchanged by any of this: every other prompt's worst
-   * answer is a wrong sentence, a confirmation's is a purchase. It is the
-   * easy thing to lose, because "on everywhere" is how this was asked for
-   * and the confirm card is a card like the others.
+   * Marked by the summon rather than inferred from "an idle card that
+   * happens to be pinned". That is true of ⌘K today and stops being true
+   * the moment somebody pins an idle card for another reason — and the
+   * failure would be a microphone opening with no explanation.
    */
   check(
-    rule !== null && /let listens = mode != "waiting" \|\| \(data\["confirm"\] as\? Bool\) != true/.test(rule),
-    'and never a confirmation: a yes is a press or two keys, never a sentence Grove heard'
+    /private func summon\(\)[\s\S]{0,600}?notch\.show\("idle", \["summoned": true\], pin: true\)/.test(main),
+    'and the summon says so itself rather than being guessed at from the card'
+  );
+  check(
+    rule !== null && !/mode == "answer"|mode == "job"|mode == "thinking"|contains\(mode\)/.test(rule),
+    'no card opens it by being a particular kind of card',
+    'that is the version that had the Mac listening alongside the phone'
   );
   check(
     rule !== null && /!voice\.busy/.test(rule),
     'not over a microphone already open, which would be torn down mid-sentence'
   );
-  /*
-   * And never over sound. A job playing a film would otherwise have it
-   * transcribed by the microphone Grove opened over it and sent back into
-   * the same job as a change of plan — the card that is up longest, failing
-   * in the most confusing way available.
-   */
   check(
     rule !== null && /!\(MainActor\.assumeIsolated \{ Speaker\.shared\.isReading \}\), !Player\.soundPlaying\(\)/.test(rule),
     'nor over a film, a song, or Grove reading aloud',
-    'the microphone would transcribe it and send it back into the job as a change of plan'
+    'the microphone would transcribe it and send it back as a change of plan'
+  );
+  /*
+   * Exactly one card is ever marked summoned, and it is the ⌘K one.
+   *
+   * Stated as a count rather than as "a confirmation is not summoned",
+   * which was the first version and missed the mutation that proved it:
+   * it looked for `"confirm": true` while the real line reads `"confirm":
+   * result.state == "confirm"`. Counting cannot be dodged by how a
+   * neighbouring field happens to be spelled, and it covers every card at
+   * once — including the one that costs money to get wrong.
+   */
+  const marks = main.split('"summoned": true').length - 1;
+  check(
+    marks === 1,
+    'exactly one card is ever marked as summoned',
+    `found ${marks}; a second one is a microphone opening somewhere nobody pressed ⌘K`
+  );
+  const summonBody = between(main, 'private func summon() {', '\n  }\n', { min: 80, max: 900 });
+  check(
+    summonBody !== null && summonBody.includes('"summoned": true'),
+    'and it is the summon, so no confirmation, answer or job can ever carry it'
   );
 
-  // The button is the switch, so pressing it off means off.
-  check(
-    /const on = !b\.classList\.contains\('on'\);[\s\S]{0,120}?post\(\{ t: 'mic', on \}\)/.test(panel),
-    'the microphone button is a toggle, not an on switch'
-  );
+  /*
+   * The button stays everywhere, because "press to talk" has to be possible
+   * on a card that no longer listens on its own — and it is a one-off now,
+   * not the switch. Turning off a thing that is already off is not what
+   * somebody reaching for a microphone wants.
+   */
+  for (const [mode, from, to] of [
+    ['idle', "if (m === 'idle')", "if (m === 'listening')"],
+    ['thinking', "if (m === 'thinking')", "if (m === 'rewrite' || m === 'answer')"],
+    ['answer', "if (m === 'rewrite' || m === 'answer')", "if (m === 'job')"],
+    ['job', "if (m === 'job')", "if (m === 'done')"],
+    ['waiting', "if (m === 'waiting')", "if (m === 'pair')"],
+  ]) {
+    const region = between(panel, from, to, { min: 200, max: 2200 });
+    check(region !== null, `the ${mode} card is where it is expected to be`);
+    check(
+      region !== null && /id="mic"/.test(region),
+      `the ${mode} card still has a microphone to press`,
+      'a card that cannot listen on its own must at least be able to be asked'
+    );
+  }
   const press = between(main, 'case "mic":', 'case "stop":', { min: 200, max: 1200 });
   check(press !== null, 'what the button does is where it is expected to be');
   check(
-    press !== null && /AppDelegate\.listensItself = wanted/.test(press) && /if wanted \{ dictate\(\) \} else \{ voice\.stop\(\) \}/.test(press),
-    'and pressing it off turns it off, rather than stopping one sentence',
-    'off that comes back on the next card is the press that did nothing'
+    press !== null && !/AppDelegate\.listensItself = /.test(press),
+    'and pressing it listens now rather than rewriting the setting',
+    'the setting governs ⌘K; the button governs this moment'
+  );
+  check(
+    /const on = !b\.classList\.contains\('on'\);[\s\S]{0,120}?post\(\{ t: 'mic', on \}\)/.test(panel),
+    'it is still a toggle, so a press that started it can stop it'
   );
   check(
     /static var listensItself: Bool/.test(main) && /grove\.listen\.auto/.test(main),
-    'kept where Settings reads it too, so the panel and the switch cannot disagree'
+    'and the setting is still there to switch the ⌘K half off'
   );
-
-  // The panel shows the microphone; it must never start one.
   check(
     /const micOn = \(\) => \{ if \(S\.data && S\.data\.mic\)/.test(panel),
     'the panel draws the microphone as on rather than switching it on',
     'a card re-renders on every step, phone and remark; starting it there would start it each time'
-  );
-  const confirmCard = between(panel, "if (m === 'waiting')", "if (m === 'pair')", { min: 300, max: 1800 });
-  check(confirmCard !== null, 'the waiting card is where it is expected to be');
-  check(
-    confirmCard !== null && /if \(!d\.confirm\) \{ wireAsk\(true\); micOn\(\); \}/.test(confirmCard),
-    'and shows one only on the half of that card which is a question'
   );
 }
 
@@ -3529,12 +3557,12 @@ laterSection('⌘K opens Grove, except where it would be missed', async () => {
     /guard !option/.test(shortcut),
     '⌥⌘K is never shared with anything, which is what choosing it means'
   );
-  // Not by deciding for itself: it opens the panel pinned, and a pinned
-  // panel is what the one microphone rule listens on. Two places deciding
-  // the same thing is how they come to disagree.
+  // It marks the card as summoned; the one microphone rule listens on that
+  // and on nothing else. Two places deciding the same thing is how they
+  // come to disagree.
   check(
-    /private func summon\(\)[\s\S]{0,500}?notch\.show\("idle", \[:\], pin: true\)/.test(main),
-    'and summoning Grove opens the panel on purpose, which is what opens the microphone',
+    /private func summon\(\)[\s\S]{0,600}?notch\.show\("idle", \["summoned": true\], pin: true\)/.test(main),
+    'and summoning Grove is the one thing that opens the microphone with it',
     'a shortcut that opens a box to type in has saved a mouse and nothing else'
   );
 

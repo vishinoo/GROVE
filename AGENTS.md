@@ -1685,25 +1685,37 @@ and not having to touch anything is the whole reason the ring and the glasses
 exist. So it opens with the card, and what is said fills the box and sends
 itself.
 
-**Every card with somewhere to say something into listens**, and they all have
-a microphone button to show it and stop it. That was three cards, and only an
-idle panel opened on purpose; both were too careful. Opening the notch and
-finding the microphone off is the whole complaint, and "I opened it normally"
-is most of how anyone opens it, so gating on a deliberate open meant the common
-case was the one that did not work. Thinking and working listen too: that is
-the card that is up longest and the one worth talking over — *"no, chicken
-parm"* while it is halfway through searching is the entire point of the box
-being there, and having to type it is why the box got used once.
+**Only a ⌘K summon opens the microphone by itself.**
+
+This has been wrong in both directions, and the second was worse than the
+first. It started by opening only when Grove had asked something, which left
+somebody opening the notch to find the microphone off. Then it opened on every
+card with a box — an answer, a question, every step of a job — and that is a
+microphone that is on most of the time. The worst of it was the Mac listening
+alongside the phone: **two recognisers on one room**, each hearing the other's
+half of a sentence.
+
+⌘K is the one moment that cannot be anything else. Somebody pressed a key
+meaning to talk, and nobody opens a panel by accident with a keyboard
+shortcut. Everywhere else the button is still there on every card, and
+pressing it is a decision rather than a guess about one.
+
+Marked by the summon itself (`"summoned": true`) rather than inferred from "an
+idle card that happens to be pinned". That is true of ⌘K today and would stop
+being true the moment somebody pins an idle card for another reason, and the
+failure would be a microphone opening with no explanation. `npm run verify`
+counts the marks: exactly one card may ever carry it.
 
 **Never over sound.** A job playing a film would otherwise have it transcribed
-by the microphone Grove just opened over it and sent back into the same job as
-a change of plan. Reading aloud is the same problem in Grove's own voice.
+by the microphone Grove opened over it and sent back into the same job as a
+change of plan. Reading aloud is the same problem in Grove's own voice.
 
-**The button is the switch**, not a one-off. On by default means the only
-reason to press it is to stop it, and "stop this sentence" and "stop doing
-that" are the same gesture when the next card would open it again a minute
-later. Pressing it off is the same thing as the switch in Settings, so the two
-cannot disagree, and off that comes back is the press that did nothing.
+**The button is a one-off, not the switch.** While the microphone opened on
+every card, the only reason to press it was to stop it, so the button and the
+setting were the same thing. With it opening on ⌘K alone, pressing it anywhere
+else means "listen now" — and turning off something that is already off is not
+what somebody reaching for a microphone wants. The switch in Settings governs
+the ⌘K half.
 
 One rule decides all of it (`openMicOn`), asked once per card inside
 `Notch.show` where every card is drawn. Twenty-odd `show` calls each deciding
@@ -1931,6 +1943,18 @@ itself; a control hidden at 1px is listed as the label you would press. And a
 tick changes a property, not the page, so the real-click fallback compares
 checked states and field values as well as mutations: it used to tick a box,
 see nothing change, and click again, unticking it.
+
+**Faster: measured, then cut.** A recipe search took 35s, and where it went was
+not the model: Chrome's "loading" stays true while ads trickle in (fifteen
+seconds on Google results readable in one), fixed sleeps after every press, a
+reader that walked the whole DOM once per query on heavy pages, thinking on the
+first move (usually just "go"), a doubt or a check that took a screenshot (which
+waits for a gap in their typing) of a page whose words said everything, and the
+agent checking its own work with find. Now a page is ready when it is readable,
+a press waits only until the page is still, shadow roots are gathered once,
+thinking is for boards and recovery, eyes only where the words cannot show it,
+"go" can take one of their tabs in the same move, and the brief says done the
+moment it is done. Pad thai, search to recipe: 26s including an interruption.
 
 Texts go through Messages, not a website (`agent.message`): the person is
 found in Contacts by name or relation, a pick among several is remembered,

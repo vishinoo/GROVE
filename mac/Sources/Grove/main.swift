@@ -50,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     shortcut = Shortcut()
 
     notch.onGlance = { [weak self] in self?.remark() }
-    notch.wantsMic = { [weak self] mode, data, pin in self?.openMicOn(mode, data, pin) ?? false }
+    notch.wantsMic = { [weak self] mode, data in self?.openMicOn(mode, data) ?? false }
     notch.onMessage = { [weak self] message in self?.fromPanel(message) }
 
     link.onLook = { [weak self] incoming in
@@ -363,7 +363,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func summon() {
     Log.say("⌘K: opening Grove\(AppDelegate.listensItself ? ", listening" : "")")
     captured = nil
-    notch.show("idle", [:], pin: true)
+    notch.show("idle", ["summoned": true], pin: true)
   }
 
   /**
@@ -384,36 +384,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     Not while it is already listening, which would tear the first one down
     mid-sentence, and not over Grove reading aloud, which would hear itself.
   */
-  private func openMicOn(_ mode: String, _ data: [String: Any], _ pinned: Bool) -> Bool {
+  private func openMicOn(_ mode: String, _ data: [String: Any]) -> Bool {
     guard AppDelegate.listensItself else { return false }
     /*
-      Every card with somewhere to say something into, which is now all of
-      them bar one.
+      Only a ⌘K summon opens the microphone by itself.
 
-      It was the three that already had a microphone button, and an empty
-      panel only when it had been opened on purpose. Both were too careful.
-      Opening the notch and finding the microphone off is the thing being
-      asked about here, and "I opened it normally" is most of how anyone
-      opens it — gating on a deliberate open meant the common case was the
-      one that did not work.
+      It was every card with a box, which is what was asked for and was
+      wrong in use: a microphone that opens on an answer, on a question and
+      on every step of a job is one that is on most of the time, and the
+      worst of it was the Mac listening alongside the phone — two
+      recognisers on one room, each hearing the other's half of a sentence.
 
-      Thinking and working now listen too, and have a button to show it.
-      That is the card that is up longest and the one worth talking over:
-      "no, chicken parm" while it is halfway through searching is the whole
-      point of the box being there, and having to type it is why the box got
-      used once.
+      ⌘K is the one moment that cannot be anything else. Somebody pressed a
+      key meaning to talk; nobody opens a panel by accident with a keyboard
+      shortcut. Everywhere else there is still a button, and pressing it is
+      a decision rather than a guess about one.
+
+      Marked by the summon itself rather than inferred from "an idle card
+      that happens to be pinned" — that is true of ⌘K today and would stop
+      being true the moment somebody pins an idle card for another reason,
+      and the failure would be a microphone opening with no explanation.
     */
-    let listens = mode != "waiting" || (data["confirm"] as? Bool) != true
-    let hasBox = ["idle", "answer", "waiting", "thinking", "job"].contains(mode)
-    guard listens, hasBox, !voice.busy else { return false }
-    /*
-      Not over sound.
-
-      A job that is playing a film or a song would otherwise be transcribed
-      by the microphone Grove just opened over it, and sent back into the
-      same job as a change of plan. Reading aloud is Grove's own voice and
-      the same problem from the other side.
-    */
+    guard (data["summoned"] as? Bool) == true, !voice.busy else { return false }
+    // Not over a film, a song, or Grove reading aloud: it would hear those.
     guard !(MainActor.assumeIsolated { Speaker.shared.isReading }), !Player.soundPlaying() else { return false }
     dictate()
     return true
@@ -492,17 +485,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       notch.show("idle", [:], pin: false)
     case "mic":
       /*
-        The button is the setting, not a one-off.
+        A one-off now, not the switch.
 
-        Default on means the only reason to press it is to stop it, and "stop
-        this sentence" and "stop doing that" are the same gesture when the
-        next card would open it again a minute later. Pressing it off and
-        having it come back is the press that did nothing.
+        While the microphone opened on every card, the only reason to press
+        the button was to stop it, so the button and the setting were the
+        same thing. With it opening on ⌘K alone, pressing it anywhere else
+        means "listen now" — and turning off a thing that is already off is
+        not what somebody reaching for a microphone wants. The setting is
+        still in Settings, and it governs ⌘K.
       */
-      let wanted = (message["on"] as? Bool) ?? true
-      AppDelegate.listensItself = wanted
-      Log.say("mic: \(wanted ? "on" : "off") from the panel")
-      if wanted { dictate() } else { voice.stop() }
+      if (message["on"] as? Bool) ?? true { dictate() } else { voice.stop() }
     case "stop":
       run(Job(id: UUID().uuidString, kind: "agent.stop", args: [:], fromPhone: false)) { _, _, _ in }
     case "answer", "approve", "decline":

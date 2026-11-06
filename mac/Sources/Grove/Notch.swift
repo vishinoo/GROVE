@@ -42,7 +42,7 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     answer has to be the same at every one of them and the one that gets
     forgotten is the one somebody has to click.
   */
-  var wantsMic: ((String, [String: Any], Bool) -> Bool)?
+  var wantsMic: ((String, [String: Any]) -> Bool)?
 
   private var notchRect = NSRect.zero
   private var notchSize = CGSize(width: 190, height: 32)
@@ -203,7 +203,7 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     payload["mode"] = mode
     // Before the card is drawn, so it is drawn with its microphone already on
     // rather than switched on a frame later.
-    if payload["mic"] == nil, wantsMic?(mode, data, pin) == true { payload["mic"] = true }
+    if payload["mic"] == nil, wantsMic?(mode, data) == true { payload["mic"] = true }
     js("grove.show(\(json(payload)))")
     if let closeAfter {
       closeTimer = Timer.scheduledTimer(withTimeInterval: closeAfter, repeats: false) { [weak self] _ in
