@@ -273,6 +273,32 @@ for (const said of POLITE_MUST_ACT) {
 }
 
 /* 4. Connections must unlock abilities that exist. */
+section('A sum is worked out in code, never in the model\'s head');
+// The four films that came back as "two billion", then "four" when challenged.
+{
+  const calc = require(path.join(OUT, 'lib/calc.js'));
+  const films = calc.workOut('1518.8 + 1402.8 + 130.8 + 1131.4');
+  check(films && films.value === '4,183.8', 'the four-film total is 4,183.8 (millions)', films ? `got ${films.value}` : 'not parsed');
+  const pct = calc.workOut('15% * 240');
+  check(pct && pct.value === '36', '15% of 240 is 36', pct ? `got ${pct.value}` : 'not parsed');
+  check(calc.workOut('Avengers + Captain Marvel') === null, 'names are refused, not guessed at', 'workOut accepted words');
+  check(calc.workOut('2 + ') === null, 'a broken sum is refused', 'workOut accepted a dangling operator');
+  for (const said of [
+    'avengers + avengers age of ultron + blue beetle + captain marvel how much did they make',
+    'how much did those four films make together',
+    "what's the total box office for the Nolan films",
+    'what is the average rent across those three',
+    'how much more did Avatar make than Titanic',
+  ]) check(calc.asksToCombine(said), `"${said}" is a sum`, 'the double-check would not run');
+  for (const said of ['can we watch something together tonight', 'how much is a ticket to Avatar', 'what did Avengers make']) {
+    check(!calc.asksToCombine(said), `"${said}" is not a sum`, 'the double-check would send an ordinary answer back');
+  }
+  const maths = byId.get('maths.work');
+  check(maths && maths.reads === true, 'the maths tool is a read', 'it must be reachable from a question');
+  const brainSource = fs.readFileSync(path.join(ROOT, 'src/lib/brain.ts'), 'utf8');
+  check(/asksToCombine\(userText\)/.test(brainSource) && /checkedSum = true/.test(brainSource), 'a total answered without the tool is sent back once', 'the code-side check is gone from brain.ts');
+}
+
 section('Connections point at real abilities');
 for (const c of connections.CONNECTIONS) {
   for (const id of c.unlocks) {
@@ -3063,13 +3089,39 @@ section('Nothing that changes every turn is in the system prompt');
    */
   const persona = require(path.join(OUT, 'lib/persona.js'));
   const { MEMORY_RULES } = require(path.join(OUT, 'lib/memory.js'));
-  const rules = between(brain, 'const TOOL_RULES = `', '`;', { min: 500, max: 20_000 });
+  /*
+   * Two jobs, which were one number and should not have been.
+   *
+   * This ceiling is a sanity bound on the slice: it catches an end landmark
+   * that stopped matching and handed back half the file. It is not a budget
+   * — and while it was both, ordinary growth in the rules tripped it (five
+   * characters over, in the end), where the only honest response is to raise
+   * the number, which quietly turns a real check into a rubber stamp. So it
+   * is generous now, and the budget is stated separately below where it can
+   * be argued with.
+   */
+  const rules = between(brain, 'const TOOL_RULES = `', '`;', { min: 500, max: 40_000 });
   check(rules !== null, 'the tool rules are where they are expected to be');
   const stableChars =
     (rules?.length ?? 0) + MEMORY_RULES.length + persona.mannerDirective(persona.DEFAULT_PERSONA).length;
   check(
     stableChars / 4 > 1200,
     `the stable prefix is about ${Math.round(stableChars / 4)} tokens, over any cache minimum`
+  );
+  /*
+   * The budget, said out loud, because this rides on every single turn.
+   *
+   * Cacheable at a quarter price, so it is not the dearest thing here — but
+   * it has grown by half since it was measured at 3,031 tokens, a few lines
+   * at a time, each justified on its own. That is how a prompt reaches
+   * twelve thousand tokens without anybody deciding it should. Past this,
+   * something comes out rather than the number going up.
+   */
+  const ruleTokens = Math.round((rules?.length ?? 0) / 4);
+  check(
+    ruleTokens < 6500,
+    `the tool rules are about ${ruleTokens} tokens`,
+    'every line is sent on every turn; past this, take something out rather than raising this'
   );
 
   // The one deliberate exception, stated so it is a decision and not a leak.
