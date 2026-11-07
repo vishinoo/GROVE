@@ -132,7 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     shortcut.onEscape = { [weak self] in
       guard let self, self.notch.isShowing else { return false }
-      self.voice.stop()
+      self.stopListening()
       self.captured = nil
       self.notch.close()
       return true
@@ -246,7 +246,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   private func think(_ instruction: String) {
     guard let captured else { return }
-    voice.stop()
+    stopListening()
     notch.show("thinking", ["text": captured.text, "ask": instruction], pin: true)
     Task { @MainActor in
       let reply = await Thinking.run(instruction: instruction, text: captured.text, link: link, manner: look.manner)
@@ -343,7 +343,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.run(Job(id: UUID().uuidString, kind: kind, args: ["what": what, "say": say], fromPhone: false)) { _, _, _ in }
       case .act(let goal, let say):
         Recent.said(instruction, did: "On Chrome: \(goal)")
-        self.runAgent(Job(id: UUID().uuidString, kind: "agent.start", args: ["goal": goal, "say": say], fromPhone: false)) { _, _, _ in }
+        self.runAgent(Job(id: UUID().uuidString, kind: "agent.start", args: ["goal": goal, "say": say, "said": instruction], fromPhone: false)) { _, _, _ in }
       case .message(let to, let text):
         Recent.said(instruction, did: "Text to \(to): \(text)")
         self.runAgent(Job(id: UUID().uuidString, kind: "agent.message", args: ["to": to, "text": text, "goal": "Text \(to)"], fromPhone: false)) { _, _, _ in }
@@ -488,12 +488,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   /** The mic beside the ask box: what is said fills the box, and is sent when they stop. */
+  /**
+    The microphone stays on until they close it.
+
+    It used to be one sentence per press: speak, it sends, the microphone
+    shuts, and saying the next thing meant reaching for the key again. In the
+    middle of anything — a game with a clock, a back-and-forth about what to
+    change — that reach is the whole cost, and it is paid every sentence.
+
+    So it re-arms after each one. The ways out are all the ordinary ones: the
+    ✕, Escape, the microphone button, or the panel closing. And it gives up
+    after three silences in a row, because a microphone left open in a pocket
+    is not a feature anybody asked for.
+  */
   private func dictate() {
     notch.hold()
+    listening = true
+    quiet = 0
+    listenOn()
+  }
+
+  private var listening = false
+  private var quiet = 0
+
+  private func listenOn() {
     voice.listen(
       partial: { [weak self] words in self?.notch.send("dictate", ["words": words]) },
-      done: { [weak self] said in self?.notch.send("dictate", ["words": said ?? "", "final": true]) }
+      done: { [weak self] said in
+        guard let self else { return }
+        self.notch.send("dictate", ["words": said ?? "", "final": true])
+        let heard = !(said ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+        self.quiet = heard ? 0 : self.quiet + 1
+        guard self.listening, self.quiet < 3, AppDelegate.listensItself else {
+          if self.listening { Log.say("mic: three silences, closing it") }
+          self.stopListening()
+          return
+        }
+        // A beat, so the recogniser is not torn down and rebuilt in the same
+        // instant it finished, which it does not survive on every build.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+          guard self.listening else { return }
+          self.listenOn()
+        }
+      }
     )
+  }
+
+  /** Every way out of listening goes through here, so none of them can miss one. */
+  private func stopListening() {
+    // The microphone goes either way: `begin` listens without setting the
+    // flag, and guarding the whole function on it meant the selected-text
+    // listen survived everything that was supposed to end it.
+    let wasSticky = listening
+    listening = false
+    quiet = 0
+    voice.stop()
+    if wasSticky { notch.send("dictate", ["words": "", "final": true, "off": true]) }
   }
 
   private func fromPanel(_ message: [String: Any]) {
@@ -525,7 +575,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSPasteboard.general.setString(text, forType: .string)
       }
     case "close":
-      voice.stop()
+      stopListening()
       captured = nil
       notch.close()
     case "run":
@@ -553,11 +603,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         not what somebody reaching for a microphone wants. The setting is
         still in Settings, and it governs ⌘K.
       */
-      if (message["on"] as? Bool) ?? true { dictate() } else { voice.stop() }
+      if (message["on"] as? Bool) ?? true { dictate() } else { stopListening() }
     case "stop":
       run(Job(id: UUID().uuidString, kind: "agent.stop", args: [:], fromPhone: false)) { _, _, _ in }
     case "answer", "approve", "decline":
-      voice.stop()
+      stopListening()
       let kind = message["t"] as? String ?? ""
       // Said in the log in so many words: a send that happened should never
       // leave anyone wondering whether a person pressed for it.
@@ -693,6 +743,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let began = Date()
     final class Pace { var next = Date().addingTimeInterval(25); var gap: TimeInterval = 45; var told = Date.distantPast }
     let pace = Pace()
+    /*
+      Said back at once when they speak mid-task.
+
+      The model's answer to an interruption is a move away — a second or
+      two at best — and on anything with a clock on it that is already too
+      late. A word in code, now, is the difference between "it heard me" and
+      saying it again louder. It carries their own words back so it cannot
+      be a canned line that is wrong about what they said.
+    */
+    agent.onHeard = { [weak self] said in
+      guard let self else { return }
+      let short = said.count > 60 ? String(said.prefix(57)) + "…" : said
+      self.link.news(what: "Heard mid-task", state: "working", said: "Got it — \(short)", speak: true)
+      self.notch.send("heardyou", ["words": short])
+    }
     agent.onStep = { [weak self] goal, steps in
       guard let self else { return }
       self.notch.show("job", ["title": goal, "from": from, "steps": steps, "at": max(0, steps.count - 1)], pin: true)
@@ -751,7 +816,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       // The phone is waiting on an answer, so its runs check in sooner.
       let raw: AgentResult
       switch job.kind {
-      case "agent.start": raw = await self.agent.start(goal: goal, budget: 240)
+      case "agent.start": raw = await self.agent.start(goal: goal, budget: 240, said: job.args["said"] ?? "")
       case "agent.message": raw = await self.agent.message(to: job.args["to"] ?? "", text: job.args["text"] ?? "", app: job.args["app"] ?? "messages")
       default: raw = await self.agent.resume(task: job.args["task"] ?? "", answer: job.args["answer"] ?? "", approve: job.args["approve"] == "yes")
       }

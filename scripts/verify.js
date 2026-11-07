@@ -3524,12 +3524,12 @@ section('Grove hands over what it should not be doing itself');
    * a thing it can actually tell, and the wording changed with it.
    */
   check(
-    /REACHING FOR ONE YOURSELF IS RARE, and only ever for A THING TO BE MADE/.test(delegates),
-    'the decision hands over unasked only for something to be made'
+    /NEVER REACH FOR ONE YOURSELF/.test(delegates) && /Delegates\.wanted\(in: said\) == nil/.test(agent),
+    'another AI only when their own words name one, checked in code against what they said'
   );
   check(
-    /you cannot make an image or a video at all/i.test(delegates),
-    'and told plainly what it cannot do, rather than left to judge its own range'
+    /a gift they use on purpose/.test(delegates),
+    'and told that another AI is theirs to ask for, not a tool for every small thing'
   );
   // The menu is built from the list, so a delegate added later is offered.
   check(
@@ -4575,7 +4575,7 @@ section('A question is Grove\'s own');
     'with the reason, which is about them rather than about capability'
   );
   check(
-    /only ever for A THING TO BE MADE/.test(delegates),
+    /NEVER REACH FOR ONE YOURSELF/.test(delegates),
     'and handing over needs an artefact at the end of it'
   );
   check(
@@ -4837,6 +4837,120 @@ section('A mode is asked for however they ask for it');
     /is a thing they set up on their Mac[\s\S]{0,400}?"Start study mode on the Mac"/.test(brain),
     'and the rules say the goal must spell out "<name> mode on the Mac"',
     'the Mac matches on that phrase; a goal that only implies it reaches nothing'
+  );
+}
+
+
+/*
+ * Said mid-task, acted on mid-task
+ * --------------------------------
+ *
+ * Something said while the agent was working went into the task's history —
+ * which is only read on the NEXT model call. So a click or a long type
+ * already under way ran to completion first, and on anything with a clock
+ * on it the answer arrived after it mattered: "by the time it understands
+ * my complaint it is already typing, and the timer runs out".
+ *
+ * Two halves, and they are different problems. The move in flight has to be
+ * DROPPED, which is about correctness. And they have to hear something
+ * straight away, which is about not saying it again louder — the model's
+ * reply is a move away at best, and in code it is now.
+ */
+section('Said mid-task, acted on mid-task');
+{
+  const agent = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Agent.swift'), 'utf8');
+  const main = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/main.swift'), 'utf8');
+
+  check(/var interrupted = false/.test(agent), 'a task can be told its next move is stale');
+  const redirect = between(agent, 'func redirect(_ said: String) -> String? {', '\n  }\n', { min: 300, max: 1800 });
+  check(redirect !== null, 'the redirect is where it is expected to be');
+  check(
+    redirect !== null && /task\.interrupted = true/.test(redirect) && /onHeard\?\(trimmed\)/.test(redirect),
+    'speaking sets it and is answered at once',
+    'history alone is read a move too late'
+  );
+  check(
+    /if task\.interrupted \{[\s\S]{0,400}?continue\s*\n\s*\}/.test(agent),
+    'and the move decided without knowing is dropped rather than made',
+    'one model call instead of a click, a wait, and then the model call'
+  );
+  // The drop has to sit before the action runs, or it drops nothing.
+  const at = agent.indexOf('if task.interrupted {');
+  const acts = agent.indexOf('let action = (move["action"] as? String ?? "").lowercased()');
+  check(at > 0 && acts > 0 && at < acts, 'before the move is read, not after it has been made');
+  check(
+    /self\.link\.news\(what: "Heard mid-task", state: "working", said: "Got it — \\\(short\)", speak: true\)/.test(main),
+    'what they said comes back in their own words',
+    'a canned line is wrong about half of what it answers'
+  );
+}
+
+/*
+ * The microphone stays on until they close it
+ * -------------------------------------------
+ *
+ * One sentence per press: speak, it sends, the microphone shuts, and the
+ * next thing means reaching for the key again. In the middle of anything —
+ * a game with a clock, a back-and-forth about what to change — that reach is
+ * the whole cost and it is paid every sentence.
+ *
+ * The danger is the opposite one, so it gives up after three silences: a
+ * microphone left open in a pocket is not a feature anybody asked for.
+ */
+section('The microphone stays on until they close it');
+{
+  const main = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/main.swift'), 'utf8');
+  check(/private func listenOn\(\) \{/.test(main), 'listening re-arms itself');
+  check(
+    /guard self\.listening, self\.quiet < 3, AppDelegate\.listensItself else \{/.test(main),
+    'and stops after three silences, or when the setting is off',
+    'a microphone left open in a pocket is not a feature'
+  );
+  /*
+   * Every way out goes through one function. Five places used to call
+   * `voice.stop()` directly, and with a flag that re-arms, the one that is
+   * forgotten is a microphone that comes back after they closed it.
+   */
+  const loose = main.split('\n').map((l, i) => [i + 1, l])
+    .filter(([, l]) => /\bvoice\.stop\(\)/.test(l) && !/private func stopListening/.test(l));
+  check(
+    loose.length === 1,
+    'and exactly one place turns it off',
+    loose.map(([n, l]) => `${n}: ${l.trim()}`).join('\n         ')
+  );
+  check(
+    /let wasSticky = listening/.test(main),
+    'which stops the microphone whether or not it was the re-arming kind',
+    'the selected-text listen does not set the flag, and used to survive everything meant to end it'
+  );
+}
+
+/*
+ * A tidy-up may not take their session with it
+ * --------------------------------------------
+ *
+ * "Close my other tabs" was written as a loop over every Chrome window
+ * calling close on each — which is not the other tabs, it is everything they
+ * were working in. It did exactly that: a mode opened a new tab and shut the
+ * one they were on.
+ */
+section('A tidy-up may not take their session with it');
+{
+  const modes = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Modes.swift'), 'utf8');
+  const step = between(modes, 'if want.range(of: #"\\bclose\\b.*\\btabs?\\b"#', 'else if want.range', { min: 300, max: 2000 });
+  check(step !== null, 'the tidy-up step is where it is expected to be');
+  check(
+    step !== null && !/close w\b/.test(step) && /close tab i of w/.test(step),
+    'it closes tabs, never windows',
+    'closing every window is not "close my other tabs", it is closing what they were working in'
+  );
+  check(
+    step !== null && /set keep to active tab index of w/.test(step) && /if i is not keep then/.test(step),
+    'and keeps the one they are looking at'
+  );
+  check(
+    step !== null && /set w to front window/.test(step) && !/every window/.test(step),
+    'in the front window only, so another window of theirs is untouched'
   );
 }
 

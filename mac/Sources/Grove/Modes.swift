@@ -248,15 +248,30 @@ enum Modes {
     for step in steps where step.kind == "do" {
       let want = step.value.lowercased()
       if want.range(of: #"\bclose\b.*\btabs?\b"#, options: .regularExpression) != nil {
-        // Every window but the one this mode is about to open — which does
-        // not exist yet, which is why this runs first.
+        /*
+          The OTHER tabs in the front window. Not windows, and never all of
+          them.
+
+          The first version of this closed every Chrome window, which is not
+          "close my other tabs", it is closing the thing they were working
+          in — and it did exactly that: a mode opened a new tab and shut the
+          one they were on. A step meant to tidy up cannot be allowed to
+          take somebody's session with it.
+
+          One window, its active tab kept, nothing else touched. Anything
+          they had in another window is theirs and stays.
+        */
         Script.run("""
         tell application "Google Chrome"
-          if it is running then
-            repeat with w in (every window)
-              try
-                close w
-              end try
+          if it is running and (count of windows) > 0 then
+            set w to front window
+            set keep to active tab index of w
+            repeat with i from (count of tabs of w) to 1 by -1
+              if i is not keep then
+                try
+                  close tab i of w
+                end try
+              end if
             end repeat
           end if
         end tell

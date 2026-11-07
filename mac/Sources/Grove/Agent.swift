@@ -108,6 +108,17 @@ final class Agent {
     var delegate: Delegates.Delegate?
     /** What rides above the goal on every move: what this job is, when it is not obvious from the page. */
     var note = ""
+    /**
+      They said something while it was working, so the move in flight is now
+      the wrong move.
+
+      Appending to the history was not enough: history is only read on the
+      NEXT model call, so a click or a long type already under way ran to
+      completion first — and on anything with a clock on it, the answer
+      arrived after it mattered. "By the time it understands my complaint it
+      is already typing."
+    */
+    var interrupted = false
     /** It said done after a move that changed nothing, and was asked to look again. */
     var doubted = false
     /** Times the check refused its done. */
@@ -171,6 +182,8 @@ final class Agent {
   }
   /** Shown in the notch as it goes. */
   var onStep: ((String, [String]) -> Void)?
+  /** Something said mid-task, to be acknowledged out loud before the next move. */
+  var onHeard: ((String) -> Void)?
 
   private static let maxSteps = 60
   /** A whole game of chess is a few hundred moves and waits, and that is the job, not a loop. */
@@ -192,7 +205,21 @@ final class Agent {
     job belongs on, or a new tab. The rule that matters is still in the brief
     — never a site because it happened to be open.
   */
-  func start(goal: String, budget: TimeInterval = 60) async -> AgentResult {
+  func start(goal written: String, budget: TimeInterval = 60, said: String = "") async -> AgentResult {
+    /*
+      Another AI only when their own words name one. The decision wrote "Ask
+      ChatGPT to…" into goals for a game, a finance video, a science fact —
+      handing their prompt to another assistant for something Grove could just
+      do. Told in the rule not to, it still did; so it is checked against what
+      they actually said, and a hand-off they did not ask for is taken back
+      out of the goal and done here. From the phone there are no words of
+      theirs to check here, and the phone's rules say the same thing.
+    */
+    var goal = written
+    if !said.isEmpty, let to = Delegates.wanted(in: written), Delegates.wanted(in: said) == nil {
+      goal = Delegates.asked(from: written, to: to)
+      Log.say("agent: not handing to \(to.name) — they did not ask for it")
+    }
     // One run at a time. A new ask while one was going started a second loop
     // beside it, and the two drove the same tab: moves in a game they had
     // just said they would play themselves.
@@ -352,7 +379,14 @@ final class Agent {
     // what is happening rather than vanishing into a prompt.
     task.shown.append("You: \(trimmed.prefix(60))")
     task.touched = Date()
+    // Set before anything else, so a step part-way through drops what it was
+    // about to do rather than finishing it and reading this afterwards.
+    // What they said is newer than what it decided.
+    task.interrupted = true
     Log.say("agent: redirected \(task.id) — \(trimmed.prefix(60))")
+    // Heard at once, in a word. Three seconds of nothing after speaking is
+    // how somebody concludes it did not hear them and says it again.
+    onHeard?(trimmed)
     return task.goal
   }
 
@@ -569,6 +603,18 @@ final class Agent {
       }
       // Stop pressed while the model was thinking: the move it came back with is not made.
       if mine != current { return AgentResult(state: "stopped", spoken: "Stopped.", plain: true, task: task.id) }
+      /*
+        They said something while this move was being decided, so it was
+        decided without knowing it. Dropped, and the next one is made with
+        their words in front of it — which costs one model call instead of a
+        click, a wait, and then the model call.
+      */
+      if task.interrupted {
+        task.interrupted = false
+        task.history.append("You dropped the move you were about to make, because they spoke. Do what they just said.")
+        Log.say("agent: \(task.id) dropped a move — they said something")
+        continue
+      }
       let action = (move["action"] as? String ?? "").lowercased()
       let n = (move["n"] as? Int) ?? Int("\(move["n"] ?? "")") ?? -1
       let text = move["text"] as? String ?? ""
