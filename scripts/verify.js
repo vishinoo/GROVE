@@ -4138,7 +4138,27 @@ section('Grove works beside them, not on top of them');
   // looking — rather than excused by a line number, which moves.
   const borrowBody = between(agent, 'static func borrow<T>(_ body: () async -> T) async -> T {', '\n  /** Brings the task', { min: 400, max: 2600 });
   check(borrowBody !== null, 'borrow is where it is expected to be before the sweep');
-  const elsewhere = borrowBody === null ? agent : agent.replace(borrowBody, '');
+  /*
+   * One exception, and it is the opposite case rather than a loophole.
+   *
+   * Borrowing is for the middle of a run: wait for a gap, do the thing, give
+   * the screen back. Delivering is the end of one — the video is playing, the
+   * game is loaded — and a thing fetched and left face down behind their own
+   * window has not been delivered. It must not wait for a gap and must not
+   * give the focus back, so it cannot go through borrow.
+   *
+   * Carved out by its own landmark rather than by widening the sweep, so
+   * every other bare front() still fails and this one is a decision somebody
+   * wrote down.
+   */
+  const delivery = between(agent, 'And a tab that stays is put in front of them.', 'return AgentResult(state: "done"', { min: 400, max: 2000 });
+  check(delivery !== null, 'the delivery is where it is expected to be');
+  check(
+    delivery !== null && /await Browser\.front\(\)/.test(delivery),
+    'a finished job puts what it opened in front of them',
+    'Grove works in a window of its own, so a video left behind theirs never happened'
+  );
+  const elsewhere = [borrowBody, delivery].reduce((t, part) => (part === null ? t : t.replace(part, '')), agent);
   const bare = elsewhere
     .split('\n')
     .map((line, i) => [i + 1, line])
@@ -4951,6 +4971,59 @@ section('A tidy-up may not take their session with it');
   check(
     step !== null && /set w to front window/.test(step) && !/every window/.test(step),
     'in the front window only, so another window of theirs is untouched'
+  );
+}
+
+
+/*
+ * Two ways "play Krillion" went nowhere
+ * -------------------------------------
+ *
+ * **It asked ChatGPT to play it.** In the log, verbatim: `act("Ask ChatGPT to
+ * play the game Krillion on krillion.com for them")`. None of these
+ * assistants can press a key in somebody's browser, so that is a sentence
+ * that cannot come true — and the delegation rule had covered questions and
+ * conversation but never the thing Grove is actually for.
+ *
+ * **And it invented the address.** `krillion.com` is not the game. A name is
+ * not a domain, and a wrong domain looks exactly like a working one until it
+ * loads — which is the expensive kind of wrong, because the run carries on
+ * from a page that was never the right page.
+ *
+ * No URL is hardcoded here on purpose. Baking in a guess is the same mistake
+ * one level up, and `Routes` already keeps what worked the first time.
+ */
+section('Two ways "play Krillion" went nowhere');
+{
+  const delegates = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Delegates.swift'), 'utf8');
+  const agent = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Agent.swift'), 'utf8');
+
+  check(
+    /NEVER FOR SOMETHING YOU DO ON THEIR MAC\./.test(delegates),
+    'work Grove has hands for is never handed to an assistant that has none'
+  );
+  check(
+    /None of these assistants can press a key in their browser/.test(delegates),
+    'with the reason, which is about capability rather than about etiquette'
+  );
+  check(
+    /Playing a game, opening a site, putting a video or a film on/.test(delegates),
+    'and the kinds named, since "play Krillion" was the one that got through'
+  );
+
+  check(
+    /NEVER INVENT AN ADDRESS FROM A NAME\./.test(agent),
+    'a name is not a domain'
+  );
+  check(
+    /a wrong domain looks exactly like a working one until it loads/.test(agent),
+    'with the reason it is worth a rule, which is that the run carries on from it'
+  );
+  // No hardcoded answer: that is the same mistake with a better guess.
+  check(
+    !/krillion\.com["/]/.test(agent) && !/krillion/i.test(fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Modes.swift'), 'utf8')),
+    'and no address is baked in for it',
+    'Routes already keeps what worked the first time; a guess in the source cannot be corrected by using it'
   );
 }
 

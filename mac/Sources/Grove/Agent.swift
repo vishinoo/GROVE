@@ -935,6 +935,25 @@ final class Agent {
         if (move["close"] as? Bool) == true, task.opened {
           _ = await Browser.run("tell application \"Google Chrome\" to close \(task.tab)")
           task.tab = ""
+        } else if !task.tab.isEmpty, task.desk.isEmpty {
+          /*
+            And a tab that stays is put in front of them.
+
+            Grove works in a window of its own now, and gives the screen back
+            after every real click, which is right for the middle of a run and
+            wrong for the end of one: a video was playing, a game was loaded, a
+            recipe was open — all of it behind the window they were looking at,
+            so from where they sat nothing had happened at all. "The YouTube
+            and other tabs don't open."
+
+            Not a contradiction of working beside them. That rule is about not
+            taking the screen while thinking; this is the delivery, and a thing
+            fetched and left face down has not been delivered. The close branch
+            above is the same judgement from the other side — one hides what
+            was only a means, this shows what was the point.
+          */
+          await Browser.front()
+          _ = await Browser.run("tell application \"Google Chrome\" to activate")
         }
         return AgentResult(state: "done", spoken: claim.isEmpty ? "Done on your Mac." : claim, task: task.id, detail: page.url)
       default:
@@ -1001,6 +1020,7 @@ final class Agent {
   Before choosing, look at what the last move actually did ("Result" lines in So far, and the page itself) and at your plan. On your first move only, also include "plan": the three to six steps you will take, in one line.
   Reply with ONE next move as JSON. Every move also carries "step": what you are doing, as a person would say it in four to seven words, naming the actual thing. Never numbers, brackets or button names in step.
   {"action":"go","url":"https://...","tab":2} — open an address; with "tab", in that one of their open tabs, in the same move. Go straight to search addresses when you can: https://www.youtube.com/results?search_query=..., https://www.google.com/search?q=..., https://www.amazon.com/s?k=..., https://www.linkedin.com/jobs/search/?keywords=..., https://www.indeed.com/jobs?q=...
+  NEVER INVENT AN ADDRESS FROM A NAME. A game, a tool or a site they named is not automatically <name>.com — "play Krillion" went to krillion.com, which is not the game, and a wrong domain looks exactly like a working one until it loads. If you do not KNOW the address, search for it and open the result that is actually the thing. A name you half-recognise is a name to search for, and a search costs one move.
   {"action":"click","n":12,"summary":"..."} — when the click puts something in a cart or an order, summary is the question they will answer: the item, how many and the price, Check the quantity is what they asked for (one, unless they said more) before adding.
   {"action":"type","n":4,"text":"...","enter":true}
   {"action":"keys","text":"crane","enter":true} — real key presses, for pages that listen to the keyboard rather than a box: games like Wordle, shortcuts. Not for typing into a field. For named keys, give their names separated by spaces, several at once when that is the plan: "ArrowLeft ArrowLeft ArrowUp", "Escape", "Space", "Tab", "Backspace".
@@ -1392,9 +1412,15 @@ enum Browser {
     event for AppleScript's default two minutes, and a run sat that long
     between two steps with nothing on screen. Twelve seconds is far more than
     any read or click needs.
+
+    And a poll gets far less. A page mid-navigation (YouTube, every time)
+    holds the first Apple event until it times out, so a readiness check with
+    a five-second deadline sat twelve seconds on its first poll and then
+    twelve more on the retry — which is where "reading the page took 12.6s"
+    came from, not the reader. A poll that fails fast is just asked again.
   */
-  static func run(_ source: String) async -> (Bool, String) {
-    let bounded = "with timeout of 12 seconds\n\(source)\nend timeout"
+  static func run(_ source: String, limit: Int = 12) async -> (Bool, String) {
+    let bounded = "with timeout of \(limit) seconds\n\(source)\nend timeout"
     return await withCheckedContinuation { c in Script.run(bounded) { ok, out in c.resume(returning: (ok, out)) } }
   }
 
@@ -1510,7 +1536,7 @@ enum Browser {
     let until = Date().addingTimeInterval(seconds)
     try? await _Concurrency.Task.sleep(nanoseconds: 250_000_000)
     while Date() < until {
-      let state = await js("document.readyState+'|'+(document.body?document.body.innerText.length:0)")
+      let state = await js("document.readyState+'|'+(document.body?document.body.innerText.length:0)", limit: 2)
       let bits = state.split(separator: "|")
       if bits.count == 2, bits[0] != "loading", (Int(bits[1]) ?? 0) > 150 { break }
       try? await _Concurrency.Task.sleep(nanoseconds: 250_000_000)
@@ -1530,9 +1556,9 @@ enum Browser {
     var last = -1, still = 0
     while Date() < until {
       try? await _Concurrency.Task.sleep(nanoseconds: 150_000_000)
-      let here = await js("location.href")
+      let here = await js("location.href", limit: 2)
       if here != start && here != "error" { await readable(within: max(1, until.timeIntervalSinceNow + 1.5)); return }
-      let count = Int(await js("String(window.__groveQuiet===undefined?-1:window.__groveQuiet)")) ?? -1
+      let count = Int(await js("String(window.__groveQuiet===undefined?-1:window.__groveQuiet)", limit: 2)) ?? -1
       if count == last { still += 1; if still >= 2 { return } } else { still = 0; last = count }
     }
   }
@@ -1956,8 +1982,8 @@ enum Browser {
     await run("tell application \"Google Chrome\" to get URL of \(tab)").1
   }
 
-  static func js(_ code: String) async -> String {
-    let (ok, out) = await run("tell application \"Google Chrome\" to execute \(tab) javascript \(quoted(code))")
+  static func js(_ code: String, limit: Int = 12) async -> String {
+    let (ok, out) = await run("tell application \"Google Chrome\" to execute \(tab) javascript \(quoted(code))", limit: limit)
     if !ok { lastError = out }
     return ok ? out : "error"
   }
@@ -1997,13 +2023,14 @@ enum Browser {
         return v||e.placeholder||e.title||(edit?'text box':'');
       }
       function field(e){return /^(INPUT|TEXTAREA|SELECT)$/.test(e.tagName)||e.isContentEditable||e.getAttribute('role')==='textbox';}
+      var T=[performance.now()];function tick(){T.push(Math.round(performance.now()-T[0]));}
       var roots=[];(function walk(root){roots.push(root);var kids=root.querySelectorAll('*');for(var i=0;i<kids.length;i++){if(kids[i].shadowRoot)walk(kids[i].shadowRoot);}
         root.querySelectorAll('iframe').forEach(function(f){try{var d=f.contentDocument;if(d&&d.body)walk(d);}catch(x){}});})(document);
       function all(q){var out=[];roots.forEach(function(r){r.querySelectorAll(q).forEach(function(e){out.push(e);});});return out;}
       function deepText(root){var t='';root.childNodes.forEach(function(c){
         if(c.nodeType===3)t+=c.textContent; else if(c.nodeType===1){var st=getComputedStyle(c); if(st.display==='none'||st.visibility==='hidden')return;
         if(c.shadowRoot)t+=' '+deepText(c.shadowRoot)+' '; if(/^(SCRIPT|STYLE|NOSCRIPT)$/.test(c.tagName))return; t+=deepText(c); if(/^(DIV|P|LI|TR|H[1-6]|SECTION|ARTICLE|BR)$/.test(c.tagName))t+='\\n';}});return t;}
-      all('[data-grove]').forEach(function(e){e.removeAttribute('data-grove');});
+      tick();all('[data-grove]').forEach(function(e){e.removeAttribute('data-grove');});tick();
       window.__grove=[];
       var out=[],n=0,h=innerHeight;
       var found=all(sel);
@@ -2018,7 +2045,7 @@ enum Browser {
       var rank=list.map(function(e,i){return {e:e,i:i,d:away(e)};});
       rank.sort(function(a,b){var pa=pop&&pop.contains(a.e)?0:1,pb=pop&&pop.contains(b.e)?0:1;if(pa!==pb)return pa-pb;var fa=field(a.e)&&a.d===0?0:1,fb=field(b.e)&&b.d===0?0:1;if(fa!==fb)return fa-fb;return a.d-b.d||a.i-b.i;});
       list=rank.map(function(x){return x.e;});
-      var pressed=new Set(),marks=[];
+      tick();var pressed=new Set(),marks=[];
       list.forEach(function(e){
         if(n>=140)return;
         var r=e.getBoundingClientRect();
@@ -2046,7 +2073,7 @@ enum Browser {
         if(r.bottom<0)it.where='above';else if(r.top>h)it.where='below';
         out.push(it); n++;
       });
-      var board=[];
+      tick();var board=[];
       all('[data-state],[evaluation],[aria-roledescription],[role=gridcell],[role=img][aria-label]').forEach(function(e){
         if(board.length>=90||e.hasAttribute('data-grove'))return;
         var r=e.getBoundingClientRect(); if(r.width<2||r.height<2)return;
@@ -2054,24 +2081,24 @@ enum Browser {
         var st=e.getAttribute('data-state')||e.getAttribute('evaluation')||'';
         if(l||st)board.push(l+(st&&l.toLowerCase().indexOf(st)<0?' {'+st+'}':''));
       });
-      var whole=(document.body?document.body.innerText:'')||'';
+      tick();var whole=(document.body?document.body.innerText:'')||'';
       if(whole.length<300&&document.body)whole=deepText(document.body);
       whole=whole.replace(/[ \\t]+/g,' ').replace(/\\n\\s*\\n+/g,'\\n');
       var at=0,top=document.elementFromPoint(innerWidth/2,Math.min(120,innerHeight/3));
       for(var k=0;k<4&&top&&at===0;k++,top=top.parentElement){var probe=(top.innerText||'').replace(/[ \\t]+/g,' ').trim().slice(0,40);if(probe.length>8){var i=whole.indexOf(probe);if(i>0)at=i;}}
       var start=Math.max(0,at-300);
       var text=(start>0?'(…from where the page is scrolled to)\\n':'')+whole.slice(start,start+4000)+(whole.length>start+4000?'\\n(…more below)':'');
-      marks.forEach(function(m,i){m.setAttribute('data-grove',i);});
+      tick();marks.forEach(function(m,i){m.setAttribute('data-grove',i);});tick();
       var big=0;all('canvas,iframe').forEach(function(e){var r=e.getBoundingClientRect();big=Math.max(big,(Math.min(r.right,innerWidth)-Math.max(r.left,0))*(Math.min(r.bottom,innerHeight)-Math.max(r.top,0))/(innerWidth*innerHeight));});
       var frames=[];all('iframe').forEach(function(f){var r=f.getBoundingClientRect();if(r.width*r.height<innerWidth*innerHeight*0.08||!f.src||/^(about|javascript|data):/.test(f.src))return;var same=false;try{same=!!(f.contentDocument&&f.contentDocument.body);}catch(x){}if(!same)frames.push((f.title||f.name||'frame').slice(0,60)+' at '+f.src.slice(0,180)+' ('+Math.round(r.width)+'x'+Math.round(r.height)+')');});
       var popText=pop?(pop.innerText||'').replace(/\\s+/g,' ').trim().slice(0,240):'';
-      return JSON.stringify({loading:document.readyState==='loading',url:location.href,title:document.title,items:out,board:board.join('\\n'),text:text,chess:groveChessText(),visual:big>0.25,popup:popText,frames:frames.join('\\n')});
+      return JSON.stringify({loading:document.readyState==='loading',url:location.href,title:document.title,items:out,board:board.join('\\n'),text:text,chess:groveChessText(),visual:big>0.25,popup:popText,frames:frames.join('\\n'),took:(tick(),T.slice(1).join('/'))});
     })()
     """
     let began = Date()
     let raw = await js(code)
     let took = Date().timeIntervalSince(began)
-    if took > 1.5 { Log.say("agent: reading the page took \(String(format: "%.1f", took))s") }
+    if took > 1.5 { Log.say("agent: reading the page took \(String(format: "%.1f", took))s (js ms roots/unmark/rank/items/board/text/mark/end: \(((try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])?["took"] as? String) ?? "?"))") }
     guard let data = raw.data(using: .utf8),
           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
       var page = Page(url: await url())
