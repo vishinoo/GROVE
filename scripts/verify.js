@@ -4778,6 +4778,68 @@ section('⌘V works, and the colour goes both ways');
   );
 }
 
+
+/*
+ * A mode is asked for however they ask for it
+ * -------------------------------------------
+ *
+ * The matcher wanted the whole sentence to BE the mode — a verb from a fixed
+ * list, the name, nothing else — so "activate study mode" and "put on study
+ * mode" did nothing at all. The verb list was never going to be complete,
+ * because there is no end to the ways somebody asks for a thing.
+ *
+ * Ending with the name is the rule that generalises: everything in front is
+ * free, "what's a good study technique" still names no mode because it does
+ * not end there, and a SIGNAL is required — the word "mode", or a verb of
+ * starting or stopping — so the bare word "study" is never a command.
+ *
+ * And the phone had its own version of the problem: "play Krillion" and
+ * "turn on study mode" both went to the MUSIC tool, because its description
+ * ended "songs not in their library play on YouTube" and a game looks like a
+ * song that is not in the library.
+ */
+section('A mode is asked for however they ask for it');
+{
+  const modes = fs.readFileSync(path.join(ROOT, 'mac/Sources/Grove/Modes.swift'), 'utf8');
+  const brain = fs.readFileSync(path.join(ROOT, 'src/lib/brain.ts'), 'utf8');
+
+  const heard = between(modes, 'static func heard(_ said: String) -> (start: Bool, mode: Mode)? {', '\n  }\n', { min: 600, max: 3400 });
+  check(heard !== null, 'the matcher is where it is expected to be');
+  check(
+    heard !== null && heard.includes('+ name + #"(?:\\s+mode)?$"#'),
+    'a sentence that ends with the mode names it, whatever is in front',
+    'anchoring both ends meant only a sentence that was nothing but the mode counted'
+  );
+  check(
+    heard !== null && /t\.contains\("mode"\) \|\| t\.range\(/.test(heard),
+    'and a signal is still required, so the bare word is never a command',
+    '"study" on its own must not start anything'
+  );
+  check(
+    heard !== null && heard.includes('if let r = t.range(of: #"\\s+(on|off)$"#, options: .regularExpression) {'),
+    'with the switch taken off the end, since "turn study mode on" puts it there'
+  );
+
+  // The phone's half.
+  const music = ALL.find((a) => a.id === 'mac.music');
+  const use = ALL.find((a) => a.id === 'mac.use');
+  check(!!music && /ONLY MUSIC/.test(music.what), 'the Mac music tool says it is only music');
+  check(
+    !!music && /"play Krillion", "play Wordle", "play a movie" and "turn on study mode" are none of them music/.test(music.what),
+    'and names the four things it kept being reached for',
+    'a game looks like a song that is not in their library'
+  );
+  check(
+    !!use && /PLAYS A GAME \(Wordle, chess, Krillion/.test(use.what) && /TURNS ON A MODE/.test(use.what),
+    'while the browser tool claims games and modes outright'
+  );
+  check(
+    /is a thing they set up on their Mac[\s\S]{0,400}?"Start study mode on the Mac"/.test(brain),
+    'and the rules say the goal must spell out "<name> mode on the Mac"',
+    'the Mac matches on that phrase; a goal that only implies it reaches nothing'
+  );
+}
+
 /* ------------------------------------------------------------- verdict */
 
 /*

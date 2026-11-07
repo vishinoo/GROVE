@@ -62,6 +62,7 @@ import {
 } from './life';
 import { localTime, shortDate, windowFor, within as inWindow } from './when';
 import { timeoutSignal } from './abort';
+import { workOut } from './calc';
 import * as google from './google';
 import { isGoogleConnected } from './googleAuth';
 import {
@@ -315,6 +316,50 @@ const BRIEF: Ability = {
       detail: found.grounded
         ? found.detail
         : `${found.detail}\n\n[NOT FROM A SEARCH: this is recollection, not a looked-up fact. Do not state any name, place, price or time in it as true. If they wanted something specific and local, say you could not find one and offer to open the app that would know.]`,
+    };
+  },
+};
+
+/**
+ * Arithmetic, done in code. See `workOut` in calc.ts.
+ *
+ * A model adding four box-office figures in its head said two billion for
+ * four; told it was wrong, it agreed with a new number rather than checking.
+ * The figures were never the problem. So any total, difference, average or
+ * percentage comes through here, and the model says what came back.
+ */
+const MATHS: Ability = {
+  id: 'maths.work',
+  name: 'Maths',
+  what: 'Works out arithmetic exactly. Use it for ANY total, sum, difference, average, percentage or conversion over figures — figures they gave, figures you just looked up, or figures you know. Never add, subtract, multiply or divide in your head.',
+  where: 'device',
+  wired: true,
+  needs: [],
+  reads: true,
+  args: {
+    sum: {
+      type: 'string',
+      what: 'the arithmetic, in plain numbers and + - * / ^ ( ) % only, all in one unit — "1518.8 + 1402.8 + 130.8 + 1131.4", never words or names',
+      required: true,
+    },
+    of: { type: 'string', what: 'what the numbers are, in order, with their unit — "Avengers, Age of Ultron, Blue Beetle, Captain Marvel worldwide gross, millions of dollars"' },
+  },
+  examples: [
+    'how much is 1.52 billion plus 1.4 billion plus 1.13 billion',
+    'how much is 15 percent of 240',
+  ],
+  run: async (args) => {
+    const worked = workOut(args.sum || '');
+    if (!worked) {
+      return { ok: false, spoken: "I couldn't work that sum out.", detail: 'Not arithmetic. Pass plain numbers and operators only.' };
+    }
+    const of = (args.of || '').trim();
+    return {
+      ok: true,
+      spoken: `That comes to ${worked.value}.`,
+      detail:
+        `${worked.expr} = ${worked.value}${of ? ` (${of})` : ''}\n` +
+        '[Worked out exactly, in code. Say this result, rounded for speech if you like, and never a different one. If they say it is wrong, check the figures that went in rather than changing the answer.]',
     };
   },
 };
@@ -3332,7 +3377,7 @@ const NOW: Ability = {
 const MAC_MUSIC: Ability = {
   id: 'mac.music',
   name: 'Music on your Mac',
-  what: 'Plays, pauses or skips music in Apple Music on their laptop, or makes the laptop louder or quieter. The music tool whenever the context says their Mac is connected, unless they say the phone. Songs not in their library play on YouTube.',
+  what: 'ONLY MUSIC: plays, pauses or skips a song, artist, album or playlist on their laptop, or makes the laptop louder or quieter. The music tool whenever the context says their Mac is connected, unless they say the phone. A song not in their library is played on YouTube, but it must still be a SONG. Never a game, a film, a video, a website or a mode — "play Krillion", "play Wordle", "play a movie" and "turn on study mode" are none of them music, and all belong to the Mac browser tool.',
   where: 'device',
   wired: true,
   needs: [],
@@ -3560,7 +3605,7 @@ let macTask: { id: string; at: number } | null = null;
 const MAC_USE: Ability = {
   id: 'mac.use',
   name: 'Use your Mac',
-  what: 'Does things on their laptop in its web browser, where they are signed in to everything: checks Instagram or other DMs, finds jobs, plays a web game like Wordle, puts on a video, looks something up on a site, fills in a form, orders something. Call it straight away, without asking first, for anything that needs a website or an account no other tool here reaches (Instagram, LinkedIn, Uber Eats, a shop, any site), whether or not they said laptop; never ask "should I check your laptop?". It asks them questions as it goes and waits for a yes before buying, sending or submitting. When it has just asked them something, or they change or carry on with what it is doing or just did, pass that as answer with the task id.',
+  what: 'Does things on their laptop in its web browser, where they are signed in to everything: PLAYS A GAME (Wordle, chess, Krillion, 2048, anything they name that is a game rather than a song), TURNS ON A MODE ("study mode", "gym mode" — pass it as "Start study mode on the Mac"), puts on a video or a film, checks Instagram or other DMs, finds jobs, looks something up on a site, fills in a form, orders something. Call it straight away, without asking first, for anything that needs a website or an account no other tool here reaches (Instagram, LinkedIn, Uber Eats, a shop, any site), whether or not they said laptop; never ask "should I check your laptop?". It asks them questions as it goes and waits for a yes before buying, sending or submitting. When it has just asked them something, or they change or carry on with what it is doing or just did, pass that as answer with the task id.',
   where: 'device',
   wired: true,
   needs: [],
@@ -4356,6 +4401,7 @@ export const ABILITIES: Ability[] = [
   MAIL_SEND,
   SEND_SELF,
   BRIEF,
+  MATHS,
   CALENDAR_READ,
   CALENDAR_MOVE,
   REMIND,

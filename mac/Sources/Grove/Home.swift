@@ -40,6 +40,22 @@ final class Home: NSObject, WKScriptMessageHandler, WKNavigationDelegate, NSWind
     show()
   }
 
+  /**
+    Built before it is wanted, so the first click is not the slow one.
+
+    `show()` built the window, loaded the page and compiled the field's
+    shader all at once, which is most of a second with nothing on screen —
+    and the first click of a session is the one somebody is most likely to
+    think did not register, so they click again. Everything after it was
+    instant, which made it look like a flaky app rather than a slow start.
+
+    Built hidden at launch instead: by the time anybody opens it, the page
+    has loaded and the shader is warm.
+  */
+  func warm() {
+    if window == nil { build() }
+  }
+
   func show() {
     if window == nil { build() }
     NSApp.activate(ignoringOtherApps: true)

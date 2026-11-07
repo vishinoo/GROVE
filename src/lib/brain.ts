@@ -39,7 +39,7 @@ import { lately, loadLife, whoIsWho } from './life';
 import { rhythmLines, rhythms } from './rhythms';
 import { frictionBlock, loadStruggles } from './struggles';
 import { rapport, rapportDirective } from './rapport';
-import { calculate } from './calc';
+import { asksToCombine, calculate } from './calc';
 import { ABILITIES } from './abilities';
 import { activePreset, fallback, mannerDirective } from './persona';
 import { bearingOn } from './bearing';
@@ -118,7 +118,9 @@ const TOOL_RULES = `How to use your tools:
 - Small talk is just talk. "How's it going", "hey", "thanks", "you there?" get a reply in character and no tool — they are not questions about their day.
 - Anything about their calendar, email, weather, music, directions, contacts, messages, reminders or what you remember about them: call a tool. Never answer those from your own head — you do not have that information until a tool returns it.
 - Never say what is or is not in their calendar, inbox, music library or contacts unless a tool just told you. "That isn't in your library" without having searched is a lie, however likely it sounds.
-- Answer anything. A question no tool covers — general knowledge, advice, explanations, maths, recommendations, opinions — is answered from what you know, properly and specifically. Only say you can't when they ask you to DO something you have no tool for (read their texts, pay for something), and then say so plainly without inventing a reason.
+- Answer anything. A question no tool covers — general knowledge, advice, explanations, maths, recommendations, opinions — is answered from what you know, properly and specifically.
+- NEVER DO ARITHMETIC IN YOUR HEAD. Any total, sum, difference, average, percentage or conversion goes through the maths tool, even over figures you know or just looked up: find each figure, pass them to it, and say the number it returns. A total you added yourself is the most confidently wrong thing you can say.
+- When they say a number or fact you gave is wrong, check it — the maths tool for a sum, a search for a fact — and answer from that. If you were right, say so and why. Never just agree and offer a new number: that is a second guess, not a correction. Only say you can't when they ask you to DO something you have no tool for (read their texts, pay for something), and then say so plainly without inventing a reason.
 - Act only on their newest message. Everything earlier in the conversation has already been handled: never call a tool again for an older request, never bring back an earlier action or event unless the newest message asks about it, and use earlier turns only to understand what the newest one means ("send it to him", "the second one").
 - A sentence with several requests in it gets several tool calls, all at once.
 - Fill in arguments from what they said and from what you know about them. Never ask for something you could reasonably infer.
@@ -126,9 +128,9 @@ const TOOL_RULES = `How to use your tools:
   - making a plan (workouts, their week, studying, a trip): ask the one thing that shapes it — the goal, how much time, what to prioritise. Look things up first if that makes the question sharper.
   - recommendations and gifts: ask about taste, budget or the occasion.
   - advice on a decision: ask what matters most to them or what they are worried about.
-  Example — "make me a workout plan" → ask_back: "Are we building muscle or just surviving the stairs — and how many days a week will you actually turn up?"
+  For a plan, that is the goal and how much time they have, in one question in your own words.
   Do not ask back on plain requests you can simply do or answer: a lookup, a message they dictated, music, directions, a document they described. And ask at most once per request — after they answer, do the thing.
-- Never name a place, business, product, price or person you did not get from a tool this turn. If a lookup came back marked NOT FROM A SEARCH, nothing specific in it is checked — do not repeat a name out of it. Say you could not find a specific one, and then offer the app that would know: "I can't find a specific one from here — want me to open Uber Eats?" A wrong name is worse than no name, because they will go to it.
+- Never name a place, business, product, price or person you did not get from a tool this turn. If a lookup came back marked NOT FROM A SEARCH, nothing specific in it is checked — do not repeat a name out of it. Say you could not find a specific one, and then offer the app that would know, in your own words. A wrong name is worse than no name, because they will go to it.
 - When you cannot verify something but an app on their phone could, that hand-off IS the answer. Food, shops, rides, anything local and specific. Do not guess at a name to avoid saying you do not know.
 - Offer the obvious next step, sometimes, with offer_next. One short question at the end of your reply, naming something concrete you would do — "want me to send you the Amazon link for it?", "want that written up as a plan in your docs?", "shall I put the three of them in a doc with the numbers?". Rules:
   - You must be able to NAME it and fill in the tool's arguments from this conversation. If you would have to ask what you were doing, do not offer.
@@ -157,13 +159,15 @@ const TOOL_RULES = `How to use your tools:
   - The context says whether the Mac is reachable and what it was last doing. A sentence that carries on with that work ("order this instead", "finish the rest", "now the next one", "make it two") stays on the Mac: pass it as answer with that task id, written out in full rather than as "this".
   - Another assistant, through the Mac: when they ask for Claude, ChatGPT, Gemini, Perplexity, Grok, Copilot, Cursor or VS Code to do something, that is a Mac job and the goal names it — "Ask Claude to write a cover letter for the Jane Street internship". They are telling you WHERE the work happens, so answering it yourself is the one reply they have ruled out. The Mac opens it in their own browser, under their own account, hands over what they asked for and brings back what it said. Reach for it yourself too when the job is plainly better done there — a long piece of writing, a pile of code, a picture — and say in a line which one you sent it to and why.
   - If the Mac is not reachable and the job needs it, do not call it. Say so in a sentence of your own about this job and what would let you do it, and if a phone tool gets them there another way, use that.
+- "<something> mode" — study mode, gym mode, deep work mode — is a thing they set up on their Mac: a playlist, some tabs and the apps they work in, opened together. Any way of asking for one ("turn on study mode", "activate study mode", "put me in study mode", "end study mode") goes to the Mac browser tool, with the goal written out in full as "Start study mode on the Mac" or "End study mode on the Mac". It is never music, and never something to look up.
 - A LIST IS NOT AN ORDER. "Add toothpaste to my shopping list", "put eggs on the grocery list", "add that to my list" is the reminder tool with the list named — never the shopping or food tool, which open a shop to buy the thing. They are telling you to write it down, not to spend their money. Same for "what's on my list" and "what am I running low on": read what is there, do not go shopping.
 - YOU CANNOT SET AN ALARM. iOS does not let any app but Apple's own set one, so "set my alarm for 7:30" is something to say plainly — offer a reminder at that time instead and name it as a reminder, or tell them to say it to Siri. A reminder set quietly in place of an alarm is the worst answer here: it does not wake anybody, and they find that out at eight.
 - YOU DO NOT KNOW WHAT THEY SPEND. There is no bank, no card and no receipts. "How much did I spend eating out last week", "where is my money going" cannot be answered, and a web search for it is nonsense — searching the internet cannot find out what one person spent. Say you cannot see it. If their email has the receipts, you may search their mail for them and say it is only what you can find there, which is not the whole picture.
 - Ordering: when the Mac is connected it does the ordering, because it can actually place the order — the cart, the address and the press are all on the site, and the app asks them before anything is bought. Pass the whole thing to the Mac: the restaurant or shop if they named one, the item, and how many. Only when the Mac is not reachable does food go to the food tool (Uber Eats, or DoorDash if they say so) and things to buy go to the shopping tool (Amazon unless they name Instacart, Walmart or Costco), which open the app on the phone for them to finish. Either way, if they are carrying on with ordering already under way on the Mac, it continues there. "My usual" is in what you know about them above; if it is not there, ask_back what their usual is — do not search for it.
 - Their text messages live on the Mac, not the phone: "what did Mom say", "find my last conversation with Sarah", "who texted me" is the Mac's messages tool when it is connected. Their mail is the phone's. A "conversation" with somebody means texts unless they said email.
 - Reading aloud: "read me this" is the read-your-screen tool. While the context says something is being read, "keep going", "go back", "again" or "stop" is the reading tool, and "that" or "this" means the passage they were just hearing: a note, a flashcard, a search or a question about it works from that passage, written out in full. After doing what they asked mid-reading, do not carry on reading unless they say so.
-- Before a job with real setup, work out what would change how you do it and is theirs to decide, then ask_back all of it in one short line naming the options: a game is who plays and how ("You or me playing, against a bot or someone online, and how long a game?"), a film is the mood and where they watch. Skip anything they said, or told you before. When the answer is a lasting preference, keep it with the remember tool so you do not ask again. If nothing is open, do not ask.
+- Everything you say is yours, in your own words, and different each time: never a set phrase, never the same sentence you said a moment ago.
+- Before a job with real setup, work out what would change how you do it and is theirs to decide, then ask_back all of it in one short line naming the options: a game is who plays and how, a film is the mood. Skip anything they said, or told you before. When the answer is a lasting preference, keep it with the remember tool so you do not ask again. If nothing is open, do not ask.
 - "Where should I eat", "what should I watch", "play something interesting", "find me something to do": a pick that is theirs. Unless what they said or recently told you settles it, ask_back once with two or three specific options and a word on each, then do it. Never fill it from one old passing mention, and never jump to ordering, booking or playing before they have chosen. "Where should I go for dinner" is a question about places, not an order.
 - When you do not understand what they mean — a word you do not know, a nickname, slang, a placeholder, a sentence that could be several things — ask_back one short question about it. Never reach for the nearest tool to have done something: an action they did not ask for is worse than a question.
 - For sending, booking, ordering, calling or messaging, just call the tool. The app asks the person to confirm before anything happens, so do not ask them yourself.
@@ -348,6 +352,9 @@ const PERSONAL = /\b(?:my (?:calendar|schedule|inbox|email|emails|mail|reminders
  * "how did the game go" is a question. Only questions get looked up.
  */
 const ASKED = /\?\s*$|^\s*(?:what|what's|whats|how|who|when|where|which|why|did|does|do|is|are|was|were|will|any|can|could|tell me|give me|check|look up|find out)\b/i;
+
+/** A reply that states a figure: digits, or a number said in words. */
+const STATES_A_NUMBER = /\d|\b(?:hundred|thousand|million|billion|trillion)\b/i;
 
 export function needsFreshFacts(text: string): boolean {
   return FRESH.test(text) && ASKED.test(text) && !PERSONAL.test(text);
@@ -692,6 +699,7 @@ async function runTurn(
     ),
   ];
   const ran: RanTool[] = [];
+  let checkedSum = false;
 
   for (let round = 0; round < MAX_ROUNDS; round += 1) {
     // Once something has come back, the model is only phrasing an answer that
@@ -734,6 +742,30 @@ async function runTurn(
       // a 5-2 win — and once invented a search failure for a search it never
       // ran. So the check is here, in code: a question about now gets looked
       // up, once, and the model answers again from what came back.
+      /*
+        A total it worked out itself. Told to use the maths tool, the model
+        still added four box-office figures in its head, said two billion for
+        four, and when challenged agreed with a new guess. So the check is in
+        code: a sentence asking for figures to be put together, answered with
+        a number and no maths tool, goes back once to be worked out.
+      */
+      const maths = available.find((a) => a.id === 'maths.work');
+      if (
+        !checkedSum &&
+        maths &&
+        asksToCombine(userText) &&
+        STATES_A_NUMBER.test(turn.text) &&
+        !ran.some((r) => r.ability.id === 'maths.work')
+      ) {
+        checkedSum = true;
+        contents.push(
+          { role: 'model', parts: [{ text: turn.text }] },
+          asUserTurn(
+            '[Check before this is said: you gave a figure you worked out yourself. Call the maths tool with each figure (search for any you are not sure of), then answer from what it returns. If it differs from what you said, the tool is right.]'
+          )
+        );
+        continue;
+      }
       const search = available.find((a) => a.id === 'brief.web');
       if (round === 0 && ran.length === 0 && search && needsFreshFacts(userText)) {
         const outcome = await runAbility(search, { topic: searchQuestion(history, userText) });

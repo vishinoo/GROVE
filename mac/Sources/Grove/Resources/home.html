@@ -70,6 +70,7 @@ h2 { font: 600 15px var(--sans); color: rgba(255,255,255,0.78); margin: 30px 4px
 .k-video { background: linear-gradient(180deg, #FF4B4B, #E01E1E); }
 .k-site { background: linear-gradient(180deg, #5AC8FA, #2D8CF0); }
 .k-app { background: linear-gradient(180deg, #8E8E93, #636366); }
+.k-do { background: linear-gradient(180deg, #B07CF0, #7C4DD0); }
 .k-mode { background: linear-gradient(160deg, var(--b), color-mix(in srgb, var(--a) 70%, #000)); }
 
 .pill { border: 0; border-radius: 999px; background: #FFFFFF; color: #0B0C12; font: 600 15px var(--sans); padding: 10px 22px; cursor: pointer; white-space: nowrap; }
@@ -146,6 +147,7 @@ input[type=text]:focus { border-color: rgba(255,255,255,0.4); }
       <button class="chip" data-add="video"><i class="k-video"></i>YouTube video</button>
       <button class="chip" data-add="site"><i class="k-site"></i>Website</button>
       <button class="chip" data-add="app"><i class="k-app"></i>App</button>
+      <button class="chip" data-add="do"><i class="k-do"></i>Do something</button>
       <button class="chip" id="tabs">Add the tabs open in Chrome</button>
     </div></div></div>
 
@@ -176,12 +178,14 @@ const KINDS = {
   video: { label: 'YouTube', hint: 'A YouTube link, or what to search for' },
   site: { label: 'Website', hint: 'canvas.ualberta.ca' },
   app: { label: 'App', hint: 'Notion' },
+  do: { label: 'Do', hint: 'Close my other Chrome tabs' },
 };
 const ICONS = {
   playlist: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 17.5a2.5 2.5 0 1 1-2-2.45V6.2l11-2.2v11.5a2.5 2.5 0 1 1-2-2.45V7.3l-7 1.4v8.8z"/></svg>',
   video: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>',
   site: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.4 3.8 5.2 3.8 8.5s-1.2 6.1-3.8 8.5c-2.6-2.4-3.8-5.2-3.8-8.5S9.4 5.9 12 3.5z"/></svg>',
   app: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/></svg>',
+  do: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>',
   // The clipboard, matching the notch's own icon set.
   paste: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4" width="10" height="16" rx="2.5"/><path d="M9.5 4V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1"/></svg>',
 };

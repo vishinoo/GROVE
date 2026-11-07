@@ -40,6 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_ notification: Notification) {
     Log.trim()
     installEditMenu()
+    // The window nobody has asked for yet, so the click that asks is instant.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { MainActor.assumeIsolated { self.home.warm() } }
     // Asked once, so Grove is in the Screen Recording list to be switched on.
     if !CGPreflightScreenCaptureAccess() && !UserDefaults.standard.bool(forKey: "grove.asked.screen") {
       UserDefaults.standard.set(true, forKey: "grove.asked.screen")
@@ -55,6 +57,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       // Chosen on the Mac: paint everything here at once, then tell the phone,
       // which keeps it and comes back with the same answer. Local first, so it
       // recolours as they press and whether or not the phone is there.
+      // A mode step that is neither a page nor an app: the agent has hands.
+      Modes.onGoal = { [weak self] goal in
+        guard let self else { return }
+        self.runAgent(Job(id: UUID().uuidString, kind: "agent.start", args: ["goal": goal], fromPhone: false)) { _, _, _ in }
+      }
       home.onColour = { [weak self] key, label, stops in
         guard let self else { return }
         self.look.apply(LookUpdate(colour: key, label: label, stops: stops))
