@@ -13,7 +13,7 @@ let package = Package(
     .executableTarget(
       name: "Grove",
       path: "Sources/Grove",
-      resources: [.copy("Resources/panel.html"), .copy("Resources/menubar.png")]
+      resources: [.copy("Resources/panel.html"), .copy("Resources/home.html"), .copy("Resources/menubar.png")]
     ),
   ]
 )

@@ -597,6 +597,35 @@ public class GroveRemoteModule: Module {
    * the microphone opens, and anything long gets transcribed as the start of
    * what you said.
    */
+  /**
+    The sound of Grove working, made to be left on while someone talks.
+
+    It was a beep, every 1.1 seconds, for as long as anything took — which is
+    exactly the sound a person stops hearing as information and starts hearing
+    as nagging. This is a wave instead: low noise, filtered until it has no
+    edge, swelling in and falling away over three seconds like surf. Quiet,
+    with nothing in the range speech lives in to fight with, and it loops
+    without a seam because the swell starts and ends at silence.
+  */
+  private static func waveSamples(sampleRate: Int) -> [Int16] {
+    let seconds = 3.2
+    let count = Int(seconds * Double(sampleRate))
+    var out = [Int16](repeating: 0, count: count)
+    var brown = 0.0, low = 0.0
+    var seed: UInt32 = 0x9E3779B9
+    for i in 0..<count {
+      seed = seed &* 1664525 &+ 1013904223
+      let white = Double(seed >> 8) / Double(1 << 24) * 2 - 1
+      brown = (brown + white * 0.02) * 0.997
+      low += (brown - low) * 0.08
+      let t = Double(i) / Double(count)
+      // In over the first part, out over the rest, silent at both ends.
+      let swell = pow(sin(Double.pi * t), 2) * (0.65 + 0.35 * sin(Double.pi * t * 0.5))
+      out[i] = Int16(max(-1, min(1, low * 3.2 * swell * 0.2)) * Double(Int16.max))
+    }
+    return out
+  }
+
   private static func chimeURL(_ kind: String) -> URL? {
     // (frequency in Hz, seconds). A frequency of 0 is a rest.
     let notes: [(Double, Double)]
@@ -606,17 +635,17 @@ public class GroveRemoteModule: Module {
     case "stop": notes = [(880.0, 0.07), (0, 0.012), (587.33, 0.1)]
     case "done": notes = [(1046.5, 0.14)]
     case "working":
-      notes = [(523.25, 0.05)]
-      loopLength = 1.1
+      // Not a note at all: see `waveSamples`.
+      notes = []
     default: return nil
     }
 
     let url = FileManager.default.temporaryDirectory
-      .appendingPathComponent("grove-chime-\(kind)-v1.wav")
+      .appendingPathComponent("grove-chime-\(kind)-\(kind == "working" ? "v2" : "v1").wav")
     if FileManager.default.fileExists(atPath: url.path) { return url }
 
     let sampleRate = 44100
-    var samples: [Int16] = []
+    var samples: [Int16] = kind == "working" ? waveSamples(sampleRate: sampleRate) : []
     for (frequency, seconds) in notes {
       let count = Int(seconds * Double(sampleRate))
       for i in 0..<count {

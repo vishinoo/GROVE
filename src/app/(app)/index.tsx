@@ -122,7 +122,11 @@ function TalkBody() {
       ? heard || 'Go ahead.'
       : state === 'noting'
         ? heard || caption
-        : caption;
+        : // At rest the screen is the greeting and the field, nothing else: the
+          // last reply left sitting under "hey" read as a log, not a presence.
+          state === 'idle' || state === 'asleep'
+          ? ''
+          : caption;
 
   return (
     <KeyboardAvoidingView

@@ -229,7 +229,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
     the microphone itself would start it again on every re-render, and a card
     re-renders whenever a step, a phone or a remark arrives.
   */
-  const micOn = () => { if (S.data && S.data.mic) document.getElementById('mic')?.classList.add('on'); };
+  const micOn = () => { if (S.micLive || (S.data && S.data.mic)) document.getElementById('mic')?.classList.add('on'); };
 
   /*
     Markdown off a card that shows text as it is.
@@ -441,7 +441,11 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; tr
       if (e.event === 'dictate') {
         const input = document.getElementById('ask-input'), mic = document.getElementById('mic');
         if (input) input.value = e.data.words || '';
-        if (e.data.final) { mic?.classList.remove('on'); if (input && input.value.trim()) document.getElementById('ask').requestSubmit(); }
+        if (e.data.final) { if (!S.micLive) mic?.classList.remove('on'); if (input && input.value.trim()) document.getElementById('ask').requestSubmit(); }
+      }
+      if (e.event === 'mic') {
+        S.micLive = !!(e.data && e.data.on);
+        document.querySelectorAll('.mic').forEach(function (b) { b.classList.toggle('on', S.micLive); });
       }
       if (e.event === 'remark') {
         S.remark = e.data.text; S.remarkAt = Date.now();

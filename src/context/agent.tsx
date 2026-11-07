@@ -51,7 +51,6 @@ import {
   DEFAULT_PERSONA,
   fallback,
   fineFor,
-  holdingFor,
   loadPersona,
   savePersona,
   type Persona,
@@ -77,6 +76,7 @@ import {
   type Proposal,
 } from '@/lib/offers';
 import { cancelling, closing } from '@/lib/closing';
+import { phrase, refreshPhrasebook } from '@/lib/phrasebook';
 import * as plan from '@/lib/plan';
 import { plainFailure } from '@/lib/failure';
 import * as struggles from '@/lib/struggles';
@@ -311,6 +311,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const hushAfter = useRef(-1);
   /** Says the current part of whatever is being read aloud (set below, once utter exists). */
   const readOn = useRef<() => void>(() => {});
+  /** Finished Mac jobs heard while Grove was busy, said at the end of its next reply. */
+  const macTail = useRef<string[]>([]);
   /*
     The rest of what one sentence asked for.
 
@@ -771,7 +773,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           void macJob('agent.stop', {});
           noteMacWork({ ...mac, state: 'stopped', said: 'Stopped.' });
         }
-        const line = busy ? 'Okay, stopped.' : 'No worries.';
+        const line = phrase(busy ? 'stopped' : 'nevermind');
         setCaption(line);
         hushAfter.current = turnSeq.current;
         utter(line);
@@ -892,7 +894,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       held = true;
       // The voice, not the mode: a holding line is the phrase repeated most
       // often, so it is the one most likely to break the character.
-      utter(holdingFor(voice), false, true);
+      utter(phrase('holding'), false, true);
       // Four seconds, not two. A phone on mobile data takes two to three for
       // an ordinary answer, so at 2.2 nearly every reply was preceded by
       // "give me a sec" — and the working pulse already says it is busy.
@@ -909,13 +911,13 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         clearTimeout(holdTimer);
         awaitingYes.current = null;
         if (fresh) await confirmNow();
-        else utter('That one timed out. Ask me again.');
+        else utter(phrase('timedOut'));
         return;
       }
       if (/^\s*(no|nope|cancel|stop|don'?t|forget it|never mind)\s*[.!]?\s*$/i.test(asked)) {
         clearTimeout(holdTimer);
         awaitingYes.current = null;
-        utter('Cancelled.');
+        utter(phrase('cancelled'));
         return;
       }
       // Changing the tone, which is neither a yes nor a no — see redraftTone.
@@ -928,7 +930,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         clearTimeout(holdTimer);
         awaitingYes.current = null;
         if (!fresh) {
-          utter('That one timed out. Ask me again.');
+          utter(phrase('timedOut'));
           return;
         }
         await redraftTone(
@@ -1007,7 +1009,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           whole feature is built around.
         */
         const slow = doing.slow === true;
-        if (slow) utter(holdingFor(voice), false, true);
+        if (slow) utter(phrase('holding'), false, true);
         const outcome = await runAbility(doing, proposed.args);
         running.current = false;
         if (!mine()) return;
@@ -1132,7 +1134,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // straight to Ready having said nothing — indistinguishable from the app
     // ignoring you — so it says so instead.
     if (!reply.ability && !reply.text.trim()) {
-      utter('I lost my train of thought there. Say that again?', true);
+      utter(phrase('lostThread'), true);
       return;
     }
     /*
@@ -1233,7 +1235,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       // stillWorking, or the screen drops to Ready two seconds into a write
       // that runs for a minute — and the mid-turn press guard, which only
       // covers thinking and working, stops protecting the turn.
-      if (mine()) utter('Writing it now.', false, true);
+      if (mine()) utter(phrase('writing'), false, true);
     }
 
     /*
@@ -1543,7 +1545,12 @@ function shortFailure(text: string): string {
    * is the moment a conversation stops being hands-free.
    */
   const utter = useCallback(
-    (text: string, listenAfter = false, stillWorking = false, afterSpeaking?: () => void) => {
+    (said: string, listenAfter = false, stillWorking = false, afterSpeaking?: () => void) => {
+    // A finished Mac job that landed while Grove was busy rides on the end of
+    // the reply it was busy with, the way a person mentions it in the same
+    // breath, rather than arriving minutes later as an interruption of its own.
+    const tail = stillWorking ? '' : macTail.current.splice(0).map((line) => line.replace(/[.!?\s]+$/, '')).join('. ');
+    const text = tail ? `${said.replace(/\s+$/, '')} Oh, and on your Mac: ${tail}.` : said;
     // Claimed at the moment of speaking, because stopSpeaking() also fires
     // onDone — an interruption and a natural ending are the same callback.
     // Unguarded, barging in went: press, stop the speech, start listening, and
@@ -1999,7 +2006,7 @@ function shortFailure(text: string): string {
         }
         buzz('failed');
         setState(restingState());
-        utter("I couldn't open the microphone. Try me again.");
+        utter(phrase('noMic'));
         return;
       }
 
@@ -2247,7 +2254,7 @@ function shortFailure(text: string): string {
         awaitingYes.current = null;
         trigger.notePress('second press · cancelled');
         buzz();
-        utter('Cancelled.');
+        utter(phrase('cancelled'));
         return;
       } else {
         // First press. Wait to see whether a second follows before acting,
@@ -2432,6 +2439,14 @@ function shortFailure(text: string): string {
         }
         return;
       }
+      // Busy with something else: said at the end of what it is saying, unless it
+      // needs an answer, which needs the microphone and waits its turn.
+      const busyNow = !(stateNow.current === 'idle' || stateNow.current === 'asleep') || running.current || isSpeaking();
+      if (news.speak && busyNow && news.state !== 'ask' && news.state !== 'confirm') {
+        macTail.current.push(news.said);
+        if (news.state === 'done') doneChime();
+        return;
+      }
       if (news.speak) {
         waiting.push({
           said: news.said,
@@ -2482,6 +2497,11 @@ function shortFailure(text: string): string {
       if (advanceReading()) setTimeout(() => turn === turnSeq.current && readOn.current(), 0);
     });
   };
+
+  // Grove's stock lines in its own voice, remade when the manner changes.
+  useEffect(() => {
+    void refreshPhrasebook(persona.manner ?? '');
+  }, [persona.manner]);
 
   /* -------------------------------------------------------------- the ring */
 

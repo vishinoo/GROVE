@@ -31,11 +31,14 @@ enum Popup {
   private static var lastShown = Date.distantPast
   // Four minutes, not one. The narrowed set of moments does most of the work;
   // this is what stops a run of good news becoming a slideshow.
-  private static let apart: TimeInterval = 4 * 60
+  private static let apart: TimeInterval = 6
 
   /** Whether a face would be allowed right now. Asked before the search, to save it. */
   static var welcome: Bool {
-    panel == nil && Date().timeIntervalSince(lastShown) > apart
+    // With GIFs on they asked for a face, so a new moment's face takes over
+    // from the last one once it has had a few seconds; it is not held back
+    // for the old one to finish.
+    Date().timeIntervalSince(lastShown) > apart
   }
   static let seconds: TimeInterval = 12
 

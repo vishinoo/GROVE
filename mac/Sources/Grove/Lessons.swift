@@ -104,3 +104,56 @@ enum Lessons {
     Vault.save(String(decoding: data, as: UTF8.self), as: "lessons")
   }
 }
+
+/*
+  Routes: the moves that got a job done, kept so the next one like it is fast.
+
+  Lessons are advice ("accept the cookies first"); a route is the path itself
+  — the address, the buttons by their words, what was typed, the keys. A job
+  done once, with their corrections along the way, leaves its route, and the
+  next job like it is handed that route first and can send several of its
+  moves at once instead of working each one out. So a game someone walked it
+  through step by step is played straight off the second time. Only routes
+  from jobs the check accepted are kept, and a newer one for the same kind of
+  job replaces the older.
+*/
+enum Routes {
+  private struct Route: Codable { var goal: String; var steps: [String]; var at: Date; var used: Int }
+  nonisolated(unsafe) private static var book: [Route] = {
+    (try? JSONDecoder().decode([Route].self, from: Data(Vault.load("routes").utf8))) ?? []
+  }()
+  private static let lock = NSLock()
+
+  private static func words(_ s: String) -> Set<String> {
+    let small: Set<String> = ["the", "and", "for", "with", "on", "in", "to", "a", "an", "of", "my", "me", "it", "this", "that", "play", "open", "find", "on", "youtube", "google"]
+    return Set(s.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init).filter { $0.count > 2 && !small.contains($0) })
+  }
+
+  private static func likeness(_ a: String, _ b: String) -> Double {
+    let x = words(a), y = words(b)
+    guard !x.isEmpty, !y.isEmpty else { return 0 }
+    return Double(x.intersection(y).count) / Double(min(x.count, y.count))
+  }
+
+  static func keep(goal: String, steps: [String]) {
+    let useful = steps.filter { !$0.isEmpty }
+    guard useful.count >= 2 else { return }
+    lock.lock()
+    book.removeAll { likeness($0.goal, goal) >= 0.8 }
+    book.append(Route(goal: String(goal.prefix(200)), steps: Array(useful.suffix(14)), at: Date(), used: 0))
+    if book.count > 60 { book.removeFirst(book.count - 60) }
+    let data = (try? JSONEncoder().encode(book)) ?? Data()
+    lock.unlock()
+    Vault.save(String(decoding: data, as: UTF8.self), as: "routes")
+    Log.say("route: kept \(useful.count) moves for \(goal.prefix(60))")
+  }
+
+  /** The routes for jobs like this one, as numbered moves for the prompt. */
+  static func like(_ goal: String) -> String {
+    lock.lock(); defer { lock.unlock() }
+    let near = book.map { ($0, likeness($0.goal, goal)) }.filter { $0.1 >= 0.5 }.sorted { $0.1 > $1.1 }.prefix(2)
+    return near.map { route, _ in
+      "For \"\(route.goal.prefix(100))\":\n" + route.steps.enumerated().map { "  \($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+    }.joined(separator: "\n")
+  }
+}

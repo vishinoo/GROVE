@@ -75,13 +75,14 @@ enum Thinking {
     What you know about them: "About them" is what you were told or noticed, some of it old, and it is only the lines that seem to bear on this. Say only what is written there. Never extend it, combine it, or guess how they are doing from it; a line is not news about today. If they ask about themselves and it is not there, say you do not know and ask. A person they admire is not who they are: their name is their name. Reach for it only when it helps this request.
     "need", as the kind, when you cannot do this well with what you have, and one more look would settle it: in "need" put "memory" for everything you remember about them (their taste, their plans, a person, a pick you are making for them), "screen" for a picture of the window in front of them (the sentence is about what is on it and its title is not enough: "what's this error", "answer this", "is this any good", "reply to that"), or both. Never for something you can already do.\(deep ? " You have been given it now: decide, and do not reply with need." : "")
     "uses", usually empty: when this sentence settles which app or site they use for a kind of job — because they said so ("put it on Spotify", "I use DoorDash"), or because they are answering a question you asked about it — put {"for":"music","is":"Spotify"} there. Kinds: music, film, food, shopping, rides, messages. Once settled it is settled; never ask about that kind again.
+    "misheard", usually null: what they say reaches you through speech recognition, which gets names wrong. When this sentence corrects a word you got ("no, Krillion with a K", "I said X not Y", spelling it out), {"heard":"the word as you had it","meant":"the word they mean"} — and act on the word they mean, never the misheard one: a misheard name is often a real other thing, and going to find that is the worst answer.
     "remember" on every reply, usually empty: when this sentence tells you something lasting about them (what they are working on, a date, a plan, a preference, how they like a job done, an answer to a question you asked about how to do something), one plain line of it. "wrong": when they say something you said about them is not true, the claim that was wrong, in the exact words of the line under About them when it came from there, and do not repeat it.
     WHAT THEY ASKED FOR, NOT WHAT YOU ARE GOOD AT. A request that leaves the choice open — "I want to play a game", "a number game", "what is something cool I could do" — is answered with what suits THEM, from what they have told you and what they are into. It is not answered with whatever you have the most practice at: reaching for chess every time a game is mentioned is you choosing for yourself, and a number game is not chess. If they named a kind of thing, it is that kind of thing or you ask; never a different thing that happens to be easier for you. If nothing they have said points anywhere, ask one short question rather than guessing.
 
     AND "I WANT TO PLAY" MEANS THEY PLAY. Set it up, hand it over, stop — and say so in the goal in so many words. Starting a game and then playing it yourself while they watch is the opposite of what was asked for.
 
     "Just now" is what they asked and what you did over the last few minutes. They talk in layers, so read every sentence against it: "put on X", "play this", "now the next one", "make it bigger" carry on with that thing in the same place — the site or tab you just opened, the video already on, the game under way — unless they name somewhere else. Write the goal out in full with that place in it, naming the site and the tab, never as "it" or "this". A song or video asked for right after something was opened on YouTube is "do" on YouTube, not "music". A reply to a question you asked just now is the answer to it: do what it settles. When it says they will do it themselves ("I'll play", "I'll pick"), the goal is to set it up for them and stop there, said in the goal in so many words.
-    Reply as JSON: {"kind":"open"|"do"|"music"|"message"|"inbox"|"read"|"note"|"ask"|"stop"|"answer"|"need","need":"","remember":"","wrong":"","uses":null,"question":"...","text":"...","moment":"...","title":"...","app":"...","say":"...","to":"...","action":"...","playlist":false,"gif":"..."}
+    Reply as JSON: {"kind":"open"|"do"|"music"|"message"|"inbox"|"read"|"note"|"ask"|"stop"|"answer"|"need","need":"","remember":"","wrong":"","misheard":null,"uses":null,"question":"...","text":"...","moment":"...","title":"...","app":"...","say":"...","to":"...","action":"...","playlist":false,"gif":"..."}
     \(Gifs.on ? gifAsk : "")
     For "answer" only, "moment": what kind of moment this is, one of greeting, thanks, joke, tease, good-news, celebration, surprise, sympathy, song, topic, fact, question, private, bad-news, other. Then "gif", written last, once the answer exists: \(Gifs.rule) For every other kind leave "gif" empty: what happens there is not known yet, and its face is picked when it is.
     Also put in "say" one short line in your own voice for the notch while it happens, when the kind is "do" or "music": what you picked and, if it fits, why, in your own words and different each time. Never a flat label of the action.
@@ -111,6 +112,9 @@ enum Thinking {
     }
     let text = (obj["text"] as? String) ?? ""
     learned?(Learned(remember: (obj["remember"] as? String) ?? "", wrong: (obj["wrong"] as? String) ?? ""))
+    if let m = obj["misheard"] as? [String: Any], let heard = m["heard"] as? String, let meant = m["meant"] as? String {
+      Heard.learn(heard: heard, meant: meant)
+    }
     // Settled the moment they say it, so the very next sentence goes to the
     // right place rather than asking again.
     if let uses = obj["uses"] as? [String: Any] {
@@ -199,17 +203,22 @@ enum Thinking {
     say, not a report of the screen. Its GIF follows the same rule as every
     other.
   */
+  /** What the last few hellos said and showed, so the next one is about something else. */
+  nonisolated(unsafe) private static var openers: [String] = []
+
   static func remark(now: String, manner: String, about: String, recent: String = "") async -> (line: String, gif: String)? {
     let brief = """
-    You are Grove, their friend who lives on their Mac. They just glanced at you, and this is your hello. Greet them the way the hour calls for — morning, afternoon, evening, late at night — warmly, in your own manner. Most of the time that is all. Now and then, when the song they have on is worth a word, you may add a few friendly ones about it; work in front of them is theirs, so leave it alone unless it is plainly finished. Under ten words. \(groundRule) What you yourself are doing or just did for them (under "You just did") is not theirs: never remark on it, or on a page you opened. Never describe their screen back to them, never ask something that needs an answer, never mention an app by name unless that is the joke.
-    Then "gif": \(Gifs.rule)
+    You are Grove, their friend who lives on their Mac. They just glanced at you, and this is your hello: a few words for the hour (morning, afternoon, evening, late at night) and a word about what they are looking at right now — the page, the document, the chat, the code in front of them — the way a friend glancing over would, warm and specific, never a dig. Lead with what is in front of them. Mention the song only if they are in their music app, or nothing else is in front of them. Never the same subject or the same words as your last few openers. Under fifteen words. \(groundRule)
+    Then "gif": \(Gifs.rule) For a hello, it is the GIF of what you mentioned in front of them, not the song unless you mentioned the song.
     Reply as JSON: {"line":"...","gif":"..."}
     """ + (manner.isEmpty ? "" : "\n\nYour manner (style only): \(manner.prefix(400))")
     let clock = DateFormatter.localizedString(from: Date(), dateStyle: .full, timeStyle: .short)
     let known = relevant(about, to: now)
-    let user = (known.isEmpty ? "" : "About them:\n\(known)\n\n") + "It is \(clock).\nRight now on their Mac:\n\(now.isEmpty ? "(nothing open)" : now)" + (recent.isEmpty ? "" : "\nYou just did:\n\(recent)")
-    guard let obj = parsed(await call(system: brief, user: user)), let line = obj["line"] as? String, !line.isEmpty else { return nil }
-    return (line, (obj["gif"] as? String) ?? "")
+    let user = (known.isEmpty ? "" : "About them:\n\(known)\n\n") + "It is \(clock).\nRight now on their Mac:\n\(now.isEmpty ? "(nothing open)" : now)" + (recent.isEmpty ? "" : "\nYou just did:\n\(recent)") + (openers.isEmpty ? "" : "\nYour last openers (different from these):\n\(openers.suffix(5).joined(separator: "\n"))")
+    guard let obj = parsed(await call(system: brief, user: user, temperature: 0.9)), let line = obj["line"] as? String, !line.isEmpty else { return nil }
+    let gif = (obj["gif"] as? String) ?? ""
+    openers = Array((openers + ["\(line) [\(gif)]"]).suffix(8))
+    return (line, gif)
   }
 
   /**

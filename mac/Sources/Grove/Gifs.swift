@@ -44,20 +44,27 @@ enum Gifs {
     getting a face through the other path, which is worse than not narrowing
     at all.
   */
-  static let faces: Set<String> = ["joke", "good-news", "song"]
+  /**
+    The moments that get no GIF, which is a short list on purpose: with GIFs
+    on, they asked for Grove to have a face, and a face that only shows up
+    for three kinds of moment is a face that is mostly absent. Everything
+    else can get one; what to show is the model's choice of the best point.
+  */
+  static let quiet: Set<String> = ["private", "bad-news"]
+  static func wants(_ moment: String) -> Bool { !quiet.contains(moment.lowercased()) }
 
   /** How Grove picks its face. Shared by Thinking.decide and choose, so the two cannot drift apart. */
   static let rule = """
-    A GIF is rare. It is for the two moments worth interrupting someone for — something genuinely funny, and something that actually went well — and for a song, where the picture is the point. Most exchanges get nothing, and nothing is the normal answer: a hello, a thank you, a plain fact, a question answered, a job done, bad luck, anything private. NEVER A NAME. Not the artist, the band, the song, the film, the site or the person: a GIF site searched for a name returns whatever anyone has ever tagged with it, which is fan pictures and strangers, and it is how a quiet record got a dance clip and a couple kissing. Describe the MOVEMENT or the MOOD instead, as if the sound were off and you were telling someone what the picture shows: "slow head nod", "staring out a window", "smoking on a porch" for something hazy and unhurried; "jumping around" only if it really is that. Never sarcasm or judgement (no eye rolls, facepalms, side eyes, blank stares or skeletons), never a joke about them, never a pun or a clever concept. Two or three plain English words a GIF site understands, the movement first. Leave it empty unless you would actually send one.
+    GIFs are on, so be expressive: nearly every exchange gets one. Pick the single best point in what they said or what you said — the most vivid, funny or alive thing in it — and make the GIF of that. It can be the subject itself (a person, a place, a film, an event, an animal: Alexander the Great charging, a rocket launching), a famous person doing something, an action, or your own reaction to the moment (a cheeky grin at a joke, celebrating good news, sympathy). For a song, the artist doing something that fits it, or what someone listening would be doing. Match the feeling at its size, and make it different from the faces you showed lately. Never a put-down of them. Two to five plain English words a GIF site understands, the subject first. Leave it empty only for something private or upsetting.
     """
 
   /** Search words for a moment that has happened: what it was, and what Grove said about it. */
   static func choose(happened: String, said: String, manner: String) async -> String {
-    let system = rule + (manner.isEmpty ? "" : "\nYour manner, which the face should match: \(manner.prefix(300))") + "\nFirst name the moment, one of greeting, thanks, good-news, bad-luck, joke, song, done, fact, question, other.\nReply as JSON: {\"moment\":\"...\",\"gif\":\"...\"}"
-    let user = "\(happened)\nYou said: \(said.isEmpty ? "(nothing)" : said)"
+    let system = rule + (manner.isEmpty ? "" : "\nYour manner, which the face should match: \(manner.prefix(300))") + "\nFirst name the moment, one of joke, tease, good-news, surprise, sympathy, song, topic, fact, question, greeting, thanks, done, private, bad-news, other.\nReply as JSON: {\"moment\":\"...\",\"gif\":\"...\"}"
+    let user = "\(happened)\nYou said: \(said.isEmpty ? "(nothing)" : said)\(lately.isEmpty ? "" : "\nFaces you showed lately (not these again): \(lately.joined(separator: "; "))")"
     let obj = Thinking.parsed(await Thinking.call(system: system, user: user))
     // The same gate as an answer's, from the same set, so the two cannot drift.
-    let picked = faces.contains(((obj?["moment"] as? String) ?? "").lowercased()) ? ((obj?["gif"] as? String) ?? "") : ""
+    let picked = wants((obj?["moment"] as? String) ?? "") ? ((obj?["gif"] as? String) ?? "") : ""
     let words = echoes(picked, of: happened) ? "" : picked
     Log.say("gif: chose \"\(words)\" for \(happened.prefix(70).replacingOccurrences(of: "\n", with: " "))\(words.isEmpty && !picked.isEmpty ? " (dropped \"\(picked)\": a name, not a reaction)" : "")")
     return words
@@ -79,11 +86,11 @@ enum Gifs {
   static func echoes(_ words: String, of happened: String) -> Bool {
     let small: Set<String> = ["a", "an", "the", "to", "in", "at", "on", "of", "with", "and", "for", "by", "song", "music", "playing", "played", "track", "video"]
     let parts = words.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init).filter { !small.contains($0) && $0.count > 2 }
-    // Nothing but filler left ("the song", "a video") is not a reaction
-    // either, and would be searched as written. Dropped with the names.
-    guard !parts.isEmpty else { return true }
-    let hay = happened.lowercased()
-    return parts.allSatisfy { hay.contains($0) }
+    // Nothing but filler left ("the song", "a video") is a search with nothing
+    // in it, and is dropped. A name is not: a GIF of the thing they are talking
+    // about (Alexander the Great, a rocket launch) is the point of the face.
+    _ = happened
+    return parts.isEmpty
   }
 
   /** A small GIF's address for these words, one of the best few. */
@@ -102,10 +109,16 @@ enum Gifs {
         // `lang=en` because the search is written in English and the results
         // were not: without it a weak query comes back with whatever is
         // popular anywhere, which is most of how a hello became a stranger.
-        let root = await get("https://api.giphy.com/v1/gifs/search?api_key=\(giphy)&q=\(term)&limit=4&rating=pg-13&lang=en")
-        let urls = (root?["data"] as? [[String: Any]])?.compactMap {
-          (($0["images"] as? [String: Any])?["fixed_height"] as? [String: Any])?["url"] as? String
+        let root = await get("https://api.giphy.com/v1/gifs/search?api_key=\(giphy)&q=\(term)&limit=16&rating=pg-13&lang=en")
+        let found = (root?["data"] as? [[String: Any]])?.compactMap { item -> (id: String, url: String)? in
+          guard let url = ((item["images"] as? [String: Any])?["fixed_height"] as? [String: Any])?["url"] as? String else { return nil }
+          return ((item["id"] as? String) ?? url, url)
         } ?? []
+        // Never the same GIF twice: the first result for the same search is the
+        // same picture every time, so it is one of the best few not shown lately.
+        let fresh = found.filter { !shown.contains($0.id) }
+        let urls = (fresh.isEmpty ? found : fresh).prefix(5).shuffled().map(\.url)
+        if let pick = (fresh.isEmpty ? found : fresh).first(where: { $0.url == urls.first }) { remember(pick.id, query: attempt) }
         /*
           The first result for the strongest query that found anything.
 
@@ -160,6 +173,15 @@ enum Gifs {
     return tries
       .filter { $0.split(separator: " ").count >= 2 }
       .reduce(into: [String]()) { if !$1.isEmpty && !$0.contains($1) { $0.append($1) } }
+  }
+
+  /** GIFs shown lately, and the searches behind them, so neither repeats. */
+  private static var shown: [String] { UserDefaults.standard.stringArray(forKey: "grove.gifs.shown") ?? [] }
+  static var lately: [String] { UserDefaults.standard.stringArray(forKey: "grove.gifs.lately") ?? [] }
+
+  private static func remember(_ id: String, query: String) {
+    UserDefaults.standard.set(Array((shown + [id]).suffix(120)), forKey: "grove.gifs.shown")
+    UserDefaults.standard.set(Array((lately + [query]).suffix(10)), forKey: "grove.gifs.lately")
   }
 
   private static func get(_ address: String) async -> [String: Any]? {

@@ -264,7 +264,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     stands in for a selection when the question is about "this" or "what I
     copied" — the commonest reason to ask from the notch at all.
   */
-  private func askFree(_ instruction: String, earlier: String = "") {
+  private func askFree(_ said: String, earlier: String = "") {
+    // A word they corrected once stays corrected, typed or from the phone too.
+    let instruction = Heard.fix(said)
     // A command is done, not discussed: the model cannot press play, and
     // asked to, it says so politely, which is the worst answer there is.
     // "Never mind", or a bare "stop" with something going: everything stops,
@@ -512,6 +514,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var quiet = 0
 
   private func listenOn() {
+    // The button says what the microphone is doing, on every card: drawn
+    // white while it is open, between sentences too, and off only when it shuts.
+    notch.send("mic", ["on": true])
     voice.listen(
       partial: { [weak self] words in self?.notch.send("dictate", ["words": words]) },
       done: { [weak self] said in
@@ -543,6 +548,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     listening = false
     quiet = 0
     voice.stop()
+    notch.send("mic", ["on": false])
     if wasSticky { notch.send("dictate", ["words": "", "final": true, "off": true]) }
   }
 

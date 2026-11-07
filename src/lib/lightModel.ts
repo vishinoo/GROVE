@@ -551,7 +551,10 @@ export async function lightBrief(
       (where
         ? `\nThey are in ${where}. Anything local — transport, departures, opening times, shops, what is nearby, prices in a shop — means there unless they name somewhere else. Search for that place by name; do not answer about a different city with the same question.`
         : '\nYou do not know where they are. If the answer depends on where they are standing, say which place you looked up rather than implying it is theirs.') +
-      '\nFor a timetable, a departure or an opening time, say the actual time and name the day. "Soon" is not an answer.',
+      '\nFor a timetable, a departure or an opening time, say the actual time and name the day. "Soon" is not an answer.' +
+      // The adding is done afterwards, in code (calc.ts). A total written here
+      // is a sum done in a model's head, and the turn would repeat it.
+      '\nIf the question asks for a total, a difference or an average, give each figure separately with what it is, in the same unit, and do not add them up or state a total yourself.',
     [{ role: 'user', content: topic }],
     false,
     false,
@@ -1020,6 +1023,33 @@ ${
  * It may merge and drop restatements; it may never invent, and it must keep
  * every specific it was given.
  */
+/**
+ * The short things Grove says many times a day, written by the model in its
+ * own voice instead of fixed in code: the line while it works, "stopped",
+ * "never mind", a timeout, a press it did not hear. Fixed, they were the same
+ * words every time, which is the surest way to sound like a machine. Asked for
+ * several of each, in the manner, so `phrasebook.ts` can pick one that was
+ * not just said. Data only; never instructions.
+ */
+export async function lightPhrasebook(manner: string, kinds: Record<string, string>): Promise<string | null> {
+  const wanted = Object.entries(kinds)
+    .map(([kind, what]) => `- "${kind}": ${what}`)
+    .join('\n');
+  return complete(
+    `You are writing the short spoken lines a voice assistant says many times a day, so they never sound the same twice. For each kind below, write six different ones: natural, spoken, two to eight words, the way a friend would say it, each one different in shape and words, never a stock phrase. ${manner ? `The assistant's manner, for style only: """${manner.slice(0, 400)}"""` : ''}
+
+Kinds:
+${wanted}
+
+Return JSON: {"<kind>": ["...", "..."]}`,
+    [{ role: 'user', content: 'Write them.' }],
+    true,
+    false,
+    false,
+    900
+  );
+}
+
 export async function lightCompact(block: string): Promise<string | null> {
   const text = block.trim();
   if (!text) return null;

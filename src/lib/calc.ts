@@ -106,6 +106,42 @@ const NOT_A_SUM = [
   /\b\d{1,2}[:.]\d{2}\b/,
 ];
 
+/**
+ * An expression the model wrote, worked out exactly — or null if it is not one.
+ *
+ * `calculate` only sees the person's sentence, and the sentence that went wrong
+ * had no digits in it: "Avengers plus Age of Ultron plus Blue Beetle plus
+ * Captain Marvel" is a sum over figures the model has to find first. It found
+ * them and then added them in its head, said two billion, and on being told
+ * that was nonsense said four — agreeing rather than checking. So the model
+ * supplies the figures and this does the adding; it never states a total it
+ * worked out itself. `15%` is read as fifteen hundredths.
+ */
+export function workOut(expression: string): { expr: string; value: string } | null {
+  let t = expression.replace(/[×✕]/g, '*').replace(/÷/g, '/').replace(/[−–—]/g, '-');
+  for (const [pattern, to] of WORDS) t = t.replace(pattern, to);
+  t = t.replace(/,(?=\d{3}\b)/g, '').replace(/(\d+(?:\.\d+)?)\s*%/g, '($1/100)').replace(/\s+/g, '');
+  if (!t || /[^\d.+\-*/^()]/.test(t)) return null;
+  try {
+    const value = evaluate(t);
+    return Number.isFinite(value) ? { expr: t, value: format(value) } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a sentence asks for figures to be put together: a total, a
+ * difference, an average. These are the questions where a model finds every
+ * figure correctly and then gets the one number that was asked for wrong.
+ */
+const COMBINES =
+  /\b(?:total|totals|totalled|combined|altogether|all together|in all|add(?:ed|ing)? (?:up|together)|adds up|sum of|average|on average|difference between|how much more|how many more|plus)\b|[a-z0-9]\s*\+\s*[a-z0-9]|\b(?:make|made|earn(?:ed)?|cost|spend|spent|gross(?:ed)?|weigh|worth|come to)\b.{0,60}\btogether\b/i;
+
+export function asksToCombine(text: string): boolean {
+  return COMBINES.test(text);
+}
+
 export function calculate(text: string): string | null {
   if (!ASKS_FOR_MATHS.test(text)) return null;
   if (NOT_A_SUM.some((pattern) => pattern.test(text))) return null;

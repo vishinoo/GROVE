@@ -161,7 +161,9 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
       // A little forgiveness below the notch, none at the sides: the menu
       // bar items either side are things people click on purpose.
       if notchRect.insetBy(dx: 0, dy: -6).contains(p) {
-        if tucked { untuck() } else { show("idle", [:], pin: false); onGlance?() }
+        // A card from a while ago is not what they came back for: past thirty
+        // seconds the notch opens on the greeting, not on an old answer.
+        if tucked && Date().timeIntervalSince(tuckedAt) < 30 { untuck() } else { tucked = false; show("idle", [:], pin: false); onGlance?() }
       }
       return
     }
@@ -207,11 +209,12 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     js("grove.show(\(json(payload)))")
     if let closeAfter {
       closeTimer = Timer.scheduledTimer(withTimeInterval: closeAfter, repeats: false) { [weak self] _ in
-        guard let self else { return }
+        // Already shut by the pointer leaving: going home must not open it again.
+        guard let self, self.isOpen else { return }
         // Never out from under someone reading or scrolling it: wait for the pointer to go.
         if thenHome {
           if self.pointerInside { self.closeTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in self?.homeWhenFree() } }
-          else { self.show("idle", [:], pin: false) }
+          else { self.show("idle", ["keep": true], pin: false, closeAfter: 6) }
           return
         }
         // Stay open while the pointer is over it; it goes when the pointer does,
@@ -231,12 +234,14 @@ final class Notch: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
   private func homeWhenFree() {
     guard isOpen else { return }
     if pointerInside { closeTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in self?.homeWhenFree() }; return }
-    show("idle", [:], pin: false)
+    show("idle", ["keep": true], pin: false, closeAfter: 6)
   }
 
   /** Out of the way, with what it was showing kept for when the pointer comes back. */
+  private var tuckedAt = Date.distantPast
   private func tuck() {
     tucked = true
+    tuckedAt = Date()
     isOpen = false
     panel.ignoresMouseEvents = true
     js("grove.tuck()")

@@ -3816,7 +3816,7 @@ section('The microphone opens by itself on ⌘K, and nowhere else');
     'and the setting is still there to switch the ⌘K half off'
   );
   check(
-    /const micOn = \(\) => \{ if \(S\.data && S\.data\.mic\)/.test(panel),
+    /const micOn = \(\) => \{ if \(S\.micLive \|\| \(S\.data && S\.data\.mic\)\)/.test(panel) && !/micOn[^\n]*post\(/.test(panel),
     'the panel draws the microphone as on rather than switching it on',
     'a card re-renders on every step, phone and remark; starting it there would start it each time'
   );

@@ -39,6 +39,7 @@ final class Voice {
     guard let recognizer = SFSpeechRecognizer(), recognizer.isAvailable else { end(); return }
     let request = SFSpeechAudioBufferRecognitionRequest()
     request.shouldReportPartialResults = true
+    request.contextualStrings = Heard.hints
     if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
     self.request = request
 
@@ -53,7 +54,7 @@ final class Voice {
       guard let self else { return }
       DispatchQueue.main.async {
         if let result {
-          self.latest = result.bestTranscription.formattedString
+          self.latest = Heard.fix(result.bestTranscription.formattedString)
           partial(self.latest)
           self.quiet?.invalidate()
           // Two and a half seconds of quiet: a breath mid-sentence is not the end of it.

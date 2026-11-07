@@ -1278,6 +1278,16 @@ kind `tsc` and `npm run verify` cannot see:
   thing separating a consistent answer from a plausible one.
 - **Sums are done in `calc.ts`**, not by the model, which said 15% of 240 was
   thirty. The exact answer is handed over as a fact.
+- **And so are sums over figures it had to find.** "Avengers + Age of Ultron
+  + Blue Beetle + Captain Marvel" has no digits for `calculate` to see; the
+  model looked up the four grosses, added them in its head, said two billion,
+  and when told that was nonsense said four, agreeing rather than checking.
+  `maths.work` takes the figures and `workOut` adds them. The search brief is
+  told to list figures and never total them. A sentence asking for a total
+  (`asksToCombine`) that gets a number back with no maths tool run is sent
+  back once, in code. When challenged, Grove re-checks with a tool and holds
+  its answer if it was right. Measured live: $4,170,781,356, searched and
+  summed, and "that's bs" got the same answer back with the four figures.
 - **The phrasing step is bounded.** Once a tool has answered, the model gets
   eight seconds and no retry to phrase it; past that, the tool's own answer is
   said. Gemini sometimes took twelve seconds just to reword a search result.
@@ -2067,6 +2077,21 @@ seconds to read a page of results. Pictures of the task's window are taken
 without taking the screen, and a check with nothing to look at uses the light
 model. A YouTube trailer, ask to done: 25s, from 42.
 
+**The twelve seconds were never the reader.** Timed phase by phase, a YouTube
+read is well under a second. What took twelve was the first Apple event after
+`go`: Chrome holds it while the page navigates, until AppleScript's own timeout
+(-1712), and the retry then works at once. The readiness poll had a five-second
+deadline and no way to keep it, since a single poll could sit for twelve. Polls
+now give up after two seconds and are asked again. That matters twice over,
+because `NSAppleScript` runs on the main thread, and a hung poll was also a
+frozen notch. Measured: from `go` to the click, 5s, down from 15.
+
+**And a check without a picture was a rubber stamp.** It sent the lite model a
+`thinkingConfig`, which the lite model refuses outright. A check that could not
+run counts as a pass, so every one of them passed with no reason given. The
+same bug as the agent's dead fallback, a second time. It is logged now when it
+happens.
+
 **Typing in an app only pastes.** Select-all and delete is how a web box is
 cleared, and in an app it is how a misplaced click into a code editor, instead of
 the chat panel beside it, empties the file. In apps Grove pastes where it clicked.
@@ -2095,6 +2120,55 @@ again, and `done` with `close` shuts a tab Grove opened when it was only a means
 (an article read to summarise it, an order placed). The reader lists what can be
 pressed on the whole page, nearest first, marked above or below, so "Show more"
 is pressed rather than scrolled towards; scroll goes both ways.
+
+**Grove learns routes, not only tips** (`Routes` in Lessons.swift). A job the
+check accepts leaves its moves as words — the address, the buttons by what they
+say, what was typed, the keys — with the user's corrections along the way in
+it, and a newer route for the same kind of job replaces the older. A job like
+it is handed the route first, and can send several moves at once (`moves`,
+buttons named by `label`) that are made without asking the model in between,
+dropped the moment a label is not on the page. Walked through once, a game is
+played straight off the next time.
+
+**With GIFs on, nearly every exchange gets one.** Asked for more, not fewer: the
+model picks the single best point of what was said either way — which can be
+the subject itself (Alexander the Great, a rocket launch), not only a reaction —
+and only something private or upsetting gets none (`Gifs.quiet`). A name is a
+fine search now; only a search of nothing but filler is dropped. Six seconds
+apart, and a new face takes over from the last rather than waiting for it. Asked
+"do a gif", Grove shows one instead of explaining it is only text. The card
+re-measures whenever its contents change size, so a height taken at the wrong
+moment cannot leave a short answer over a tall, empty card.
+
+**A GIF is Grove's face, and never the same twice.** The rule had narrowed to
+three moments, banned names and took GIPHY's first result, so the same search
+showed the same picture every time. Now it is the feeling in the moment — a
+cheeky line, a tease, good news, surprise, sympathy, a song — matched in size,
+with the artist doing something for a song when they are famous enough (a name
+alone is still dropped). It picks among the best few results not shown before
+(`grove.gifs.shown`), and the model is shown its recent faces so it does not
+reach for the same one. Seventy-five seconds apart.
+
+**No content examples in prompts, and fixed lines are worded.** Examples were
+being copied: the agent's done example was a Peter Thiel video, the decision's a
+Nolan film. Prompts now describe what a good line does. The Mac's fixed results
+carry `plain` and are worded by `Say` (light model, manner, recent lines,
+bounded, plain line on timeout); the phone's stock lines come from
+`phrasebook.ts`, written by the model in the manner and never the same twice
+running.
+
+**A finished card goes home in place.** The done card has the ask box under it,
+stays three to six seconds, then fades into the greeting at the same size and
+closes a few seconds later; it never reopens a notch that already shut, and it
+waits while they are typing into it. A card tucked away more than thirty seconds
+reopens as the greeting, not as the old answer.
+
+**The hello is about what is in front of them.** It used to be told to leave
+their work alone and mention the song, so every opener was an artist and a GIF
+of them. Now it leads with the page, document or chat in front, mentions a song
+only when one is playing and they are in their music app (a paused one is not
+what they are doing), and is shown its last few openers so the next one is about
+something else.
 
 Texts go through Messages, not a website (`agent.message`): the person is
 found in Contacts by name or relation, a pick among several is remembered,
@@ -2420,3 +2494,25 @@ npx expo lint
 npx expo export --platform web    # catches bad imports across every route
 npx expo install --check
 ```
+
+## A word put right stays right
+
+`mac/Sources/Grove/Heard.swift`. "Play Krillion" reached Grove as "Play
+Crillion" every time, and Crillion is a real DOS game, so Grove found it and
+played it. "With a K" changed nothing, because nothing said that the sentence
+corrected a word rather than asked for something. **A mishearing that is the
+same every time cannot be fixed by saying it louder.**
+
+So the recogniser is handed the names Grove knows as `contextualStrings`: every
+word ever corrected, plus the proper nouns in memory, the same as the phone.
+When it still gets one wrong and they say so, the decision returns `misheard`
+`{heard, meant}`. That pair is sealed in the vault and applied to every later
+transcript, spoken, typed or from the phone, as a whole word and never a
+substring. The game question in `askRule` is now only for games that have
+those choices: a quiz has no "against a bot", and asking it was a second
+wasted turn.
+
+**The mic button is white for as long as the microphone is open.** It stays on
+between sentences, now that the microphone re-arms after each one. It used to
+go dark on every finished sentence while still listening. Swift sends `mic
+{on}` from the one place listening starts and the one place it stops.
