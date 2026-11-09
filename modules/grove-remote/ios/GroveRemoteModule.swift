@@ -579,7 +579,7 @@ public class GroveRemoteModule: Module {
     guard let player = working, !player.isPlaying else { return }
     // Quieter than the others: it repeats, and a repeating sound at the same
     // level as a one-off is the thing people turn off.
-    player.volume = 0.22
+    player.volume = 0.45
     player.currentTime = 0
     player.play()
   }
@@ -607,23 +607,45 @@ public class GroveRemoteModule: Module {
     with nothing in the range speech lives in to fight with, and it loops
     without a seam because the swell starts and ends at silence.
   */
+  /*
+    Soft noise in the band small speakers can play, swelling and falling.
+
+    The first version was brown noise: 93% of it below 200 Hz, which a phone
+    speaker, earbuds and a pair of glasses all barely reproduce, played at a
+    gain of 0.2 and a volume of 0.22. It came to -39 dBFS of mostly bass, and
+    nobody could hear it at all. Measured, not guessed.
+
+    So it is white noise band-passed to 350 Hz to 1.8 kHz, a soft "shhh",
+    normalised to -20 dBFS RMS in the file, which is about -27 at the player's
+    volume. Quiet next to the chimes, never inaudible. Silent at both ends, so
+    it loops without a seam.
+  */
   private static func waveSamples(sampleRate: Int) -> [Int16] {
     let seconds = 3.2
     let count = Int(seconds * Double(sampleRate))
-    var out = [Int16](repeating: 0, count: count)
-    var brown = 0.0, low = 0.0
+    let rate = Double(sampleRate)
+    let highPass = 1 / (1 + 2 * Double.pi * 350 / rate)
+    let lowPass = 1 - exp(-2 * Double.pi * 1800 / rate)
+    var hp = 0.0, previous = 0.0, lp = 0.0, lp2 = 0.0
     var seed: UInt32 = 0x9E3779B9
+    var raw = [Double](repeating: 0, count: count)
+    var energy = 0.0
     for i in 0..<count {
       seed = seed &* 1664525 &+ 1013904223
       let white = Double(seed >> 8) / Double(1 << 24) * 2 - 1
-      brown = (brown + white * 0.02) * 0.997
-      low += (brown - low) * 0.08
+      hp = highPass * (hp + white - previous)
+      previous = white
+      lp += (hp - lp) * lowPass
+      lp2 += (lp - lp2) * lowPass
       let t = Double(i) / Double(count)
       // In over the first part, out over the rest, silent at both ends.
       let swell = pow(sin(Double.pi * t), 2) * (0.65 + 0.35 * sin(Double.pi * t * 0.5))
-      out[i] = Int16(max(-1, min(1, low * 3.2 * swell * 0.2)) * Double(Int16.max))
+      raw[i] = lp2 * swell
+      energy += raw[i] * raw[i]
     }
-    return out
+    let rms = sqrt(energy / Double(count))
+    let scale = rms > 0 ? pow(10, -20.0 / 20) / rms : 0
+    return raw.map { Int16(max(-1, min(1, $0 * scale)) * Double(Int16.max)) }
   }
 
   private static func chimeURL(_ kind: String) -> URL? {
@@ -641,7 +663,7 @@ public class GroveRemoteModule: Module {
     }
 
     let url = FileManager.default.temporaryDirectory
-      .appendingPathComponent("grove-chime-\(kind)-\(kind == "working" ? "v2" : "v1").wav")
+      .appendingPathComponent("grove-chime-\(kind)-\(kind == "working" ? "v3" : "v1").wav")
     if FileManager.default.fileExists(atPath: url.path) { return url }
 
     let sampleRate = 44100
