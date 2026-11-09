@@ -205,7 +205,8 @@ final class Agent {
     job belongs on, or a new tab. The rule that matters is still in the brief
     — never a site because it happened to be open.
   */
-  func start(goal written: String, budget: TimeInterval = 60, said: String = "") async -> AgentResult {
+  func start(goal steered: String, budget: TimeInterval = 60, said: String = "") async -> AgentResult {
+    let written = Services.steer(steered, said: said)
     /*
       Another AI only when their own words name one. The decision wrote "Ask
       ChatGPT to…" into goals for a game, a finance video, a science fact —
@@ -216,7 +217,10 @@ final class Agent {
       theirs to check here, and the phone's rules say the same thing.
     */
     var goal = written
-    if !said.isEmpty, let to = Delegates.wanted(in: written), Delegates.wanted(in: said) == nil {
+    // A picture or a video is the one thing Grove cannot make itself, so that
+    // hand-off needs no naming; anything else does.
+    let makes = written.range(of: #"(?i)\b(image|picture|photo|drawing|illustration|logo|video|clip|animation)s?\b"#, options: .regularExpression) != nil
+    if !said.isEmpty, !makes, let to = Delegates.wanted(in: written), Delegates.wanted(in: said) == nil {
       goal = Delegates.asked(from: written, to: to)
       Log.say("agent: not handing to \(to.name) — they did not ask for it")
     }
@@ -346,7 +350,7 @@ final class Agent {
     let app = task.app
     task.send = { app == "whatsapp" ? await Native.pressSend() : await Messages.send(text, to: person.address) }
     task.confirm = Pending(n: -1, url: "", summary: "")
-    return AgentResult(state: "confirm", spoken: "\(app == ", plain: truewhatsapp" ? "WhatsApp" : "Text") \(person.name): “\(text)”. Send it?", task: task.id)
+    return AgentResult(state: "confirm", spoken: "\(app == "whatsapp" ? "WhatsApp" : "Text") \(person.name): “\(text)”. Send it?", plain: true, task: task.id)
   }
 
   /** Their answer to a question, or `approve` after a yes to a confirmation. */
@@ -391,8 +395,19 @@ final class Agent {
   }
 
   func resume(task id: String, answer: String, approve: Bool) async -> AgentResult {
+    /*
+      A task that is gone finished, failed or was stopped. A yes to it presses
+      nothing, and says so. Anything else they said is a new job in its own
+      words, never glued onto the old one: "I lost track", reworded as "my wires
+      got crossed", was said three times in a row to somebody who had simply
+      moved on.
+    */
     guard let task = tasks[id] else {
-      return AgentResult(state: "failed", spoken: "I lost track of that one on your Mac. Tell me again and I'll start it fresh.", plain: true, task: id)
+      let said = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+      if approve || said.isEmpty || said.lowercased() == "yes" {
+        return AgentResult(state: "failed", spoken: "That had stopped before the yes, so I didn't press anything.", plain: false, task: id)
+      }
+      return await start(goal: said, budget: 60)
     }
     task.touched = Date()
     if !task.choices.isEmpty {
@@ -400,7 +415,7 @@ final class Agent {
       let picked = task.choices.first { said.contains($0.name.lowercased()) }
         ?? task.choices.first { $0.name.lowercased().split(separator: " ").contains { said.contains($0) && $0.count > 2 } }
         ?? (said.contains("first") ? task.choices.first : nil)
-      guard let picked else { return AgentResult(state: "ask", spoken: "Which one? \(task.choices.prefix(3).map(\.name).joined(separator: ", plain: true, or ")).", task: task.id) }
+      guard let picked else { return AgentResult(state: "ask", spoken: "Which one? \(task.choices.prefix(3).map(\.name).joined(separator: ", or ")).", plain: true, task: task.id) }
       task.choices = []
       // Asked once: next time "Akash" or "my brother" means this one.
       if let who = task.history.first { Contacts.remember(who, picked) }
@@ -640,7 +655,7 @@ final class Agent {
       let repeats = task.moves.filter { $0 == signature }.count
       if repeats >= 3 && action != "scroll" && action != "wait" && action != "keys" {
         task.history.append("Stuck: tried \(action) on \(label) three times.")
-        return AgentResult(state: "ask", spoken: "\(label.isEmpty ? ", plain: trueThat" : "“\(label.prefix(40))”") isn't responding on \(page.title.isEmpty ? "this page" : page.title). Should I try something else, or do you want to take it from here?", task: task.id)
+        return AgentResult(state: "ask", spoken: "\(label.isEmpty ? "That" : "“\(label.prefix(40))”") isn't responding on \(page.title.isEmpty ? "this page" : page.title). Should I try something else, or do you want to take it from here?", task: task.id)
       }
       if repeats == 2 && action != "scroll" && action != "wait" {
         task.history.append("You already did \(action) on \(label) and the page did not change the way you wanted. Do something different, or ask them.")
@@ -915,7 +930,9 @@ final class Agent {
         // A picture only where the page's words cannot show it: a game, a board,
         // a canvas, an app. Taking one waits for a gap in their typing and costs
         // seconds that a recipe page does not need.
-        let needsEyes = !task.desk.isEmpty || page.visual || !page.board.isEmpty || !page.chess.isEmpty
+        // A press they said yes to is money or a message: worth the picture, since
+        // the words alone let "added to your cart" through with nothing in it.
+        let needsEyes = !task.desk.isEmpty || page.visual || !page.board.isEmpty || !page.chess.isEmpty || task.approved != nil
         let verdict = await Agent.check(goal: task.goal, claim: claim, history: task.history, page: page, picture: needsEyes ? await Agent.picture(app: task.desk) : nil)
         Log.say("agent: \(task.id) check \(verdict.ok ? "passed" : "refused"): \(verdict.why.prefix(120))")
         if verdict.ok { Routes.keep(goal: task.goal, steps: task.trail) }
@@ -1033,17 +1050,18 @@ final class Agent {
   {"action":"find","text":"flour"} — search the whole page for a word and get every place it appears with the lines around it. Use it first whenever you need a particular fact from a long page (an amount, a price, a time, a name) instead of scrolling and skimming.
   {"action":"move","from":"e2","to":"e4"} — a chess move, when the page has a Chess section.
   {"action":"look"} — see a picture of the window next move, when the text does not tell you what is on the page (a game drawn on a canvas, a video player, a frame). When you have a picture, {"action":"click","x":0.42,"y":0.61} clicks that point on it, as fractions of its width and height.
-  {"action":"ask","question":"..."} — only when you cannot go on without them: a detail only they know, or a choice that is theirs and costs money (which item, which size, which restaurant). One short spoken question.
+  {"action":"ask","question":"..."} — only when you cannot go on without them: a detail only they know, or a choice that is theirs and costs money (which item, which size, which restaurant). One short spoken question. When it is a choice, give them the two or three real options from the page with what tells them apart, each with its price ("a 36 by 24 magnetic one for $45, or a 48 by 36 for $70"), never "which one do you want?" over a page they cannot see. An answer that is a rule rather than a pick ("whichever's biggest for the least money", "the cheapest decent one", "best rated") is a real answer: compare the options on the page by the thing it names (size, price, rating, price per size), with find when the figures are not in view, pick the one it points to, and say which and why in the confirm. Never ask again what they already told you as a rule.
   {"action":"confirm","n":31,"summary":"..."} — before anything that buys, sends, submits, books, applies or deletes. The summary is read aloud and they answer yes or no: say exactly what will happen, with the item, the price and total if shown, and where it goes
   {"action":"done","summary":"...","close":true} — with "close" true when the tab was only a means to the job and they will not want it afterwards: an article you read so you could summarise it, an order that has been placed, a message that has been sent. Leave it open when they will want to look at it: a video, a recipe, a page they asked to see.
   {"action":"done","summary":"..."} — the goal is reached. ONE SHORT SENTENCE for something you did: what is on their screen, said as their friend rather than a receipt. They can see it; you are not describing it to someone on the phone. Add a second only if there is a genuinely good remark to make, which is not most of the time — and never a recap of the steps, never "let me know if you need anything else". The exception is when the answer IS the thing they asked for (a recipe, a price, a comparison): then it is as long as the answer needs and no longer. Say it fresh each time, the way you would to a friend in the room, never to a formula
-  {"action":"fail","summary":"..."} — it cannot be done; say why plainly.
+  {"action":"fail","summary":"..."} — it cannot be done; say why plainly. SAY IT RATHER THAN FAKING IT. A site that needs an account they have not got, a game you cannot work out the controls of, a page that will not do the thing: "I can't get this one working reliably — here's where I got to" is a good answer and a wrong one dressed as success is not. Never report done on something you did not see happen.
   Rules:
   - Orders: before checkout, ask them to confirm the delivery address and the item you picked if either was not stated. Never change payment details. Never press the final button with click; use confirm.
   - Never type into password or card fields. If a sign-in is needed, ask them to sign in on the Mac and say when they have.
   - \(Thinking.askRule) If they already settled it — in the goal or just before — do not ask it again.
   - When the goal says they will play or do it themselves, set it up for them (open it, start the game, pick the settings) and then done: never make their moves or do their part.
-  - Games of any kind: if the goal does not say whether you or they play, and nothing they told you before settles it, ask that first in one line. Then play properly and to the end, unless they only asked to open one or will play themselves. Find the rules from the page if you do not know them, think about every move, and use what fits the game: keys for keyboard games, a click for buttons and tiles, a point on the picture for anything drawn. Never stop at "started".
+  - A SITE YOU HAVE NEVER SEEN IS STILL A SITE. Most pages are the same handful of shapes — a search box, a list of results, a play button, a form, a grid. Read what is there, try the obvious thing, and look at what changed. Do not refuse because you do not recognise it, and do not go looking for a more familiar site instead: the one they named is the one they want. Give it a real go — three or four moves of actually trying — before you decide you cannot. Then say so plainly rather than clicking on hopefully.
+  - Games of any kind: if the goal does not say whether you or they play, and nothing they told you before settles it, ask that first in one line. ASK ONCE, AT THE START, AND NEVER MID-GAME: a question four moves in is an interruption of the thing they asked for. If they already said "let's play" or "play with me", they are playing and you set it up; "play X" with nothing else said is you playing it. Then play properly and to the end, unless they only asked to open one or will play themselves. Find the rules from the page if you do not know them, think about every move, and use what fits the game: keys for keyboard games, a click for buttons and tiles, a point on the picture for anything drawn. Never stop at "started".
   - Videos, films and songs: get the thing itself playing, not a search page; the official upload when there is one, a full film only from a service they use. If it is already open in their tab, carry on there.
   - Popups are normal: cookie banners, sign-up offers, ads, "welcome" screens, newsletter boxes. When one is listed, close it or accept it (Accept, Agree, Continue, Close, X, No thanks, Maybe later) and carry on with the page underneath. A popup is never a reason to leave a site or to try another one.
   - Before looking anywhere else, check whether what you came for is already here and usable: a grid, a board, keys, a canvas, a Play or Start button, a frame. If it is, use it. A game, puzzle or player often lives in a frame from another site: go to the frame's address to open it on its own page, where you can read and press it, or use look and click on the picture. Leave a site only if it truly needs payment or an account they do not have, and say so when you do.
@@ -1114,6 +1132,7 @@ final class Agent {
           let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(picture == nil ? "gemini-flash-lite-latest" : "gemini-flash-latest"):generateContent") else { return (true, "") }
     let system = """
     You check another assistant's work in a web browser before the person is told it is finished. Judge only from the page as it is now (and the picture, when there is one) against what the person asked for, read the way they meant it: "play" a game means actually playing it — keep going until it is over or they would be satisfied, not a few moves; "correctly" means correct; "find" means it is on the screen; "order" or "send" means it reached the step they asked for. A claim is not evidence. If the page does not clearly show it, it is not achieved.
+    A yes they gave and a button that was pressed are not proof it happened. For a cart, an order or a send, look for the evidence: the cart count going up, an "added" message, the item in the basket, the order number, the sent message. No evidence means not achieved, with what to check.
     Reply as JSON: {"achieved":true|false,"why":"one sentence: what on the page shows it, or what is still missing and what to do next"}
     """
     let labels = page.items.prefix(60).map { "[\($0["n"] ?? "")] \($0["label"] ?? "")\(($0["value"] as? String).map { " = \"\($0)\"" } ?? "")" }.joined(separator: "\n")

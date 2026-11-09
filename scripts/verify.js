@@ -4746,48 +4746,32 @@ section('⌘V works, and the colour goes both ways');
   );
 
   /*
-   * The same four colours in three places, which cannot be helped — one is
-   * Swift, one is a web page and one is the phone — so they are checked
-   * against each other rather than trusted.
+   * The colour lives on the phone, in one place.
+   *
+   * The Mac could set its own and the phone's, which worked — and a second
+   * place to change one setting is a second place for the two to disagree,
+   * for the sake of a thing somebody changes twice a year. The Grove window
+   * still follows the phone's colour, through the field it already draws,
+   * so nothing was lost but the picker.
+   *
+   * What is checked now is that the dead half really went. A colour sent
+   * from a Mac that no longer offers one would be a message nothing can
+   * produce and the phone still answers.
    */
-  const phone = fs.readFileSync(path.join(ROOT, 'src/components/field-shader.ts'), 'utf8');
-  // The captured name, not the whole match: the three spell the line
-  // differently and stripping punctuation left "keytide" beside "tide".
-  const keys = (src, re) => [...src.matchAll(re)].map((m) => m[1]);
-  const onPhone = keys(phone, /key: '(tide|ember|moss|aurora)'/g);
-  const onMac = keys(home, /\("(tide|ember|moss|aurora)",/g);
-  const onPage = keys(page, /key: '(tide|ember|moss|aurora)'/g);
   check(
-    onPhone.length === 4 && onMac.join() === onPhone.join() && onPage.join() === onPhone.join(),
-    'the Mac, its settings page and the phone offer the same colours in the same order',
-    `phone ${onPhone.join()} / mac ${onMac.join()} / page ${onPage.join()}`
-  );
-  // And the actual hex, since a matching list of names with different colours
-  // is the version of this bug nobody would notice until they saw both.
-  const hex = (src) => (src.match(/#[0-9A-F]{6}/g) || []).filter((h) => phone.includes(h));
-  check(
-    hex(home).length >= 16 && hex(page).length >= 16,
-    'with the same stops, not just the same names',
-    `mac ${hex(home).length}, page ${hex(page).length} of the phone's hex values found`
-  );
-
-  check(
-    /func colour\(_ key: String\) \{[\s\S]{0,200}?deliver\(\["t": "colour", "key": key\]\)/.test(link),
-    'the Mac can tell the phone which one was picked'
+    !/onColour/.test(home) && !/onColour/.test(main),
+    'the Mac does not offer a colour picker',
+    'one setting, one place to change it'
   );
   check(
-    /home\.onColour = \{[\s\S]{0,600}?self\.notch\.setLook\(self\.look\)[\s\S]{0,300}?self\.link\.colour\(key\)/.test(main),
-    'and paints everything here before it tells the phone',
-    'otherwise it recolours when the phone answers, and not at all when it is away'
+    !/func colour\(_ key: String\)/.test(link),
+    'and the message that carried one is gone with it',
+    'a message nothing can send is dead code that type-checks'
   );
   check(
-    /m\.t === 'colour' && typeof m\.key === 'string'/.test(macts) && /savePersona\(\{ \.\.\.persona, sky: key \}\)/.test(macts),
-    'the phone keeps it'
-  );
-  check(
-    /sentLook = null;/.test(macts),
-    'and does not then skip sending it back as "nothing changed"',
-    'the phone\'s copy really did change; the Mac needs it confirmed rather than assumed'
+    /S\.look = \{ stops, speed:/.test(page),
+    'while the window still follows the phone\'s colour',
+    'the field was already driven by what the phone sends; only the picker went'
   );
 
   // The paste button, for the one field nobody types into.
@@ -4971,6 +4955,22 @@ section('A tidy-up may not take their session with it');
   check(
     step !== null && /set w to front window/.test(step) && !/every window/.test(step),
     'in the front window only, so another window of theirs is untouched'
+  );
+  /*
+   * And it runs BEFORE the mode opens anything, which is the whole of it.
+   *
+   * It ran after, so by the time it looked the front window was the one the
+   * mode had just made — and "close the other tabs in the front window"
+   * closed the mode's own. Study mode opened their Canvas and then shut it.
+   * The comment above the code already claimed it ran first; it did not,
+   * which is why this is a check and not a sentence.
+   */
+  const doAt = modes.indexOf('for step in steps where step.kind == "do" {');
+  const pagesAt = modes.indexOf('let pages = steps.filter { $0.kind == "site"');
+  check(
+    doAt > 0 && pagesAt > 0 && doAt < pagesAt,
+    'and before the mode opens anything of its own',
+    'running after means the front window is the mode\'s, so it closes its own tabs'
   );
 }
 

@@ -66,16 +66,6 @@ final class Home: NSObject, WKScriptMessageHandler, WKNavigationDelegate, NSWind
   /** The phone's colours changed. */
   func setLook() { push() }
 
-  /** The same four as the phone (field-shader.ts) and as home.html lists. */
-  static let colours: [(key: String, label: String, stops: [String])] = [
-    ("tide", "Tide", ["#061C26", "#1F7A8C", "#C9EDE6", "#E3B868"]),
-    ("ember", "Ember", ["#2A0C07", "#C9431C", "#FBD29A", "#8E2A4A"]),
-    ("moss", "Moss", ["#0B1710", "#2E6A45", "#DCE6B8", "#A8873A"]),
-    ("aurora", "Aurora", ["#060A1E", "#22B394", "#D2F3E6", "#7B4FD4"]),
-  ]
-
-  /** Set once by main.swift: paint everything here, and tell the phone. */
-  var onColour: ((String, String, [String]) -> Void)?
 
   private func build() {
     let config = WKWebViewConfiguration()
@@ -121,7 +111,7 @@ final class Home: NSObject, WKScriptMessageHandler, WKNavigationDelegate, NSWind
     guard ready, web != nil else { return }
     let modes = Modes.all.map { m -> [String: Any] in
       [
-        "id": m.id, "name": m.name, "tuck": m.tuck, "quitApps": m.quitApps,
+        "id": m.id, "name": m.name, "quitApps": m.quitApps,
         "running": Modes.isRunning(m.id),
         "steps": m.steps.map { ["kind": $0.kind, "value": $0.value] },
       ]
@@ -145,7 +135,6 @@ final class Home: NSObject, WKScriptMessageHandler, WKNavigationDelegate, NSWind
           id: m["id"] as? String ?? UUID().uuidString,
           name: m["name"] as? String ?? "",
           steps: ((m["steps"] as? [[String: Any]]) ?? []).map { ModeStep(kind: $0["kind"] as? String ?? "site", value: $0["value"] as? String ?? "") },
-          tuck: m["tuck"] as? Bool ?? true,
           quitApps: m["quitApps"] as? Bool ?? true
         )
       })
@@ -160,23 +149,6 @@ final class Home: NSObject, WKScriptMessageHandler, WKNavigationDelegate, NSWind
       Task { @MainActor in self.send("tabs", ["id": body["id"] as? String ?? "", "urls": await Modes.frontTabs()]) }
     case "apps":
       send("apps", ["names": Modes.appNames()])
-    case "colour":
-      /*
-        Changed here, and the phone follows.
-
-        It has only ever gone the other way: the phone sends its colour and
-        the Mac paints itself with it. But the Mac is where somebody sits
-        with a keyboard, and a settings window you can look at but not change
-        is a worse thing than no settings window.
-
-        Applied locally first so the notch and this window recolour as they
-        press, rather than when the phone gets round to answering — and the
-        same if the phone is not connected at all.
-      */
-      guard let key = body["key"] as? String,
-            let picked = Home.colours.first(where: { $0.key == key }) else { return }
-      Log.say("look: colour changed to \(key) on the Mac")
-      onColour?(key, picked.label, picked.stops)
     case "close":
       window?.orderOut(nil)
     default:

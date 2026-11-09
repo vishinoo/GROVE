@@ -35,7 +35,6 @@ struct Mode: Codable, Equatable {
   var name: String
   var steps: [ModeStep]
   /** Minimise the mode's browser window once its pages are loading, so a video plays without being in the way. */
-  var tuck: Bool = true
   /** Quit the apps it launched when it ends. Apps that were already open are never touched. */
   var quitApps: Bool = true
 }
@@ -197,60 +196,24 @@ enum Modes {
     Log.say("mode: starting \(mode.name), \(steps.count) things")
 
     // Pages first, all into one window of its own.
-    let pages = steps.filter { $0.kind == "site" || $0.kind == "video" }.compactMap { address(for: $0) }
-    if !pages.isEmpty {
-      if let window = await openWindow(pages) {
-        opened.window = window
-        /*
-          Land on the first page it opened.
-
-          A mode opens four tabs and Chrome leaves you on whichever loaded
-          last, which is nobody's choice — the first one is the one they put
-          at the top of the list. Skipped when the window is being tucked
-          away, because that mode's whole point is not to be looked at.
-        */
-        if !mode.tuck {
-          Script.run("""
-          tell application "Google Chrome"
-            set w to (first window whose id is \(window))
-            set active tab index of w to 1
-            set index of w to 1
-            activate
-          end tell
-          """) { _, _ in }
-        }
-        if mode.tuck {
-          // Long enough for a video to start: YouTube will not begin playing in
-          // a window that was minimised before it loaded.
-          DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
-            Script.run("tell application \"Google Chrome\" to set minimized of (every window whose id is \(window)) to true") { _, _ in }
-          }
-        }
-      } else {
-        // No Chrome, or it would not answer: open them anyway, in whatever
-        // browser is the default. Ending the mode cannot close those.
-        for page in pages { if let url = URL(string: page) { NSWorkspace.shared.open(url) } }
-      }
-    }
-
-    /*
-      Things to do, as well as things to open.
-
-      "Close my other Chrome tabs" is the one everybody wants from a study
-      mode and it is not a page or an app, so there was nowhere to put it.
-      The handful that are worth having run here in code, instantly and
-      predictably; anything else is handed to the browser agent, which can
-      do a great deal more and takes a great deal longer.
-
-      Run before the pages open, so "close my other tabs" closes THEIRS and
-      not the four this mode just put up.
-    */
     for step in steps where step.kind == "do" {
       let want = step.value.lowercased()
       if want.range(of: #"\bclose\b.*\btabs?\b"#, options: .regularExpression) != nil {
         /*
-          The OTHER tabs in the front window. Not windows, and never all of
-          them.
+          The OTHER tabs in the front window. Not windows, never all of them,
+          and before this mode has opened anything.
+
+          **The order is the fix.** This ran after the pages, so by the time
+          it looked, the front window was the one the mode had just made —
+          and "close the other tabs in the front window" closed the mode's
+          own. Study mode opened their Canvas and then shut it, which from
+          outside is Grove undoing itself at random.
+
+          The comment here already claimed it ran first. It did not. A
+          comment that asserts an ordering the code does not have is worse
+          than no comment, because the next person reads it instead of the
+          code — so the two are now in the same place and `npm run verify`
+          checks which comes first.
 
           The first version of this closed every Chrome window, which is not
           "close my other tabs", it is closing the thing they were working
@@ -284,6 +247,44 @@ enum Modes {
       }
     }
 
+    let pages = steps.filter { $0.kind == "site" || $0.kind == "video" }.compactMap { address(for: $0) }
+    if !pages.isEmpty {
+      if let window = await openWindow(pages) {
+        opened.window = window
+        /*
+          Land on the first page it opened.
+
+          A mode opens four tabs and Chrome leaves you on whichever loaded
+          last, which is nobody's choice — the first one is the one they put
+          at the top of the list.
+        */
+        Script.run("""
+        tell application "Google Chrome"
+          set w to (first window whose id is \(window))
+          set active tab index of w to 1
+          set index of w to 1
+          activate
+        end tell
+        """) { _, _ in }
+      } else {
+        // No Chrome, or it would not answer: open them anyway, in whatever
+        // browser is the default. Ending the mode cannot close those.
+        for page in pages { if let url = URL(string: page) { NSWorkspace.shared.open(url) } }
+      }
+    }
+
+    /*
+      Things to do, as well as things to open.
+
+      "Close my other Chrome tabs" is the one everybody wants from a study
+      mode and it is not a page or an app, so there was nowhere to put it.
+      The handful that are worth having run here in code, instantly and
+      predictably; anything else is handed to the browser agent, which can
+      do a great deal more and takes a great deal longer.
+
+      Run before the pages open, so "close my other tabs" closes THEIRS and
+      not the four this mode just put up.
+    */
     for step in steps where step.kind == "app" {
       guard let url = Native.locate(step.value) else { failed.append(step.value); continue }
       let id = Bundle(url: url)?.bundleIdentifier

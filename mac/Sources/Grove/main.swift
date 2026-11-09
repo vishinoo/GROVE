@@ -54,22 +54,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     home = MainActor.assumeIsolated { Home(look: look) }
     MainActor.assumeIsolated {
       home.onDone = { [weak self] said in self?.notch.show("done", ["title": said, "text": "", "ok": true], pin: false, closeAfter: 2.5) }
-      // Chosen on the Mac: paint everything here at once, then tell the phone,
-      // which keeps it and comes back with the same answer. Local first, so it
-      // recolours as they press and whether or not the phone is there.
-      // A mode step that is neither a page nor an app: the agent has hands.
-      Modes.onGoal = { [weak self] goal in
-        guard let self else { return }
-        self.runAgent(Job(id: UUID().uuidString, kind: "agent.start", args: ["goal": goal], fromPhone: false)) { _, _, _ in }
-      }
-      home.onColour = { [weak self] key, label, stops in
-        guard let self else { return }
-        self.look.apply(LookUpdate(colour: key, label: label, stops: stops))
-        self.notch.setLook(self.look)
-        MainActor.assumeIsolated { self.home.setLook() }
-        self.link.colour(key)
-        self.refreshMenu()
-      }
     }
     link = Link(account: account)
     shortcut = Shortcut()

@@ -127,12 +127,6 @@ input[type=text]:focus { border-color: rgba(255,255,255,0.4); }
     </header>
     <h2>Your modes</h2>
     <div class="card" id="modes"></div>
-    <h2>Colour</h2>
-    <div class="card" id="colours"></div>
-    <div class="card" style="margin-top:12px"><div class="note">Changing it here changes it on your phone too. It is the same field on both, so they stay a matching pair.</div></div>
-
-    <h2>Saying it</h2>
-    <div class="card"><div class="note">Say <b>"study mode"</b> to ⌘K or to Grove on your phone and it starts. <b>"End study mode"</b> closes what it opened: its own browser window, the apps it launched, and the music it put on. Nothing you already had open is touched.</div></div>
   </section>
 
   <section id="edit" hidden>
@@ -153,7 +147,6 @@ input[type=text]:focus { border-color: rgba(255,255,255,0.4); }
 
     <h2>When it runs</h2>
     <div class="card">
-      <div class="row"><div class="grow"><div class="label">Tuck the browser window away</div><div class="sub">Minimised once it has loaded, so a video plays without being in front</div></div><button class="switch" id="tuck"></button></div>
       <div class="row"><div class="grow"><div class="label">Quit the apps it opened when it ends</div><div class="sub">Apps that were already open stay open</div></div><button class="switch" id="quit"></button></div>
     </div>
 
@@ -189,35 +182,6 @@ const ICONS = {
   // The clipboard, matching the notch's own icon set.
   paste: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4" width="10" height="16" rx="2.5"/><path d="M9.5 4V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1"/></svg>',
 };
-/* The same four as the phone (field-shader.ts). Changing one changes both. */
-const COLOURS = [
-  { key: 'tide', label: 'Tide', blurb: 'Deep sea, teal and seafoam', c: ['#061C26', '#1F7A8C', '#C9EDE6', '#E3B868'] },
-  { key: 'ember', label: 'Ember', blurb: 'Wildfire at dusk', c: ['#2A0C07', '#C9431C', '#FBD29A', '#8E2A4A'] },
-  { key: 'moss', label: 'Moss', blurb: 'Forest floor and lichen', c: ['#0B1710', '#2E6A45', '#DCE6B8', '#A8873A'] },
-  { key: 'aurora', label: 'Aurora', blurb: 'Northern lights', c: ['#060A1E', '#22B394', '#D2F3E6', '#7B4FD4'] },
-];
-let colour = 'tide';
-
-function drawColours() {
-  $('colours').innerHTML = COLOURS.map((c) => `
-    <div class="row press ${c.key === colour ? 'now' : ''}" data-colour="${c.key}">
-      <div class="swatch">${c.c.map((hex) => `<i style="background:${hex}"></i>`).join('')}</div>
-      <div class="grow"><div class="title">${c.label}</div><div class="sub">${c.blurb}</div></div>
-      ${c.key === colour ? '<span class="tick">✓</span>' : ''}
-    </div>`).join('');
-  $('colours').querySelectorAll('[data-colour]').forEach((el) => (el.onclick = () => {
-    colour = el.dataset.colour;
-    const picked = COLOURS.find((c) => c.key === colour);
-    // Here first, so the window recolours as they press rather than when the
-    // phone gets round to answering — and the same if the phone is not there.
-    S.look = { stops: picked.c, speed: S.look.speed, warp: S.look.warp };
-    const r = document.documentElement.style;
-    r.setProperty('--a', picked.c[0]); r.setProperty('--b', picked.c[1]); r.setProperty('--c', picked.c[2]);
-    drawColours();
-    post({ t: 'colour', key: colour });
-  }));
-}
-
 const tileClass = (s) => s.kind === 'playlist' && /spotify/i.test(s.value) ? 'k-spotify' : `k-${s.kind}`;
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
@@ -262,7 +226,7 @@ function drawList() {
       <div class="grow"><div class="title">New mode</div></div>
     </div>`);
   $('new').onclick = () => {
-    const m = { id: uid(), name: '', steps: [{ kind: 'playlist', value: '' }], tuck: true, quitApps: true, running: false };
+    const m = { id: uid(), name: '', steps: [{ kind: 'playlist', value: '' }], quitApps: true, running: false };
     modes.push(m);
     open(m.id);
     $('name').focus();
@@ -286,7 +250,6 @@ function drawEdit() {
   if (!m) return close();
   if (document.activeElement !== $('name')) $('name').value = m.name;
   $('initial').textContent = (m.name || 'S').trim().charAt(0).toUpperCase() || 'S';
-  $('tuck').classList.toggle('yes', !!m.tuck);
   $('quit').classList.toggle('yes', !!m.quitApps);
   $('run').textContent = m.running ? 'End' : 'Start';
   $('run').classList.toggle('ghost', !!m.running);
@@ -362,7 +325,6 @@ function run(id) {
 
 $('back').onclick = close;
 $('name').oninput = () => { const m = current(); m.name = $('name').value; $('initial').textContent = (m.name || 'S').trim().charAt(0).toUpperCase() || 'S'; save(); };
-$('tuck').onclick = () => { const m = current(); m.tuck = !m.tuck; drawEdit(); save(); };
 $('quit').onclick = () => { const m = current(); m.quitApps = !m.quitApps; drawEdit(); save(); };
 $('run').onclick = () => run(editing);
 $('delete').onclick = () => {
@@ -448,8 +410,6 @@ window.grove = (msg) => {
       // changed on the phone arrives here as a drift rather than a jump.
       S.look = { stops, speed: d.look.speed ?? 1, warp: d.look.warp ?? 1 };
       document.getElementById('gl')?.classList.add('on');
-      if (d.look.colour) colour = d.look.colour;
-      drawColours();
     }
     // What is on screen wins over what came back: the box being typed into
     // is newer than the copy that was saved a moment ago.

@@ -35,6 +35,7 @@
 */
 
 import Foundation
+import AppKit
 
 final class Link {
   var onLook: ((LookUpdate) -> Void)?
@@ -53,6 +54,9 @@ final class Link {
   private var lastHeard = Date.distantPast
   private var watch: Timer?
   private var backoff: TimeInterval = 2
+  /** Anything at all from the server, heartbeat replies included: the socket is alive. */
+  private var socketHeard = Date()
+  private var woke: NSObjectProtocol?
   private var pending: [String: CheckedContinuation<Reply?, Never>] = [:]
 
   /*
@@ -73,6 +77,19 @@ final class Link {
   }
 
   func start() {
+    /*
+      Back the moment the Mac wakes. Timers do not run asleep, so a socket the
+      server dropped overnight was only noticed at the next backoff, up to a
+      minute after opening the lid, and every job sent in that minute was
+      "couldn't reach your Mac" with the Mac sitting right there.
+    */
+    if woke == nil {
+      woke = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+        Log.say("link: woke, reconnecting")
+        self?.backoff = 1
+        self?.connect()
+      }
+    }
     watch?.invalidate()
     var ticks = 0
     watch = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
@@ -136,8 +153,28 @@ final class Link {
       ])
       Log.say("link: joining \(self.topic)")
     }
+    socketHeard = Date()
+    /*
+      A join nobody answers is a dead socket. One sat "joining" for forty
+      minutes, reconnecting never, because only a socket that said it had
+      closed was retried. Silent ones are the common kind.
+    */
+    DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self, weak task] in
+      guard let self, let task, task === self.socket, !self.joined else { return }
+      Log.say("link: no answer to the join, trying again")
+      self.retry()
+    }
     heartbeat = Timer.scheduledTimer(withTimeInterval: 25, repeats: true) { [weak self] _ in
       guard let self else { return }
+      // Two heartbeats with nothing back: gone, whatever the socket says.
+      if Date().timeIntervalSince(self.socketHeard) > 60 {
+        Log.say("link: nothing from the server in a minute, reconnecting")
+        self.joined = false
+        self.setConnected(false)
+        self.backoff = 1
+        self.connect()
+        return
+      }
       self.ref += 1
       self.write(["topic": "phoenix", "event": "heartbeat", "payload": [:], "ref": "\(self.ref)"])
     }
@@ -157,6 +194,7 @@ final class Link {
         guard let self, task === self.socket else { return }
         switch result {
         case .success(let message):
+          self.socketHeard = Date()
           if case .string(let text) = message, let data = text.data(using: .utf8),
              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             self.frame(obj)
@@ -174,7 +212,8 @@ final class Link {
 
   private func retry() {
     let wait = backoff
-    backoff = min(backoff * 2, 60)
+    // Capped at fifteen: a phone waiting on a job gives up long before a minute.
+    backoff = min(backoff * 2, 15)
     DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
       guard let self, self.account.session != nil, !self.joined else { return }
       self.connect()
@@ -253,11 +292,6 @@ final class Link {
   }
 
   /** A fact they stated, or a claim they said was wrong, for the phone's memory to act on. */
-  /** A colour chosen on the Mac, for the phone to adopt and keep. */
-  func colour(_ key: String) {
-    deliver(["t": "colour", "key": key])
-  }
-
   func fact(_ line: String, wrong: String) {
     deliver(["t": "fact", "line": String(line.prefix(240)), "wrong": String(wrong.prefix(240))])
   }
@@ -303,6 +337,9 @@ final class Link {
       let id = (m["id"] as? String) ?? UUID().uuidString
       let args = (m["args"] as? [String: Any] ?? [:]).compactMapValues { "\($0)" }
       Log.say("link: job \(m["kind"] ?? "")")
+      // Received, said at once: the phone gives up in seconds without it
+      // rather than waiting out a minute on a job that never arrived.
+      broadcast(["t": "got", "id": id])
       onJob?(Job(id: id, kind: (m["kind"] as? String) ?? "", args: args, fromPhone: true)) { [weak self] ok, spoken, extra in
         var out: [String: Any] = ["t": "done", "id": id, "ok": ok, "spoken": spoken]
         extra.forEach { out[$0.key] = $0.value }
