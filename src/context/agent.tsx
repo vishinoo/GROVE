@@ -942,6 +942,16 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       // Anything else means they moved on, and a confirmation nobody answered
       // must not survive into a later turn.
       awaitingYes.current = null;
+      /*
+        Nor on the Mac. The phone forgot the yes, but the context still told
+        the model the Mac was "waiting on their yes", so "switch to study mode"
+        after a whiteboard in the cart was read as something to do with the
+        whiteboard. The Mac's job is left where it is and never resumed.
+      */
+      const mac = macWork();
+      if (holding.args.task && mac && mac.task === holding.args.task && mac.state === 'confirm') {
+        noteMacWork({ ...mac, state: 'set aside', said: 'They moved on without saying yes; nothing was pressed.' });
+      }
     }
 
     /*
@@ -1080,6 +1090,37 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           pending.current !== null || answered.listenAfter === true
         );
       }
+      return;
+    }
+
+    /*
+      A conversation is a sitting, not the life of the app.
+
+      History was only ever cleared by signing out or starting again, and Grove
+      stays alive in the background for days holding the audio session. So a
+      sentence on Monday was read as the next line of something said on
+      Saturday, and a stray "yes" got an answer about noodles.
+    */
+    const lastTurn = history.current[history.current.length - 1];
+    const sinceLast = lastTurn ? Date.now() - Date.parse(lastTurn.createdAt) : Infinity;
+    if (sinceLast > SITTING_MS) history.current = [];
+
+    /*
+      A bare "yes" with nothing to say yes to gets nothing.
+
+      The confirmation, the offer and Grove's own question all had their
+      chance above. Past them, "yes", "okay", "mm" is the recogniser hearing
+      the room, or the end of Grove's own voice, in a window that opened by
+      itself. Answered, it made the model invent something to agree to, and
+      what it reached for was whatever was oldest in the conversation. Only
+      straight after Grove asked something is it an answer.
+    */
+    const lastSaid = [...history.current].reverse().find((t) => t.role === 'assistant');
+    const askedJustNow = !!lastSaid && lastSaid.text.trim().endsWith('?') && Date.now() - Date.parse(lastSaid.createdAt) < ANSWER_MS + 30_000;
+    if (heardAloud && !askedJustNow && BARE_ACK.test(asked)) {
+      clearTimeout(holdTimer);
+      console.log('[grove:listen] a bare acknowledgement with nothing open; no reply');
+      setState(restingState());
       return;
     }
 
@@ -1230,6 +1271,46 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // Writing takes a minute, and a minute of silence reads as a crash. This is
     // not the empty promise the prompt forbids — the work is already running
     // and the answer is guaranteed to follow it.
+    /*
+     * A document is written behind the conversation, not in front of it.
+     *
+     * Half a minute of "working" used to be half a minute nobody could talk
+     * to Grove, and a sentence said in it abandoned the turn, so the document
+     * was still written and its link never said. Now the turn ends as soon as
+     * the work starts: Grove says it is on it and goes back to listening, and
+     * the result is said when it lands, at once when Grove is quiet or at the
+     * end of whatever it is saying.
+     */
+    if (ability.slow && ability.id === 'doc.create') {
+      setCaption('Writing…');
+      running.current = false;
+      setState((current) => (current === 'working' ? restingState() : current));
+      if (mine()) utter(phrase('writingAside'));
+      const account = live.current.uid;
+      void runAbility(ability, reply.args).then(async (outcome) => {
+        if (!mounted.current) return;
+        history.current = [...history.current, newTurn('assistant', outcome.spoken)].slice(-24);
+        if (!outcome.ok && outcome.spoken) void noteTrouble(account, outcome.spoken, ability.id);
+        // Waits for a gap rather than talking over them, for up to two minutes.
+        for (let i = 0; i < 60; i++) {
+          const resting = stateNow.current === 'idle' || stateNow.current === 'asleep';
+          if (resting && !running.current && !isSpeaking() && !awaitingYes.current) break;
+          await new Promise((resolve) => setTimeout(resolve, 2_000));
+          if (!mounted.current) return;
+        }
+        const resting = stateNow.current === 'idle' || stateNow.current === 'asleep';
+        if (!resting || running.current || isSpeaking() || awaitingYes.current) {
+          macTail.current.push(outcome.spoken);
+          return;
+        }
+        setCaption(outcome.spoken);
+        if (outcome.ok) doneChime();
+        hushAfter.current = turnSeq.current;
+        utter(outcome.spoken);
+      });
+      return;
+    }
+
     if (ability.slow) {
       setCaption('Writing…');
       // stillWorking, or the screen drops to Ready two seconds into a write
@@ -2874,6 +2955,11 @@ function listeningContext(): string {
   if (trigger.musicPlaying()) parts.push('music-playing');
   return parts.join(' · ');
 }
+
+/** How long a pause ends a conversation: the next sentence starts a new one. */
+const SITTING_MS = 30 * 60_000;
+/** Agreement on its own, with nothing in it to act on. */
+const BARE_ACK = /^\s*(?:yes|yeah|yep|yup|ok(?:ay)?|sure|mm+|hmm+|uh[- ]?huh|mhm|right|cool|alright|got it)\s*[.!]?\s*$/i;
 
 async function whenQuiet(timeoutMs = 12_000): Promise<void> {
   const started = Date.now();

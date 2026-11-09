@@ -143,4 +143,62 @@ enum Services {
     }
     return out
   }
+
+  /*
+    A job that names an app they do not use goes to the one they do.
+
+    The phone wrote "find watermelon on Instacart" for somebody who uses Uber
+    Eats and had said so. The phone's memory held it, but it never reached the
+    place that picked the store, and the Mac drove Instacart to a cart they
+    could not use. A rule in a prompt has lost this argument before (see
+    "Steering is not playing"), so it is code: whatever wrote the goal, a rival
+    app of a settled kind is swapped for theirs, unless their own words named it.
+  */
+  private static let apps: [String: [(name: String, site: String)]] = [
+    "food": [("Uber Eats", "ubereats.com"), ("DoorDash", "doordash.com"), ("SkipTheDishes", "skipthedishes.com"), ("Instacart", "instacart.com"), ("Grubhub", "grubhub.com")],
+    "film": [("Netflix", "netflix.com"), ("Crave", "crave.ca"), ("Prime Video", "primevideo.com"), ("Disney+", "disneyplus.com"), ("Hulu", "hulu.com")],
+  ]
+
+  private static func mentions(_ text: String, _ name: String) -> Bool {
+    let flat = name.lowercased().replacingOccurrences(of: " ", with: "")
+    let pattern = "(?i)(?<![a-z])(" + NSRegularExpression.escapedPattern(for: name) + "|" + NSRegularExpression.escapedPattern(for: flat) + ")(?![a-z])"
+    return text.range(of: pattern, options: .regularExpression) != nil
+  }
+
+  /**
+    The app they use for a kind: settled here, or else the one their memory
+    names. The memory is the phone's, sent across, so "I use Uber Eats, not
+    Instacart" counts even though it was never said at the Mac. A mention
+    straight after not, no, never or instead of counts against.
+  */
+  static func theirs(_ kind: String) -> (name: String, site: String)? {
+    guard let list = apps[kind] else { return nil }
+    let settled = use(kind)
+    if !settled.isEmpty, let hit = list.first(where: { mentions(settled, $0.name) }) { return hit }
+    var score: [String: Int] = [:]
+    for line in Vault.load().split(whereSeparator: \.isNewline).map(String.init) {
+      for app in list where mentions(line, app.name) {
+        let against = line.range(of: "(?i)(not|no|never|don'?t|doesn'?t|instead of|rather than)\\W+(\\w+\\W+){0,2}" + NSRegularExpression.escapedPattern(for: app.name), options: .regularExpression) != nil
+        score[app.name, default: 0] += against ? -2 : 1
+      }
+    }
+    guard let best = score.max(by: { $0.value < $1.value }), best.value > 0,
+          score.values.filter({ $0 == best.value }).count == 1 else { return nil }
+    return list.first { $0.name == best.key }
+  }
+
+  static func steer(_ goal: String, said: String) -> String {
+    var out = goal
+    for (kind, list) in apps {
+      guard let mine = theirs(kind) else { continue }
+      for rival in list where rival.name != mine.name && mentions(out, rival.name) && !mentions(said, rival.name) {
+        let flat = rival.name.lowercased().replacingOccurrences(of: " ", with: "")
+        let pattern = "(?i)(?<![a-z])(" + NSRegularExpression.escapedPattern(for: rival.name) + "|" + NSRegularExpression.escapedPattern(for: flat) + ")(?![a-z])"
+        out = out.replacingOccurrences(of: "(?i)\\(?" + NSRegularExpression.escapedPattern(for: rival.site.replacingOccurrences(of: ".com", with: "")) + "\\.[a-z.]+\\)?", with: "", options: .regularExpression)
+        out = out.replacingOccurrences(of: pattern, with: NSRegularExpression.escapedTemplate(for: mine.name), options: .regularExpression)
+        Log.say("services: \(rival.name) is not theirs, so \(mine.name)")
+      }
+    }
+    return out.replacingOccurrences(of: "  ", with: " ")
+  }
 }

@@ -81,6 +81,8 @@ type Native = {
    */
   requestMusicAccess?(): Promise<boolean>;
   playChime?(kind: string): Promise<void>;
+  speakNatural?(text: string, key: string, model: string, voice: string, style: string): Promise<void>;
+  stopNatural?(): Promise<void>;
   startWorking?(): Promise<void>;
   stopWorking?(): Promise<void>;
   requestLocationAccess?(): Promise<boolean>;
@@ -243,6 +245,24 @@ export function isVolumeTriggerOn(): boolean {
 
 export function onRemoteCommand(listener: (event: RemoteEvent) => void): () => void {
   const sub = native?.addListener('onRemoteCommand', listener as (p: never) => void);
+  return () => sub?.remove();
+}
+
+/** Whether this binary can speak in the streamed neural voice. */
+export function hasNaturalVoice(): boolean {
+  return typeof native?.speakNatural === 'function';
+}
+
+export async function speakNatural(text: string, key: string, model: string, voice: string, style: string): Promise<void> {
+  await native?.speakNatural?.(text, key, model, voice, style);
+}
+
+export async function stopNatural(): Promise<void> {
+  await native?.stopNatural?.();
+}
+
+export function onVoice(listener: (event: { state: 'start' | 'end' | 'error'; message: string }) => void): () => void {
+  const sub = native?.addListener('onVoice', listener as (p: never) => void);
   return () => sub?.remove();
 }
 

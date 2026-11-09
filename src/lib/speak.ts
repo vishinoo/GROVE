@@ -27,14 +27,18 @@
  *   best. So this file scores them and picks, rather than letting the platform
  *   default decide.
  *
- * Anything genuinely indistinguishable from a person means a neural TTS API,
- * which costs per character and adds a network round trip to every reply. For
- * something you talk to hands-free, that latency is a worse problem than the
- * timbre — so the system synthesiser stays, driven properly.
+ * Anything genuinely indistinguishable from a person means a neural voice, and
+ * that used to be ruled out on latency: a whole sentence came back after three
+ * or four seconds. Streamed, the first sound arrives in under a second and the
+ * rest faster than it plays, so it is the default now (`NaturalVoice.swift` in
+ * grove-remote, Gemini's speech model on the key Grove already has). The system
+ * synthesiser below is what says the line when there is no network, no key, or
+ * a binary too old to have the native half.
  */
 
 import * as Speech from 'expo-speech';
 
+import { loadOwnKey } from './lightModel';
 import type { Delivery } from './persona';
 
 export type SpeakHandlers = {
@@ -233,6 +237,46 @@ export async function hasEnhancedVoice(): Promise<boolean> {
 
 /* -------------------------------------------------------------- talking */
 
+/* ------------------------------------------------------- the human voice */
+
+/** The streamed voice's model and default speaker. Lite: 0.8s to the first sound. */
+const NATURAL_MODEL = 'gemini-3.8-flash-lite-tts';
+export const NATURAL_VOICES = ['Charon', 'Algieba', 'Orus', 'Iapetus', 'Kore', 'Aoede', 'Leda', 'Puck'] as const;
+// Empty on purpose: both speech models read a style line out loud rather than taking it as direction.
+const NATURAL_STYLE = '';
+/** No sound by then means something is wrong: the line goes to the system voice. */
+const NATURAL_START_MS = 3_500;
+
+/**
+ * The native half, required lazily (the reduced-mode rule in AGENTS.md): a
+ * static import would take the whole bundle down on a build without it.
+ */
+type Remote = {
+  hasNaturalVoice(): boolean;
+  speakNatural(text: string, key: string, model: string, voice: string, style: string): Promise<void>;
+  stopNatural(): Promise<void>;
+  onVoice(listener: (event: { state: 'start' | 'end' | 'error'; message: string }) => void): () => void;
+};
+function remote(): Remote | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('grove-remote') as Remote;
+    return typeof mod.hasNaturalVoice === 'function' && mod.hasNaturalVoice() ? mod : null;
+  } catch {
+    return null;
+  }
+}
+
+let naturalListener: ((state: 'start' | 'end' | 'error') => void) | null = null;
+let naturalSub: (() => void) | null = null;
+
+/** The neural speaker to use, or null for the system voice. "system" is the only way to choose the old one. */
+function naturalVoiceFor(delivery: Delivery): string | null {
+  if (delivery.voiceId === 'system') return null;
+  const named = delivery.voiceId?.startsWith('natural:') ? delivery.voiceId.slice(8) : '';
+  return named || NATURAL_VOICES[0];
+}
+
 export function speak(text: string, delivery: Delivery, handlers: SpeakHandlers = {}): void {
   const trimmed = text.trim();
   if (!trimmed) {
@@ -253,6 +297,43 @@ export function speak(text: string, delivery: Delivery, handlers: SpeakHandlers 
   speaking = true;
   handlers.onStart?.();
 
+  const mod = remote();
+  const voice = naturalVoiceFor(delivery);
+  if (mod && voice) {
+    const mine = ++speechSeq;
+    let heard = false;
+    const fallBack = () => {
+      if (mine !== speechSeq || settled) return;
+      naturalListener = null;
+      void mod.stopNatural();
+      system(trimmed, delivery, done);
+    };
+    naturalListener = (state) => {
+      if (mine !== speechSeq) return;
+      if (state === 'start') heard = true;
+      else if (state === 'end') done();
+      else if (state === 'error' && heard) done();
+      else if (state === 'error') fallBack();
+    };
+    if (!naturalSub) naturalSub = mod.onVoice((event) => naturalListener?.(event.state));
+    setTimeout(() => {
+      if (!heard) fallBack();
+    }, NATURAL_START_MS);
+    void (async () => {
+      const key = await loadOwnKey();
+      if (mine !== speechSeq) return;
+      if (!key) return fallBack();
+      await mod.speakNatural(trimmed, key, NATURAL_MODEL, voice, NATURAL_STYLE).catch(fallBack);
+    })();
+    return;
+  }
+  system(trimmed, delivery, done);
+}
+
+let speechSeq = 0;
+
+/** The system synthesiser, for when the streamed voice cannot speak. */
+function system(trimmed: string, delivery: Delivery, done: () => void): void {
   // The chosen voice wins; otherwise the best installed one; otherwise the
   // platform default. Resolved lazily so the first reply is never delayed
   // waiting on a voice list.
@@ -268,8 +349,9 @@ export function speak(text: string, delivery: Delivery, handlers: SpeakHandlers 
     });
   };
 
-  if (delivery.voiceId) {
-    start(delivery.voiceId);
+  const chosen = delivery.voiceId && delivery.voiceId !== 'system' && !delivery.voiceId.startsWith('natural:') ? delivery.voiceId : '';
+  if (chosen) {
+    start(chosen);
     return;
   }
   if (best !== undefined) {
@@ -288,5 +370,8 @@ export function speak(text: string, delivery: Delivery, handlers: SpeakHandlers 
  */
 export function stopSpeaking(): void {
   speaking = false;
+  speechSeq++;
+  naturalListener = null;
+  void remote()?.stopNatural();
   Speech.stop();
 }

@@ -37,6 +37,7 @@ public class GroveRemoteModule: Module {
   private var keepAlive: AVAudioPlayer?
   /** One player per chime, kept so a chime costs nothing after the first. */
   private var chimes: [String: AVAudioPlayer] = [:]
+  private lazy var natural = NaturalVoice()
   /** The soft pulse that plays while Grove is working on something. */
   private var working: AVAudioPlayer?
   /// Whether we have taken the session and registered for the remote.
@@ -70,7 +71,25 @@ public class GroveRemoteModule: Module {
   public func definition() -> ModuleDefinition {
     Name("GroveRemote")
 
-    Events("onRemoteCommand", "onRouteChange", "onInterruption")
+    Events("onRemoteCommand", "onRouteChange", "onInterruption", "onVoice")
+
+    /**
+     * Speak in a neural voice, streamed (NaturalVoice.swift). `onVoice` says
+     * start, end or error; an error before any sound means the JS side should
+     * say it with the system voice instead.
+     */
+    AsyncFunction("speakNatural") { (text: String, key: String, model: String, voice: String, style: String) in
+      DispatchQueue.main.async {
+        self.natural.onState = { [weak self] state, message in
+          self?.sendEvent("onVoice", ["state": state.rawValue, "message": message])
+        }
+        self.natural.speak(text: text, key: key, model: model, voice: voice, style: style)
+      }
+    }
+
+    AsyncFunction("stopNatural") {
+      DispatchQueue.main.async { self.natural.stop() }
+    }
 
     /**
      * Take the audio session and claim the remote.

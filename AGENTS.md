@@ -2516,3 +2516,102 @@ wasted turn.
 between sentences, now that the microphone re-arms after each one. It used to
 go dark on every finished sentence while still listening. Swift sends `mic
 {on}` from the one place listening starts and the one place it stops.
+
+## The Mac stays reachable, and says so fast when it is not
+
+`Link.swift` only retried a socket that reported closing. Silent ones are the
+common kind: one sat "joining" for forty minutes, and a lid opened after a
+night asleep waited out the backoff before reconnecting. So:
+- A join with no answer in ten seconds is retried.
+- Two heartbeats with nothing from the server is a reconnect.
+- Waking from sleep reconnects at once.
+- The backoff is capped at fifteen seconds rather than a minute.
+
+And a job sent into a dead socket used to wait its whole timeout, up to a
+minute and a half, before saying the Mac "didn't answer in time". The Mac now
+sends `got` the moment a job lands. A missing receipt is "I couldn't reach your
+Mac" within four seconds, enforced only once this Mac has sent a receipt, so an
+older build is never declared unreachable.
+
+## A job that ended is over
+
+The phone resumed whatever task id the model handed it, so "open my Drive" went
+into a checkout they had just stopped. When the Mac had dropped the task, the
+phone restarted it as the old goal with the new words glued on. Now only a task
+still waiting on them (`ask`, `confirm`, `working`) is resumed. On the Mac, an
+answer for a task that is gone starts a new job in its own words, and a yes to
+one presses nothing and says so. "I lost track", reworded three times as "my
+wires got crossed", is gone.
+
+A purchase is checked with a picture, and a pressed button is not evidence. The
+words-only check let "added to your cart" through with nothing in it.
+
+**The app they use wins, in code** (`Services.steer`). A goal naming a rival
+food or film app is moved to theirs: settled on the Mac, or else named in the
+memory the phone sends, with "not Instacart" counting against. Their own words
+naming the app still win.
+
+## Where the work happens
+
+Whatever is quickest for them. The phone takes documents, email replies, the
+weather, the calendar and questions. The Mac takes orders, Amazon, LinkedIn,
+games, film and video, Drive, and a long email ("pull it up on my Mac" is a
+Gmail search opened on the Mac). **Where they said is where it happens**: "put
+an essay on my YouTube" is a video essay on YouTube, never one to write. An
+image goes to Gemini and a video to Higgsfield without being named, since Grove
+cannot make either. Every other AI still needs naming.
+
+A wish ("I want to make lasagna") is answered with the route first: a recipe to
+cook from, the ingredients ordered, or one delivered. An answer that is a rule
+("whichever's biggest for the least") is applied by the Mac agent to the real
+options, which it lists with prices when it asks. Measured live: lasagna asks
+"from scratch, ingredients delivered, or order one in?". The YouTube essay, the
+Gemini image and the Gmail search all route correctly.
+
+**A document is written behind the conversation.** `doc.create` frees the turn
+as soon as it starts and says the result when it lands. Before, half a minute
+of "working" was half a minute nobody could talk, and a sentence said during it
+lost the link.
+
+The loading screen is one dark screen: the native splash and the gate are both
+#0D0E11 with a white g (`splash-icon-dark.png`). The splash is native, so it
+needs a build.
+
+## A human voice
+
+`modules/grove-remote/ios/NaturalVoice.swift`, and `speak.ts`. Grove speaks
+with Gemini's speech model (`gemini-3.8-flash-lite-tts`) on the key it
+already has, streamed as server-sent 24 kHz PCM and played as it arrives:
+- **Speed:** measured at 0.8s to the first sound, and the rest arrives faster
+  than it plays. Unstreamed it was three to four seconds per sentence, which is
+  why a neural voice was once ruled out.
+- **Playing:** its own small engine on the session grove-remote holds, with no
+  category of its own. **The engine stops whenever the voice does**, because a
+  running output graph in the background stops the recogniser's engine from
+  starting, and every reply ends in a listening window.
+- **Fallback:** no sound within three and a half seconds, no key, no network,
+  or a binary without the native half: the line is said with the system voice
+  instead. A dropped connection costs a worse voice, never silence.
+- **Choosing a voice:** `voiceId` "natural:<name>" picks a speaker (Charon by
+  default), and "system" is the only way back to the old voice.
+- **No style line.** Both models read a direction like "say this warmly" out
+  loud: measured 11.4s against 6.6s for the same sentence.
+
+The projects people point at for this (OpenVoice, voicebox, OmniVoice,
+Real-Time-Voice-Cloning) are Python models for a GPU or a running server. None
+of them can run inside an iPhone app, and the phone cannot depend on the Mac
+being awake to talk.
+
+## A conversation is a sitting
+
+History was only cleared on sign-out, and Grove lives in the background for
+days. So a stray "yes" in a grace window was answered on Monday from Saturday's
+conversation about noodles. Turns older than thirty minutes now start a new
+conversation. A bare "yes", "okay" or "mm" heard aloud, with no question,
+offer or confirmation open, gets no reply at all: it is the recogniser hearing
+the room.
+
+Moving on from a pending Mac confirmation sets that job aside on the phone too.
+The context kept saying the Mac was "waiting on their yes", so "switch to study
+mode" was read against the whiteboard. Only a job still waiting on them shows
+its task id to the model.

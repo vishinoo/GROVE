@@ -3638,16 +3638,27 @@ const MAC_USE: Ability = {
     // Mac" after reading their email went into the YouTube job from two
     // sentences before, because any task from the last ten minutes did.
     const waitingOn = macWork();
-    const fresh = macTask && Date.now() - macTask.at < 10 * 60_000 && waitingOn && waitingOn.task === macTask.id && ['ask', 'confirm', 'working'].includes(waitingOn.state) ? macTask.id : '';
-    const task = (args.task || '').trim() || fresh;
+    const live = (id: string) => !!id && !!waitingOn && waitingOn.task === id && ['ask', 'confirm', 'working'].includes(waitingOn.state);
+    const fresh = macTask && Date.now() - macTask.at < 10 * 60_000 && live(macTask.id) ? macTask.id : '';
+    /*
+      A task id the model passes is only resumed while that task is still
+      waiting on them. One that finished, failed or was stopped is over, and a
+      new sentence is a new job. "Open my Drive" was handed the id of a
+      checkout they had just stopped, and the Mac went back to the checkout.
+    */
+    const named = (args.task || '').trim();
+    const task = live(named) ? named : fresh;
     const approve = /^(yes|confirmed?)$/i.test((args.confirmed || '').trim());
     const answer = (args.answer || '').trim();
     const goal = (args.goal || '').trim();
 
+    // A yes for a job that is no longer waiting must never become a job called "yes".
+    if (approve && !task) return { ok: false, spoken: 'That had stopped on your Mac before the yes, so nothing was pressed.' };
+
     let result;
     // A new goal is a new task. Resuming whatever was pending because an
     // answer argument came along with it is how an old job came back.
-    const resuming = Boolean(task && (approve || (answer && (!goal || args.task))));
+    const resuming = Boolean(task && (approve || (answer && (!goal || named === task))));
     if (resuming) {
       result = await macJob('agent.resume', { task, answer, approve: approve ? 'yes' : '' }, 88_000);
       // The Mac forgets a task ten minutes after its last step. Carrying on
@@ -3668,7 +3679,14 @@ const MAC_USE: Ability = {
         if (finished && (!answer || said(answer) === said(goal || last.what))) {
           return { ok: true, spoken: last.said || 'That’s done.' };
         }
-        const again = finished ? answer : [goal || last?.what, answer].filter(Boolean).join('. ');
+        /*
+          Never the old goal with the new words stuck on. That is how "open my
+          Drive" became "go to the checkout on Uber Eats. open my Drive". A yes
+          to something gone presses nothing, and anything else they said
+          starts on its own words, or the goal they gave with it.
+        */
+        if (approve) return { ok: false, spoken: 'That had stopped on your Mac before the yes, so nothing was pressed.' };
+        const again = goal || answer;
         if (again) result = await macJob('agent.start', { goal: again }, 88_000);
       }
     } else if (goal || answer) {
@@ -3677,7 +3695,9 @@ const MAC_USE: Ability = {
       return { ok: false, spoken: 'What should I do on your Mac?' };
     }
 
-    macTask = result.task && result.state !== 'failed' ? { id: result.task, at: Date.now() } : null;
+    // Only a job still waiting on them is worth carrying on with. One that
+    // failed or finished ends here, and the next sentence starts fresh.
+    macTask = result.task && ['ask', 'confirm', 'working'].includes(result.state ?? '') ? { id: result.task, at: Date.now() } : null;
     if (result.task || result.state) {
       const before = macWork();
       noteMacWork({

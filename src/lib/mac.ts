@@ -84,6 +84,19 @@ export function subscribeMac(listener: () => void): () => void {
   };
 }
 
+/*
+  Receipts. A job sent down a socket that had quietly died on the Mac's side
+  waited out its whole timeout, up to a minute and a half, before saying
+  anything, and then said the Mac had not answered in time, which sounds like
+  the job was slow rather than never delivered. The Mac now says "got" the
+  moment a job lands, so a missing receipt is known within seconds. Only
+  enforced once this Mac has sent one, so an older build is not declared
+  unreachable for lacking a message it was never taught.
+*/
+let receiptsSeen = false;
+const received = new Set<string>();
+const RECEIPT_MS = 4_000;
+
 function send(message: Record<string, unknown>): boolean {
   if (!channel) return false;
   void channel.send({ type: 'broadcast', event: 'msg', payload: { from: 'phone', ...message } });
@@ -102,6 +115,9 @@ function heard(m: Record<string, unknown>) {
       const { about: _about, ...rest } = look;
       sentLook = rest;
     }
+  } else if (m.t === 'got') {
+    receiptsSeen = true;
+    received.add(String(m.id ?? ''));
   } else if (m.t === 'done') {
     const id = String(m.id ?? '');
     jobs.get(id)?.({
@@ -400,7 +416,10 @@ const WORK_STATE: Record<string, string> = {
   answered: 'Grove answered them there',
   working: 'It is still going on the Mac, unattended (a game, or a long job); "stop" stops it',
   stopped: 'It was stopped',
+  'set aside': 'They moved on without answering, so it is over and nothing was pressed',
 };
+/** Only a job still waiting on them shows its id: a model handed a finished job's id resumes it. */
+const LIVE = new Set(['ask', 'confirm', 'working']);
 
 /**
  * The Mac, in a few lines, for the volatile half of the prompt.
@@ -427,7 +446,7 @@ export function macContext(now = Date.now()): string {
   const said = recent.said.replace(/\s+/g, ' ').trim().slice(0, 220);
   return [
     reach + blocked,
-    `On the Mac ${ago(recent.at)} min ago: ${recent.what}. ${WORK_STATE[recent.state] ?? 'It stopped'}${said ? `: "${said}"` : ''}${recent.task ? ` (task ${recent.task})` : ''}.`,
+    `On the Mac ${ago(recent.at)} min ago: ${recent.what}. ${WORK_STATE[recent.state] ?? 'It stopped'}${said ? `: "${said}"` : ''}${recent.task && LIVE.has(recent.state) ? ` (task ${recent.task})` : ''}.`,
   ].join('\n');
 }
 
@@ -459,6 +478,17 @@ export async function macJob(kind: string, args: Record<string, string>, timeout
       clearTimeout(timer);
       jobs.delete(id);
       resolve({ ok: false, spoken: 'Your Mac isn’t reachable right now.' });
+      return;
+    }
+    if (receiptsSeen) {
+      setTimeout(() => {
+        if (received.delete(id) || !jobs.has(id)) return;
+        clearTimeout(timer);
+        jobs.delete(id);
+        // Not connected, as far as anything here can tell: the next job asks first.
+        set({ ...status, state: 'waiting' });
+        resolve({ ok: false, spoken: 'I couldn’t reach your Mac just then. It may be asleep or reconnecting, so try again in a moment.' });
+      }, RECEIPT_MS);
     }
   });
 }

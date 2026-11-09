@@ -26,6 +26,7 @@ const KINDS: Record<string, string> = {
   lostThread: 'it lost track of what it was saying and needs them to say it again',
   noMic: 'the microphone would not open; they can try again',
   writing: 'it has started writing a document for them and it will take a moment',
+  writingAside: 'it has started writing a document for them in the background, and they can carry on talking to it meanwhile; it will say when it is done',
 };
 
 /** Plain lines, for before the model has written any, or if it never does. */
@@ -38,6 +39,7 @@ const PLAIN: Record<string, string[]> = {
   lostThread: ['I lost my train of thought there. Say that again?'],
   noMic: ["I couldn't open the microphone. Try me again."],
   writing: ['Writing it now.'],
+  writingAside: ['Writing it now. Keep talking, I’ll tell you when it’s done.'],
 };
 
 export type Kind = keyof typeof PLAIN;
