@@ -2577,30 +2577,26 @@ The loading screen is one dark screen: the native splash and the gate are both
 #0D0E11 with a white g (`splash-icon-dark.png`). The splash is native, so it
 needs a build.
 
-## A human voice
+## The voice stays Apple's, and why
 
-`modules/grove-remote/ios/NaturalVoice.swift`, and `speak.ts`. Grove speaks
-with Gemini's speech model (`gemini-3.8-flash-lite-tts`) on the key it
-already has, streamed as server-sent 24 kHz PCM and played as it arrives:
-- **Speed:** measured at 0.8s to the first sound, and the rest arrives faster
-  than it plays. Unstreamed it was three to four seconds per sentence, which is
-  why a neural voice was once ruled out.
-- **Playing:** its own small engine on the session grove-remote holds, with no
-  category of its own. **The engine stops whenever the voice does**, because a
-  running output graph in the background stops the recogniser's engine from
-  starting, and every reply ends in a listening window.
-- **Fallback:** no sound within three and a half seconds, no key, no network,
-  or a binary without the native half: the line is said with the system voice
-  instead. A dropped connection costs a worse voice, never silence.
-- **Choosing a voice:** `voiceId` "natural:<name>" picks a speaker (Charon by
-  default), and "system" is the only way back to the old voice.
-- **No style line.** Both models read a direction like "say this warmly" out
-  loud: measured 11.4s against 6.6s for the same sentence.
+Two neural voices were tried and taken out again. Both are worth knowing about
+before trying a third.
 
-The projects people point at for this (OpenVoice, voicebox, OmniVoice,
-Real-Time-Voice-Cloning) are Python models for a GPU or a running server. None
-of them can run inside an iPhone app, and the phone cannot depend on the Mac
-being awake to talk.
+- **Gemini's speech model** sounded right and streamed fast: 0.8s to the first
+  sound. But it bills per second of speech, about 25 audio tokens a second, and
+  a key on the paid tier pays for every word Grove says. Removed as too costly
+  for a voice that talks all day.
+- **Kokoro on the phone, through sherpa-onnx**, is free and offline, but:
+  - It needs sherpa-onnx 1.x, because 2.0 dropped espeak-ng and expects
+    phonemes.
+  - Only the 345 MB full-precision model was fast enough: about half real time
+    on an M-series Mac. The 88 MB int8 model ran at 0.8× real time there,
+    which on a phone means stutter.
+  - CoreML cannot load it.
+  - All told, about 400 MB of app for one voice. Not taken.
+
+The Python voice projects (OpenVoice, voicebox, OmniVoice) need a GPU or a
+server, and none can run inside an iPhone app.
 
 ## A conversation is a sitting
 
