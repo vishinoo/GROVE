@@ -1,16 +1,14 @@
 import { Redirect } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { Image, View } from 'react-native';
 
 import { useSession } from '@/context/session';
-import { usePalette } from '@/hooks/use-palette';
 import { ALWAYS_SHOW_ONBOARDING, hasSeenOnboarding } from '@/lib/firstRun';
 import { catchUpToLatest } from '@/lib/updates';
 
 /** The gate: nothing renders until we know whether there's a Noctus session. */
 export default function Index() {
   const { status } = useSession();
-  const palette = usePalette();
 
   // null while unknown. Resolving this inside the same spinner the session
   // already blocks on is what stops the login screen flashing up for a moment
@@ -37,8 +35,10 @@ export default function Index() {
 
   if (status === 'loading' || seenIntro === null || !caughtUp) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.paper }}>
-        <ActivityIndicator color={palette.muted} />
+      // The same ground and mark as the native splash, so opening Grove is one
+      // dark screen rather than beige, then grey, then the app.
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0D0E11' }}>
+        <Image source={require('../../assets/images/splash-icon-dark.png')} style={{ width: 84, height: 84 }} />
       </View>
     );
   }
